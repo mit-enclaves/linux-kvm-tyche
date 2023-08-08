@@ -99,6 +99,16 @@ config X86_SGX_KVM
 
 	  If unsure, say N.
 
+config KVM_TYCHE
+	tristate "KVM for Tyche backend support"
+	depends on KVM && IA32_FEAT_CTL
+	help
+	  Provides a Tyche backend for KVM, so that we can run KVM on top of
+	  Tyche
+
+	  To compile this as a module, choose M here: the module
+	  will be called kvm-tyche.
+
 config KVM_AMD
 	tristate "KVM for AMD processors support"
 	depends on KVM
