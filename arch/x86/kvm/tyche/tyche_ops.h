@@ -15,6 +15,10 @@
 
 #define TYCHE_KVM_VMX_READL 0
 #define TYCHE_KVM_VMX_WRITEL 1
+#define TYCHE_KVM_VMX_VMCLEAR 2
+#define TYCHE_KVM_VMX_VMPTRLD 3
+#define TYCHE_KVM_VMX_INVVPID 4
+#define TYCHE_KVM_VMX_INVEPT 5
 
 // A type to pass arguments and receive when calling tyche.
 typedef struct vmcall_frame_t {
@@ -209,6 +213,93 @@ static __always_inline void tyche_vmcs_writel(unsigned long field,
 {
 	vmcs_checkl(field);
 	__tyche_vmcs_writel(field, value);
+}
+
+static __always_inline void tyche_vmcs_clear_bits(unsigned long field, u32 mask)
+{
+	BUILD_BUG_ON_MSG(__builtin_constant_p(field) &&
+				 ((field)&0x6000) == 0x2000,
+			 "vmcs_clear_bits does not support 64-bit fields");
+
+	__tyche_vmcs_writel(field, __tyche_vmcs_readl(field) & ~mask);
+}
+
+static __always_inline void tyche_vmcs_set_bits(unsigned long field, u32 mask)
+{
+	BUILD_BUG_ON_MSG(__builtin_constant_p(field) &&
+				 ((field)&0x6000) == 0x2000,
+			 "vmcs_set_bits does not support 64-bit fields");
+
+	__tyche_vmcs_writel(field, __tyche_vmcs_readl(field) | mask);
+}
+
+static inline void tyche_vmcs_clear(struct vmcs *vmcs)
+{
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_KVM_VMX_OPS,
+		.arg_1 = TYCHE_KVM_VMX_VMCLEAR,
+		.arg_2 = __pa(vmcs),
+	};
+
+	if (tyche_call(&frame) != SUCCESS) {
+		printk(KERN_ERR "kvm-tyche: tyche_vmcs_clear failed!\n");
+	}
+}
+
+static inline void tyche_vmcs_load(struct vmcs *vmcs)
+{
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_KVM_VMX_OPS,
+		.arg_1 = TYCHE_KVM_VMX_VMPTRLD,
+		.arg_2 = __pa(vmcs),
+	};
+
+	if (tyche_call(&frame) != SUCCESS) {
+		printk(KERN_ERR "kvm-tyche: tyche_vmcs_load failed!\n");
+	}
+}
+
+// FIXME: ughhh what is the gva used for here?
+static inline void __tyche_invvpid(unsigned long ext, u16 vpid, gva_t gva)
+{
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_KVM_VMX_OPS,
+		.arg_1 = TYCHE_KVM_VMX_INVVPID,
+		.arg_2 = ext,
+		.arg_3 = vpid,
+	};
+
+	if (tyche_call(&frame) != SUCCESS) {
+		printk(KERN_ERR "kvm-tyche: __tyche_invvpid failed!\n");
+	}
+}
+
+// FIXME: ughhh what is the gpa used for here?
+static inline void __tyche_invept(unsigned long ext, u64 eptp, gpa_t gpa)
+{
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_KVM_VMX_OPS,
+		.arg_1 = TYCHE_KVM_VMX_INVEPT,
+		.arg_2 = ext,
+		.arg_3 = eptp,
+	};
+
+	if (tyche_call(&frame) != SUCCESS) {
+		printk(KERN_ERR "kvm-tyche: __tyche_invept failed!\n");
+	}
+}
+
+static inline void tyche_vpid_sync_vcpu_single(int vpid)
+{
+	if (vpid == 0)
+		return;
+
+	__tyche_invvpid(VMX_VPID_EXTENT_SINGLE_CONTEXT, vpid, 0);
+}
+
+static inline void tyche_vpid_sync_vcpu_global(void)
+{
+	__tyche_invvpid(VMX_VPID_EXTENT_ALL_CONTEXT, 0, 0);
 }
 
 #endif /* __KVM_X86_VMX_INSN_H */
