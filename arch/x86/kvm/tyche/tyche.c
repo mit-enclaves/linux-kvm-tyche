@@ -1,6 +1,108 @@
 #include "tyche.h"
 
 #include <asm/desc.h>
+#include <asm/virtext.h>
+
+#define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
+#define KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR0_NE
+#define KVM_VM_CR0_ALWAYS_ON				\
+	(KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST | X86_CR0_PG | X86_CR0_PE)
+
+#define KVM_VM_CR4_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR4_VMXE
+#define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
+#define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
+
+#define RMODE_GUEST_OWNED_EFLAGS_BITS (~(X86_EFLAGS_IOPL | X86_EFLAGS_VM))
+
+#define MSR_IA32_RTIT_STATUS_MASK (~(RTIT_STATUS_FILTEREN | \
+	RTIT_STATUS_CONTEXTEN | RTIT_STATUS_TRIGGEREN | \
+	RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
+	RTIT_STATUS_BYTECNT))
+
+static bool tyche_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
+{
+	/*
+	 * We operate under the default treatment of SMM, so VMX cannot be
+	 * enabled under SMM.  Note, whether or not VMXE is allowed at all,
+	 * i.e. is a reserved bit, is handled by common x86 code.
+	 */
+	if ((cr4 & X86_CR4_VMXE) && is_smm(vcpu))
+		return false;
+
+#if 0  // FIXME: skip nested for now
+	if (to_tyche(vcpu)->nested.vmxon && !nested_cr4_valid(vcpu, cr4))
+		return false;
+#endif
+
+	return true;
+}
+
+void tyche_set_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
+{
+	unsigned long old_cr4 = vcpu->arch.cr4;
+	struct vcpu_tyche *vmx = to_tyche(vcpu);
+	/*
+	 * Pass through host's Machine Check Enable value to hw_cr4, which
+	 * is in force while we are in guest mode.  Do not let guests control
+	 * this bit, even if host CR4.MCE == 0.
+	 */
+	unsigned long hw_cr4;
+
+	hw_cr4 = (cr4_read_shadow() & X86_CR4_MCE) | (cr4 & ~X86_CR4_MCE);
+	if (enable_unrestricted_guest)
+		hw_cr4 |= KVM_VM_CR4_ALWAYS_ON_UNRESTRICTED_GUEST;
+	else if (vmx->rmode.vm86_active)
+		hw_cr4 |= KVM_RMODE_VM_CR4_ALWAYS_ON;
+	else
+		hw_cr4 |= KVM_PMODE_VM_CR4_ALWAYS_ON;
+
+	if (!boot_cpu_has(X86_FEATURE_UMIP) && vmx_umip_emulated()) {
+		if (cr4 & X86_CR4_UMIP) {
+			secondary_exec_controls_setbit(vmx, SECONDARY_EXEC_DESC);
+			hw_cr4 &= ~X86_CR4_UMIP;
+		}
+#if 0 // FIXME: skip nested for now
+		else if (!is_guest_mode(vcpu) ||
+			!nested_cpu_has2(get_vmcs12(vcpu), SECONDARY_EXEC_DESC)) {
+			secondary_exec_controls_clearbit(vmx, SECONDARY_EXEC_DESC);
+		}
+#endif
+	}
+
+	vcpu->arch.cr4 = cr4;
+	kvm_register_mark_available(vcpu, VCPU_EXREG_CR4);
+
+	if (!enable_unrestricted_guest) {
+		if (enable_ept) {
+			if (!is_paging(vcpu)) {
+				hw_cr4 &= ~X86_CR4_PAE;
+				hw_cr4 |= X86_CR4_PSE;
+			} else if (!(cr4 & X86_CR4_PAE)) {
+				hw_cr4 &= ~X86_CR4_PAE;
+			}
+		}
+
+		/*
+		 * SMEP/SMAP/PKU is disabled if CPU is in non-paging mode in
+		 * hardware.  To emulate this behavior, SMEP/SMAP/PKU needs
+		 * to be manually disabled when guest switches to non-paging
+		 * mode.
+		 *
+		 * If !enable_unrestricted_guest, the CPU is always running
+		 * with CR0.PG=1 and CR4 needs to be modified.
+		 * If enable_unrestricted_guest, the CPU automatically
+		 * disables SMEP/SMAP/PKU when the guest sets CR0.PG=0.
+		 */
+		if (!is_paging(vcpu))
+			hw_cr4 &= ~(X86_CR4_SMEP | X86_CR4_SMAP | X86_CR4_PKE);
+	}
+
+	tyche_vmcs_writel(CR4_READ_SHADOW, cr4);
+	tyche_vmcs_writel(GUEST_CR4, hw_cr4);
+
+	if ((cr4 ^ old_cr4) & (X86_CR4_OSXSAVE | X86_CR4_PKE))
+		kvm_update_cpuid_runtime(vcpu);
+}
 
 static void tyche_get_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 {
