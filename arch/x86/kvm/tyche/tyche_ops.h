@@ -6,6 +6,7 @@
 
 #include <asm/vmx.h>
 
+#include "capabilities.h"
 #include "../x86.h"
 
 #define SUCCESS (0)
@@ -300,6 +301,38 @@ static inline void tyche_vpid_sync_vcpu_single(int vpid)
 static inline void tyche_vpid_sync_vcpu_global(void)
 {
 	__tyche_invvpid(VMX_VPID_EXTENT_ALL_CONTEXT, 0, 0);
+}
+
+static inline void tyche_vpid_sync_context(int vpid)
+{
+	if (cpu_has_vmx_invvpid_single())
+		tyche_vpid_sync_vcpu_single(vpid);
+	else if (vpid != 0)
+		tyche_vpid_sync_vcpu_global();
+}
+
+static inline void tyche_vpid_sync_vcpu_addr(int vpid, gva_t addr)
+{
+	if (vpid == 0)
+		return;
+
+	if (cpu_has_vmx_invvpid_individual_addr())
+		__tyche_invvpid(VMX_VPID_EXTENT_INDIVIDUAL_ADDR, vpid, addr);
+	else
+		tyche_vpid_sync_context(vpid);
+}
+
+static inline void tyche_ept_sync_global(void)
+{
+	__tyche_invept(VMX_EPT_EXTENT_GLOBAL, 0, 0);
+}
+
+static inline void tyche_ept_sync_context(u64 eptp)
+{
+	if (cpu_has_vmx_invept_context())
+		__tyche_invept(VMX_EPT_EXTENT_CONTEXT, eptp, 0);
+	else
+		tyche_ept_sync_global();
 }
 
 #endif /* __KVM_X86_VMX_INSN_H */
