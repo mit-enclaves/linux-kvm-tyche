@@ -151,93 +151,6 @@ static void tyche_write_guest_kernel_gs_base(struct vcpu_tyche *vmx, u64 data)
 	vmx->msr_guest_kernel_gs_base = data;
 }
 
-void tyche_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
-			  struct loaded_vmcs *buddy)
-{
-	struct vcpu_tyche *vmx = to_tyche(vcpu);
-	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
-	struct vmcs *prev;
-
-	if (!already_loaded) {
-		loaded_vmcs_clear(vmx->loaded_vmcs);
-		local_irq_disable();
-
-		/*
-		 * Ensure loaded_vmcs->cpu is read before adding loaded_vmcs to
-		 * this cpu's percpu list, otherwise it may not yet be deleted
-		 * from its previous cpu's percpu list.  Pairs with the
-		 * smb_wmb() in __loaded_vmcs_clear().
-		 */
-		smp_rmb();
-
-		list_add(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
-			 &per_cpu(loaded_vmcss_on_cpu, cpu));
-		local_irq_enable();
-	}
-
-	prev = per_cpu(current_vmcs, cpu);
-	if (prev != vmx->loaded_vmcs->vmcs) {
-		per_cpu(current_vmcs, cpu) = vmx->loaded_vmcs->vmcs;
-		tyche_vmcs_load(vmx->loaded_vmcs->vmcs);
-
-		/*
-		 * No indirect branch prediction barrier needed when switching
-		 * the active VMCS within a vCPU, unless IBRS is advertised to
-		 * the vCPU.  To minimize the number of IBPBs executed, KVM
-		 * performs IBPB on nested VM-Exit (a single nested transition
-		 * may switch the active VMCS multiple times).
-		 */
-		if (!buddy || WARN_ON_ONCE(buddy->vmcs != prev))
-			indirect_branch_prediction_barrier();
-	}
-
-	if (!already_loaded) {
-		void *gdt = get_current_gdt_ro();
-
-		/*
-		 * Flush all EPTP/VPID contexts, the new pCPU may have stale
-		 * TLB entries from its previous association with the vCPU.
-		 */
-		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-
-		/*
-		 * Linux uses per-cpu TSS and GDT, so set these when switching
-		 * processors.  See 22.2.4.
-		 */
-		tyche_vmcs_writel(
-			HOST_TR_BASE,
-			(unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
-		tyche_vmcs_writel(HOST_GDTR_BASE,
-				  (unsigned long)gdt); /* 22.2.4 */
-
-		if (IS_ENABLED(CONFIG_IA32_EMULATION) ||
-		    IS_ENABLED(CONFIG_X86_32)) {
-			/* 22.2.3 */
-			tyche_vmcs_writel(
-				HOST_IA32_SYSENTER_ESP,
-				(unsigned long)(cpu_entry_stack(cpu) + 1));
-		}
-
-		vmx->loaded_vmcs->cpu = cpu;
-	}
-}
-
-/*
- * Switches to specified vcpu, until a matching vcpu_put(), but assumes
- * vcpu mutex is already taken.
- */
-static void tyche_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
-{
-	struct vcpu_tyche *vmx = to_tyche(vcpu);
-
-	tyche_vcpu_load_vmcs(vcpu, cpu, NULL);
-
-	// FIXME: we probably don't want posted interrupt for a basic VM
-	// vmx_vcpu_pi_load(vcpu, cpu);
-
-	vmx->host_debugctlmsr = get_debugctlmsr();
-}
-
 /*
  * nested_vmx_allowed() checks whether a guest should be allowed to use VMX
  * instructions and MSRs (i.e., nested VMX). Nested VMX is disabled for
@@ -291,6 +204,160 @@ static int tyche_get_msr_feature(struct kvm_msr_entry *msr)
 	default:
 		return KVM_MSR_RET_INVALID;
 	}
+}
+
+/*
+ * Reads an msr value (of 'msr_info->index') into 'msr_info->data'.
+ * Returns 0 on success, non-0 otherwise.
+ * Assumes vcpu_load() was already called.
+ */
+static int tyche_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	struct vcpu_tyche *vmx = to_tyche(vcpu);
+	struct tyche_uret_msr *msr;
+	u32 index;
+
+	switch (msr_info->index) {
+	case MSR_FS_BASE:
+		msr_info->data = tyche_vmcs_readl(GUEST_FS_BASE);
+		break;
+	case MSR_GS_BASE:
+		msr_info->data = tyche_vmcs_readl(GUEST_GS_BASE);
+		break;
+	case MSR_KERNEL_GS_BASE:
+		msr_info->data = tyche_read_guest_kernel_gs_base(vmx);
+		break;
+	case MSR_EFER:
+		return kvm_get_msr_common(vcpu, msr_info);
+	case MSR_IA32_TSX_CTRL:
+		if (!msr_info->host_initiated &&
+		    !(vcpu->arch.arch_capabilities & ARCH_CAP_TSX_CTRL_MSR))
+			return 1;
+		goto find_uret_msr;
+	case MSR_IA32_UMWAIT_CONTROL:
+		if (!msr_info->host_initiated && !vmx_has_waitpkg(vmx))
+			return 1;
+
+		msr_info->data = vmx->msr_ia32_umwait_control;
+		break;
+	case MSR_IA32_SPEC_CTRL:
+		if (!msr_info->host_initiated &&
+		    !guest_has_spec_ctrl_msr(vcpu))
+			return 1;
+
+		msr_info->data = to_tyche(vcpu)->spec_ctrl;
+		break;
+	case MSR_IA32_SYSENTER_CS:
+		msr_info->data = tyche_vmcs_read32(GUEST_SYSENTER_CS);
+		break;
+	case MSR_IA32_SYSENTER_EIP:
+		msr_info->data = tyche_vmcs_readl(GUEST_SYSENTER_EIP);
+		break;
+	case MSR_IA32_SYSENTER_ESP:
+		msr_info->data = tyche_vmcs_readl(GUEST_SYSENTER_ESP);
+		break;
+	case MSR_IA32_BNDCFGS:
+		if (!kvm_mpx_supported() ||
+		    (!msr_info->host_initiated &&
+		     !guest_cpuid_has(vcpu, X86_FEATURE_MPX)))
+			return 1;
+		msr_info->data = tyche_vmcs_read64(GUEST_BNDCFGS);
+		break;
+	case MSR_IA32_MCG_EXT_CTL:
+		if (!msr_info->host_initiated &&
+		    !(vmx->msr_ia32_feature_control &
+		      FEAT_CTL_LMCE_ENABLED))
+			return 1;
+		msr_info->data = vcpu->arch.mcg_ext_ctl;
+		break;
+	case MSR_IA32_FEAT_CTL:
+		msr_info->data = vmx->msr_ia32_feature_control;
+		break;
+	case MSR_IA32_SGXLEPUBKEYHASH0 ... MSR_IA32_SGXLEPUBKEYHASH3:
+		if (!msr_info->host_initiated &&
+		    !guest_cpuid_has(vcpu, X86_FEATURE_SGX_LC))
+			return 1;
+		msr_info->data = to_tyche(vcpu)->msr_ia32_sgxlepubkeyhash
+			[msr_info->index - MSR_IA32_SGXLEPUBKEYHASH0];
+		break;
+	case MSR_IA32_VMX_BASIC ... MSR_IA32_VMX_VMFUNC:
+		if (!nested_vmx_allowed(vcpu))
+			return 1;
+#if 0 // FIXME
+		if (tyche_get_vmx_msr(&vmx->nested.msrs, msr_info->index,
+				    &msr_info->data))
+			return 1;
+		/*
+		 * Enlightened VMCS v1 doesn't have certain VMCS fields but
+		 * instead of just ignoring the features, different Hyper-V
+		 * versions are either trying to use them and fail or do some
+		 * sanity checking and refuse to boot. Filter all unsupported
+		 * features out.
+		 */
+		if (!msr_info->host_initiated && guest_cpuid_has_evmcs(vcpu))
+			nested_evmcs_filter_control_msr(vcpu, msr_info->index,
+							&msr_info->data);
+#endif
+		break;
+	case MSR_IA32_RTIT_CTL:
+		if (!vmx_pt_mode_is_host_guest())
+			return 1;
+		msr_info->data = vmx->pt_desc.guest.ctl;
+		break;
+	case MSR_IA32_RTIT_STATUS:
+		if (!vmx_pt_mode_is_host_guest())
+			return 1;
+		msr_info->data = vmx->pt_desc.guest.status;
+		break;
+	case MSR_IA32_RTIT_CR3_MATCH:
+		if (!vmx_pt_mode_is_host_guest() ||
+			!intel_pt_validate_cap(vmx->pt_desc.caps,
+						PT_CAP_cr3_filtering))
+			return 1;
+		msr_info->data = vmx->pt_desc.guest.cr3_match;
+		break;
+	case MSR_IA32_RTIT_OUTPUT_BASE:
+		if (!vmx_pt_mode_is_host_guest() ||
+			(!intel_pt_validate_cap(vmx->pt_desc.caps,
+					PT_CAP_topa_output) &&
+			 !intel_pt_validate_cap(vmx->pt_desc.caps,
+					PT_CAP_single_range_output)))
+			return 1;
+		msr_info->data = vmx->pt_desc.guest.output_base;
+		break;
+	case MSR_IA32_RTIT_OUTPUT_MASK:
+		if (!vmx_pt_mode_is_host_guest() ||
+			(!intel_pt_validate_cap(vmx->pt_desc.caps,
+					PT_CAP_topa_output) &&
+			 !intel_pt_validate_cap(vmx->pt_desc.caps,
+					PT_CAP_single_range_output)))
+			return 1;
+		msr_info->data = vmx->pt_desc.guest.output_mask;
+		break;
+	case MSR_IA32_RTIT_ADDR0_A ... MSR_IA32_RTIT_ADDR3_B:
+		index = msr_info->index - MSR_IA32_RTIT_ADDR0_A;
+		if (!vmx_pt_mode_is_host_guest() ||
+		    (index >= 2 * vmx->pt_desc.num_address_ranges))
+			return 1;
+		if (index % 2)
+			msr_info->data = vmx->pt_desc.guest.addr_b[index / 2];
+		else
+			msr_info->data = vmx->pt_desc.guest.addr_a[index / 2];
+		break;
+	case MSR_IA32_DEBUGCTLMSR:
+		msr_info->data = tyche_vmcs_read64(GUEST_IA32_DEBUGCTL);
+		break;
+	default:
+	find_uret_msr:
+		msr = tyche_find_uret_msr(vmx, msr_info->index);
+		if (msr) {
+			msr_info->data = msr->data;
+			break;
+		}
+		return kvm_get_msr_common(vcpu, msr_info);
+	}
+
+	return 0;
 }
 
 static bool tyche_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
@@ -427,7 +494,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 
 	// .update_exception_bitmap = vmx_update_exception_bitmap,
 	.get_msr_feature = tyche_get_msr_feature,
-	// .get_msr = vmx_get_msr,
+	.get_msr = tyche_get_msr,
 	// .set_msr = vmx_set_msr,
 	// .get_segment_base = vmx_get_segment_base,
 	// .get_segment = vmx_get_segment,
