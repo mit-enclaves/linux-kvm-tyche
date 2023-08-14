@@ -223,6 +223,8 @@ struct kvm_tyche {
 	struct kvm kvm;
 };
 
+bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
+
 #define __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS				\
 	(VM_ENTRY_LOAD_DEBUG_CONTROLS)
 #define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS			        \
@@ -355,6 +357,12 @@ BUILD_CONTROLS_SHADOW(pin, PIN_BASED_VM_EXEC_CONTROL, 32)
 BUILD_CONTROLS_SHADOW(exec, CPU_BASED_VM_EXEC_CONTROL, 32)
 BUILD_CONTROLS_SHADOW(secondary_exec, SECONDARY_VM_EXEC_CONTROL, 32)
 BUILD_CONTROLS_SHADOW(tertiary_exec, TERTIARY_VM_EXEC_CONTROL, 64)
+
+static inline bool vmx_has_waitpkg(struct vcpu_tyche *vmx)
+{
+	return secondary_exec_controls_get(vmx) &
+		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
+}
 
 static __always_inline struct kvm_tyche *to_kvm_tyche(struct kvm *kvm)
 {
