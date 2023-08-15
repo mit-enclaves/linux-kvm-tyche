@@ -6,6 +6,8 @@
 #include <asm/virtext.h>
 #include <asm/msr-index.h>
 
+MODULE_LICENSE("GPL");
+
 #define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
 #define KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR0_NE
 #define KVM_VM_CR0_ALWAYS_ON \
@@ -61,8 +63,179 @@ module_param_named(unrestricted_guest,
 static bool __read_mostly nested = 1;
 module_param(nested, bool, S_IRUGO);
 
+/* Default is SYSTEM mode, 1 for host-guest mode */
+int __read_mostly pt_mode = PT_MODE_SYSTEM;
+module_param(pt_mode, int, S_IRUGO);
+
+static DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
+static DEFINE_STATIC_KEY_FALSE(vmx_l1d_flush_cond);
+static DEFINE_MUTEX(vmx_l1d_flush_mutex);
+
+/* Storage for pre module init parameter parsing */
+static enum vmx_l1d_flush_state __read_mostly vmentry_l1d_flush_param = VMENTER_L1D_FLUSH_AUTO;
+
+static const struct {
+	const char *option;
+	bool for_parse;
+} vmentry_l1d_param[] = {
+	[VMENTER_L1D_FLUSH_AUTO]	 = {"auto", true},
+	[VMENTER_L1D_FLUSH_NEVER]	 = {"never", true},
+	[VMENTER_L1D_FLUSH_COND]	 = {"cond", true},
+	[VMENTER_L1D_FLUSH_ALWAYS]	 = {"always", true},
+	[VMENTER_L1D_FLUSH_EPT_DISABLED] = {"EPT disabled", false},
+	[VMENTER_L1D_FLUSH_NOT_REQUIRED] = {"not required", false},
+};
+
+#define L1D_CACHE_ORDER 4
+static void *vmx_l1d_flush_pages;
+
 /* Control for disabling CPU Fill buffer clear */
 static bool __read_mostly vmx_fb_clear_ctrl_available;
+
+static int vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf)
+{
+	struct page *page;
+	unsigned int i;
+
+	if (!boot_cpu_has_bug(X86_BUG_L1TF)) {
+		l1tf_vmx_mitigation = VMENTER_L1D_FLUSH_NOT_REQUIRED;
+		return 0;
+	}
+
+	if (!enable_ept) {
+		l1tf_vmx_mitigation = VMENTER_L1D_FLUSH_EPT_DISABLED;
+		return 0;
+	}
+
+	if (boot_cpu_has(X86_FEATURE_ARCH_CAPABILITIES)) {
+		u64 msr;
+
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, msr);
+		if (msr & ARCH_CAP_SKIP_VMENTRY_L1DFLUSH) {
+			l1tf_vmx_mitigation = VMENTER_L1D_FLUSH_NOT_REQUIRED;
+			return 0;
+		}
+	}
+
+	/* If set to auto use the default l1tf mitigation method */
+	if (l1tf == VMENTER_L1D_FLUSH_AUTO) {
+		switch (l1tf_mitigation) {
+		case L1TF_MITIGATION_OFF:
+			l1tf = VMENTER_L1D_FLUSH_NEVER;
+			break;
+		case L1TF_MITIGATION_FLUSH_NOWARN:
+		case L1TF_MITIGATION_FLUSH:
+		case L1TF_MITIGATION_FLUSH_NOSMT:
+			l1tf = VMENTER_L1D_FLUSH_COND;
+			break;
+		case L1TF_MITIGATION_FULL:
+		case L1TF_MITIGATION_FULL_FORCE:
+			l1tf = VMENTER_L1D_FLUSH_ALWAYS;
+			break;
+		}
+	} else if (l1tf_mitigation == L1TF_MITIGATION_FULL_FORCE) {
+		l1tf = VMENTER_L1D_FLUSH_ALWAYS;
+	}
+
+	if (l1tf != VMENTER_L1D_FLUSH_NEVER && !vmx_l1d_flush_pages &&
+	    !boot_cpu_has(X86_FEATURE_FLUSH_L1D)) {
+		/*
+		 * This allocation for vmx_l1d_flush_pages is not tied to a VM
+		 * lifetime and so should not be charged to a memcg.
+		 */
+		page = alloc_pages(GFP_KERNEL, L1D_CACHE_ORDER);
+		if (!page)
+			return -ENOMEM;
+		vmx_l1d_flush_pages = page_address(page);
+
+		/*
+		 * Initialize each page with a different pattern in
+		 * order to protect against KSM in the nested
+		 * virtualization case.
+		 */
+		for (i = 0; i < 1u << L1D_CACHE_ORDER; ++i) {
+			memset(vmx_l1d_flush_pages + i * PAGE_SIZE, i + 1,
+			       PAGE_SIZE);
+		}
+	}
+
+	l1tf_vmx_mitigation = l1tf;
+
+	if (l1tf != VMENTER_L1D_FLUSH_NEVER)
+		static_branch_enable(&vmx_l1d_should_flush);
+	else
+		static_branch_disable(&vmx_l1d_should_flush);
+
+	if (l1tf == VMENTER_L1D_FLUSH_COND)
+		static_branch_enable(&vmx_l1d_flush_cond);
+	else
+		static_branch_disable(&vmx_l1d_flush_cond);
+	return 0;
+}
+
+static int vmentry_l1d_flush_parse(const char *s)
+{
+	unsigned int i;
+
+	if (s) {
+		for (i = 0; i < ARRAY_SIZE(vmentry_l1d_param); i++) {
+			if (vmentry_l1d_param[i].for_parse &&
+			    sysfs_streq(s, vmentry_l1d_param[i].option))
+				return i;
+		}
+	}
+	return -EINVAL;
+}
+
+static int vmentry_l1d_flush_set(const char *s, const struct kernel_param *kp)
+{
+	int l1tf, ret;
+
+	l1tf = vmentry_l1d_flush_parse(s);
+	if (l1tf < 0)
+		return l1tf;
+
+	if (!boot_cpu_has(X86_BUG_L1TF))
+		return 0;
+
+	/*
+	 * Has vmx_init() run already? If not then this is the pre init
+	 * parameter parsing. In that case just store the value and let
+	 * vmx_init() do the proper setup after enable_ept has been
+	 * established.
+	 */
+	if (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_AUTO) {
+		vmentry_l1d_flush_param = l1tf;
+		return 0;
+	}
+
+	mutex_lock(&vmx_l1d_flush_mutex);
+	ret = vmx_setup_l1d_flush(l1tf);
+	mutex_unlock(&vmx_l1d_flush_mutex);
+	return ret;
+}
+
+static int vmentry_l1d_flush_get(char *s, const struct kernel_param *kp)
+{
+	if (WARN_ON_ONCE(l1tf_vmx_mitigation >= ARRAY_SIZE(vmentry_l1d_param)))
+		return sprintf(s, "???\n");
+
+	return sprintf(s, "%s\n", vmentry_l1d_param[l1tf_vmx_mitigation].option);
+}
+
+static void vmx_setup_fb_clear_ctrl(void)
+{
+	u64 msr;
+
+	if (boot_cpu_has(X86_FEATURE_ARCH_CAPABILITIES) &&
+	    !boot_cpu_has_bug(X86_BUG_MDS) &&
+	    !boot_cpu_has_bug(X86_BUG_TAA)) {
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, msr);
+		if (msr & ARCH_CAP_FB_CLEAR_CTRL)
+			vmx_fb_clear_ctrl_available = true;
+	}
+}
+
 
 static void vmx_update_fb_clear_dis(struct kvm_vcpu *vcpu, struct vcpu_tyche *vmx)
 {
@@ -1286,3 +1459,81 @@ static struct kvm_x86_init_ops tyche_init_ops __initdata = {
 	.runtime_ops = &tyche_x86_ops,
 	// .pmu_ops = &intel_pmu_ops,
 };
+
+static void vmx_cleanup_l1d_flush(void)
+{
+	if (vmx_l1d_flush_pages) {
+		free_pages((unsigned long)vmx_l1d_flush_pages, L1D_CACHE_ORDER);
+		vmx_l1d_flush_pages = NULL;
+	}
+	/* Restore state so sysfs ignores VMX */
+	l1tf_vmx_mitigation = VMENTER_L1D_FLUSH_AUTO;
+}
+
+static void tyche_exit(void)
+{
+#if 0 // FIXME
+#ifdef CONFIG_KEXEC_CORE
+	RCU_INIT_POINTER(crash_vmclear_loaded_vmcss, NULL);
+	synchronize_rcu();
+#endif
+#endif
+
+	kvm_exit();
+
+	vmx_cleanup_l1d_flush();
+
+	allow_smaller_maxphyaddr = false;
+}
+module_exit(tyche_exit);
+
+static int __init tyche_init(void)
+{
+	int r, cpu;
+
+	r = kvm_init(&tyche_init_ops, sizeof(struct vcpu_tyche),
+		     __alignof__(struct vcpu_tyche), THIS_MODULE);
+	if (r)
+		return r;
+	
+	/*
+	 * Must be called after kvm_init() so enable_ept is properly set
+	 * up. Hand the parameter mitigation value in which was stored in
+	 * the pre module init parser. If no parameter was given, it will
+	 * contain 'auto' which will be turned into the default 'cond'
+	 * mitigation mode.
+	 */
+	r = vmx_setup_l1d_flush(vmentry_l1d_flush_param);
+	if (r) {
+		tyche_exit();
+		return r;
+	}
+
+	vmx_setup_fb_clear_ctrl();
+
+	for_each_possible_cpu(cpu) {
+		INIT_LIST_HEAD(&per_cpu(loaded_vmcss_on_cpu, cpu));
+
+#if 0 // FIXME: posted interrupt
+		pi_init_cpu(cpu);
+#endif
+	}
+#if 0 // FIXME
+#ifdef CONFIG_KEXEC_CORE
+	rcu_assign_pointer(crash_vmclear_loaded_vmcss,
+			   crash_vmclear_local_loaded_vmcss);
+#endif
+#endif
+	vmx_check_vmcs12_offsets();
+
+	/*
+	 * Shadow paging doesn't have a (further) performance penalty
+	 * from GUEST_MAXPHYADDR < HOST_MAXPHYADDR so enable it
+	 * by default
+	 */
+	if (!enable_ept)
+		allow_smaller_maxphyaddr = true;
+
+	return 0;
+}
+module_init(tyche_init);
