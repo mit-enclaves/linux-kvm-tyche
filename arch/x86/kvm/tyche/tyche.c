@@ -22,6 +22,13 @@
 	   RTIT_STATUS_TRIGGEREN | RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
 	   RTIT_STATUS_BYTECNT))
 
+bool __read_mostly enable_ept = 1;
+module_param_named(ept, enable_ept, bool, S_IRUGO);
+
+bool __read_mostly enable_unrestricted_guest = 1;
+module_param_named(unrestricted_guest,
+			enable_unrestricted_guest, bool, S_IRUGO);
+
 /*
  * If nested=1, nested virtualization is supported, i.e., guests may use
  * VMX and be a hypervisor for its own guests. If nested=0, guests may not
@@ -53,6 +60,7 @@ static void vmx_update_fb_clear_dis(struct kvm_vcpu *vcpu, struct vcpu_tyche *vm
 
 static DEFINE_PER_CPU(struct vmcs *, vmxarea);
 DEFINE_PER_CPU(struct vmcs *, current_vmcs);
+
 /*
  * We maintain a per-CPU linked-list of VMCS loaded on that CPU. This is needed
  * when a CPU is brought down, and we need to VMCLEAR all VMCSs loaded on it.
@@ -150,6 +158,93 @@ static void tyche_write_guest_kernel_gs_base(struct vcpu_tyche *vmx, u64 data)
 		wrmsrl(MSR_KERNEL_GS_BASE, data);
 	preempt_enable();
 	vmx->msr_guest_kernel_gs_base = data;
+}
+
+void tyche_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
+			  struct loaded_vmcs *buddy)
+{
+	struct vcpu_tyche *vmx = to_tyche(vcpu);
+	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
+	struct vmcs *prev;
+
+	if (!already_loaded) {
+		loaded_vmcs_clear(vmx->loaded_vmcs);
+		local_irq_disable();
+
+		/*
+		 * Ensure loaded_vmcs->cpu is read before adding loaded_vmcs to
+		 * this cpu's percpu list, otherwise it may not yet be deleted
+		 * from its previous cpu's percpu list.  Pairs with the
+		 * smb_wmb() in __loaded_vmcs_clear().
+		 */
+		smp_rmb();
+
+		list_add(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
+			 &per_cpu(loaded_vmcss_on_cpu, cpu));
+		local_irq_enable();
+	}
+
+	prev = per_cpu(current_vmcs, cpu);
+	if (prev != vmx->loaded_vmcs->vmcs) {
+		per_cpu(current_vmcs, cpu) = vmx->loaded_vmcs->vmcs;
+		tyche_vmcs_load(vmx->loaded_vmcs->vmcs);
+
+		/*
+		 * No indirect branch prediction barrier needed when switching
+		 * the active VMCS within a vCPU, unless IBRS is advertised to
+		 * the vCPU.  To minimize the number of IBPBs executed, KVM
+		 * performs IBPB on nested VM-Exit (a single nested transition
+		 * may switch the active VMCS multiple times).
+		 */
+		if (!buddy || WARN_ON_ONCE(buddy->vmcs != prev))
+			indirect_branch_prediction_barrier();
+	}
+
+	if (!already_loaded) {
+		void *gdt = get_current_gdt_ro();
+
+		/*
+		 * Flush all EPTP/VPID contexts, the new pCPU may have stale
+		 * TLB entries from its previous association with the vCPU.
+		 */
+		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
+		/*
+		 * Linux uses per-cpu TSS and GDT, so set these when switching
+		 * processors.  See 22.2.4.
+		 */
+		tyche_vmcs_writel(
+			HOST_TR_BASE,
+			(unsigned long)&get_cpu_entry_area(cpu)->tss.x86_tss);
+		tyche_vmcs_writel(HOST_GDTR_BASE,
+				  (unsigned long)gdt); /* 22.2.4 */
+
+		if (IS_ENABLED(CONFIG_IA32_EMULATION) ||
+		    IS_ENABLED(CONFIG_X86_32)) {
+			/* 22.2.3 */
+			tyche_vmcs_writel(
+				HOST_IA32_SYSENTER_ESP,
+				(unsigned long)(cpu_entry_stack(cpu) + 1));
+		}
+
+		vmx->loaded_vmcs->cpu = cpu;
+	}
+}
+
+/*
+ * Switches to specified vcpu, until a matching vcpu_put(), but assumes
+ * vcpu mutex is already taken.
+ */
+static void tyche_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+{
+	struct vcpu_tyche *vmx = to_tyche(vcpu);
+
+	tyche_vcpu_load_vmcs(vcpu, cpu, NULL);
+
+	// FIXME: we probably don't want posted interrupt for a basic VM
+	// vmx_vcpu_pi_load(vcpu, cpu);
+
+	vmx->host_debugctlmsr = get_debugctlmsr();
 }
 
 /*
@@ -885,7 +980,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .vcpu_reset = vmx_vcpu_reset,
 
 	// .prepare_switch_to_guest = vmx_prepare_switch_to_guest,
-	// .vcpu_load = vmx_vcpu_load,
+	.vcpu_load = tyche_vcpu_load,
 	// .vcpu_put = vmx_vcpu_put,
 
 	// .update_exception_bitmap = vmx_update_exception_bitmap,
