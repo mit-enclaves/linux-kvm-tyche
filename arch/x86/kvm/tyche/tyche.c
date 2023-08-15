@@ -961,6 +961,11 @@ static void tyche_set_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 	tyche_vmcs_writel(GUEST_GDTR_BASE, dt->address);
 }
 
+static void tyche_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
+{
+	tyche_vmcs_writel(GUEST_DR7, val);
+}
+
 static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.name = "tyche_intel",
 
@@ -1000,7 +1005,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.set_idt = tyche_set_idt,
 	.get_gdt = tyche_get_gdt,
 	.set_gdt = tyche_set_gdt,
-	// .set_dr7 = vmx_set_dr7,
+	.set_dr7 = tyche_set_dr7,
 	// .sync_dirty_debug_regs = vmx_sync_dirty_debug_regs,
 	// .cache_reg = vmx_cache_reg,
 	// .get_rflags = vmx_get_rflags,
