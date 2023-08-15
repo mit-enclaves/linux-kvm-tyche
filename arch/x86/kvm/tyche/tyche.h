@@ -364,6 +364,36 @@ struct kvm_tyche {
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
 
+void vmx_disable_intercept_for_msr(struct kvm_vcpu *vcpu, u32 msr, int type);
+
+/*
+ * Note, early Intel manuals have the write-low and read-high bitmap offsets
+ * the wrong way round.  The bitmaps control MSRs 0x00000000-0x00001fff and
+ * 0xc0000000-0xc0001fff.  The former (low) uses bytes 0-0x3ff for reads and
+ * 0x800-0xbff for writes.  The latter (high) uses 0x400-0x7ff for reads and
+ * 0xc00-0xfff for writes.  MSRs not covered by either of the ranges always
+ * VM-Exit.
+ */
+#define __BUILD_VMX_MSR_BITMAP_HELPER(rtype, action, bitop, access, base)      \
+static inline rtype vmx_##action##_msr_bitmap_##access(unsigned long *bitmap,  \
+						       u32 msr)		       \
+{									       \
+	int f = sizeof(unsigned long);					       \
+									       \
+	if (msr <= 0x1fff)						       \
+		return bitop##_bit(msr, bitmap + base / f);		       \
+	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))		       \
+		return bitop##_bit(msr & 0x1fff, bitmap + (base + 0x400) / f); \
+	return (rtype)true;						       \
+}
+#define BUILD_VMX_MSR_BITMAP_HELPERS(ret_type, action, bitop)		       \
+	__BUILD_VMX_MSR_BITMAP_HELPER(ret_type, action, bitop, read,  0x0)     \
+	__BUILD_VMX_MSR_BITMAP_HELPER(ret_type, action, bitop, write, 0x800)
+
+BUILD_VMX_MSR_BITMAP_HELPERS(bool, test, test)
+BUILD_VMX_MSR_BITMAP_HELPERS(void, clear, __clear)
+BUILD_VMX_MSR_BITMAP_HELPERS(void, set, __set)
+
 #define __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS (VM_ENTRY_LOAD_DEBUG_CONTROLS)
 #define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS \
 	(__KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS | VM_ENTRY_IA32E_MODE)
@@ -484,6 +514,14 @@ static __always_inline struct kvm_tyche *to_kvm_tyche(struct kvm *kvm)
 static __always_inline struct vcpu_tyche *to_tyche(struct kvm_vcpu *vcpu)
 {
 	return container_of(vcpu, struct vcpu_tyche, vcpu);
+}
+
+static inline bool vmx_need_pf_intercept(struct kvm_vcpu *vcpu)
+{
+	if (!enable_ept)
+		return true;
+
+	return allow_smaller_maxphyaddr && cpuid_maxphyaddr(vcpu) < boot_cpu_data.x86_phys_bits;
 }
 
 static inline struct vmcs12 *get_vmcs12(struct kvm_vcpu *vcpu)

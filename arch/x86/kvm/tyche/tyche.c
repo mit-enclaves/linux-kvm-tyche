@@ -22,6 +22,30 @@
 	   RTIT_STATUS_TRIGGEREN | RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
 	   RTIT_STATUS_BYTECNT))
 
+/*
+ * List of MSRs that can be directly passed to the guest.
+ * In addition to these x2apic and PT MSRs are handled specially.
+ */
+static u32 vmx_possible_passthrough_msrs[MAX_POSSIBLE_PASSTHROUGH_MSRS] = {
+	MSR_IA32_SPEC_CTRL,
+	MSR_IA32_PRED_CMD,
+	MSR_IA32_TSC,
+#ifdef CONFIG_X86_64
+	MSR_FS_BASE,
+	MSR_GS_BASE,
+	MSR_KERNEL_GS_BASE,
+	MSR_IA32_XFD,
+	MSR_IA32_XFD_ERR,
+#endif
+	MSR_IA32_SYSENTER_CS,
+	MSR_IA32_SYSENTER_ESP,
+	MSR_IA32_SYSENTER_EIP,
+	MSR_CORE_C1_RES,
+	MSR_CORE_C3_RESIDENCY,
+	MSR_CORE_C6_RESIDENCY,
+	MSR_CORE_C7_RESIDENCY,
+};
+
 bool __read_mostly enable_ept = 1;
 module_param_named(ept, enable_ept, bool, S_IRUGO);
 
@@ -76,6 +100,49 @@ struct vmx_capability vmx_capability;
 static inline void tyche_segment_cache_clear(struct vcpu_tyche *tyche)
 {
 	tyche->segment_cache.bitmask = 0;
+}
+
+static int possible_passthrough_msr_slot(u32 msr)
+{
+	u32 i;
+
+	for (i = 0; i < ARRAY_SIZE(vmx_possible_passthrough_msrs); i++)
+		if (vmx_possible_passthrough_msrs[i] == msr)
+			return i;
+
+	return -ENOENT;
+}
+
+static bool is_valid_passthrough_msr(u32 msr)
+{
+	bool r;
+
+	switch (msr) {
+	case 0x800 ... 0x8ff:
+		/* x2APIC MSRs. These are handled in vmx_update_msr_bitmap_x2apic() */
+		return true;
+	case MSR_IA32_RTIT_STATUS:
+	case MSR_IA32_RTIT_OUTPUT_BASE:
+	case MSR_IA32_RTIT_OUTPUT_MASK:
+	case MSR_IA32_RTIT_CR3_MATCH:
+	case MSR_IA32_RTIT_ADDR0_A ... MSR_IA32_RTIT_ADDR3_B:
+		/* PT MSRs. These are handled in pt_update_intercept_for_msr() */
+	case MSR_LBR_SELECT:
+	case MSR_LBR_TOS:
+	case MSR_LBR_INFO_0 ... MSR_LBR_INFO_0 + 31:
+	case MSR_LBR_NHM_FROM ... MSR_LBR_NHM_FROM + 31:
+	case MSR_LBR_NHM_TO ... MSR_LBR_NHM_TO + 31:
+	case MSR_LBR_CORE_FROM ... MSR_LBR_CORE_FROM + 8:
+	case MSR_LBR_CORE_TO ... MSR_LBR_CORE_TO + 8:
+		/* LBR MSRs. These are handled in vmx_update_intercept_for_lbr_msrs() */
+		return true;
+	}
+
+	r = possible_passthrough_msr_slot(msr) != -ENOENT;
+
+	WARN(!r, "Invalid MSR %x, please adapt vmx_possible_passthrough_msrs[]", msr);
+
+	return r;
 }
 
 struct tyche_uret_msr *tyche_find_uret_msr(struct vcpu_tyche *vmx, u32 msr)
@@ -140,6 +207,65 @@ void loaded_vmcs_clear(struct loaded_vmcs *loaded_vmcs)
 	if (cpu != -1)
 		smp_call_function_single(cpu, __loaded_vmcs_clear, loaded_vmcs,
 					 1);
+}
+
+void tyche_update_exception_bitmap(struct kvm_vcpu *vcpu)
+{
+	u32 eb;
+
+	eb = (1u << PF_VECTOR) | (1u << UD_VECTOR) | (1u << MC_VECTOR) |
+	     (1u << DB_VECTOR) | (1u << AC_VECTOR);
+	/*
+	 * Guest access to VMware backdoor ports could legitimately
+	 * trigger #GP because of TSS I/O permission bitmap.
+	 * We intercept those #GP and allow access to them anyway
+	 * as VMware does.
+	 */
+	if (enable_vmware_backdoor)
+		eb |= (1u << GP_VECTOR);
+	if ((vcpu->guest_debug &
+	     (KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)) ==
+	    (KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP))
+		eb |= 1u << BP_VECTOR;
+	if (to_tyche(vcpu)->rmode.vm86_active)
+		eb = ~0;
+	if (!vmx_need_pf_intercept(vcpu))
+		eb &= ~(1u << PF_VECTOR);
+
+	/* When we are running a nested L2 guest and L1 specified for it a
+	 * certain exception bitmap, we must trap the same exceptions and pass
+	 * them to L1. When running L2, we will only handle the exceptions
+	 * specified above if L1 did not want them.
+	 */
+	if (is_guest_mode(vcpu))
+		eb |= get_vmcs12(vcpu)->exception_bitmap;
+        else {
+		int mask = 0, match = 0;
+
+		if (enable_ept && (eb & (1u << PF_VECTOR))) {
+			/*
+			 * If EPT is enabled, #PF is currently only intercepted
+			 * if MAXPHYADDR is smaller on the guest than on the
+			 * host.  In that case we only care about present,
+			 * non-reserved faults.  For vmcs02, however, PFEC_MASK
+			 * and PFEC_MATCH are set in prepare_vmcs02_rare.
+			 */
+			mask = PFERR_PRESENT_MASK | PFERR_RSVD_MASK;
+			match = PFERR_PRESENT_MASK;
+		}
+		tyche_vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK, mask);
+		tyche_vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH, match);
+	}
+
+	/*
+	 * Disabling xfd interception indicates that dynamic xfeatures
+	 * might be used in the guest. Always trap #NM in this case
+	 * to save guest xfd_err timely.
+	 */
+	if (vcpu->arch.xfd_no_write_intercept)
+		eb |= (1u << NM_VECTOR);
+
+	tyche_vmcs_write32(EXCEPTION_BITMAP, eb);
 }
 
 static u64 tyche_read_guest_kernel_gs_base(struct vcpu_tyche *vmx)
@@ -495,7 +621,6 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		tyche_write_guest_kernel_gs_base(vmx, data);
 		break;
 	case MSR_IA32_XFD:
-#if 0
 		ret = kvm_set_msr_common(vcpu, msr_info);
 		/*
 		 * Always intercepting WRMSR could incur non-negligible
@@ -510,12 +635,9 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 			vmx_disable_intercept_for_msr(vcpu, MSR_IA32_XFD,
 						      MSR_TYPE_RW);
 			vcpu->arch.xfd_no_write_intercept = true;
-			vmx_update_exception_bitmap(vcpu);
+			tyche_update_exception_bitmap(vcpu);
 		}
 		break;
-#endif
-		printk(KERN_ERR "MSR_IA32_XFD not implemented\n");
-		return 0;
 	case MSR_IA32_SYSENTER_CS:
 		if (is_guest_mode(vcpu))
 			get_vmcs12(vcpu)->guest_sysenter_cs = data;
@@ -961,6 +1083,55 @@ static void tyche_set_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 	tyche_vmcs_writel(GUEST_GDTR_BASE, dt->address);
 }
 
+static void vmx_msr_bitmap_l01_changed(struct vcpu_tyche *vmx)
+{
+	vmx->nested.force_msr_bitmap_recalc = true;
+}
+
+void vmx_disable_intercept_for_msr(struct kvm_vcpu *vcpu, u32 msr, int type)
+{
+	struct vcpu_tyche *vmx = to_tyche(vcpu);
+	unsigned long *msr_bitmap = vmx->vmcs01.msr_bitmap;
+
+	if (!cpu_has_vmx_msr_bitmap())
+		return;
+
+	vmx_msr_bitmap_l01_changed(vmx);
+
+	/*
+	 * Mark the desired intercept state in shadow bitmap, this is needed
+	 * for resync when the MSR filters change.
+	*/
+	if (is_valid_passthrough_msr(msr)) {
+		int idx = possible_passthrough_msr_slot(msr);
+
+		if (idx != -ENOENT) {
+			if (type & MSR_TYPE_R)
+				clear_bit(idx, vmx->shadow_msr_intercept.read);
+			if (type & MSR_TYPE_W)
+				clear_bit(idx, vmx->shadow_msr_intercept.write);
+		}
+	}
+
+	if ((type & MSR_TYPE_R) &&
+	    !kvm_msr_allowed(vcpu, msr, KVM_MSR_FILTER_READ)) {
+		vmx_set_msr_bitmap_read(msr_bitmap, msr);
+		type &= ~MSR_TYPE_R;
+	}
+
+	if ((type & MSR_TYPE_W) &&
+	    !kvm_msr_allowed(vcpu, msr, KVM_MSR_FILTER_WRITE)) {
+		vmx_set_msr_bitmap_write(msr_bitmap, msr);
+		type &= ~MSR_TYPE_W;
+	}
+
+	if (type & MSR_TYPE_R)
+		vmx_clear_msr_bitmap_read(msr_bitmap, msr);
+
+	if (type & MSR_TYPE_W)
+		vmx_clear_msr_bitmap_write(msr_bitmap, msr);
+}
+
 static void tyche_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 {
 	tyche_vmcs_writel(GUEST_DR7, val);
@@ -988,7 +1159,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.vcpu_load = tyche_vcpu_load,
 	// .vcpu_put = vmx_vcpu_put,
 
-	// .update_exception_bitmap = vmx_update_exception_bitmap,
+	.update_exception_bitmap = tyche_update_exception_bitmap,
 	.get_msr_feature = tyche_get_msr_feature,
 	.get_msr = tyche_get_msr,
 	// .set_msr = vmx_set_msr,
