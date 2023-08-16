@@ -1,10 +1,12 @@
 #include "tyche.h"
 #include "nested.h"
 #include "vmcs12.h"
+#include "mmu.h"
 
 #include <asm/desc.h>
 #include <asm/virtext.h>
 #include <asm/msr-index.h>
+#include <asm/intel-family.h>
 
 MODULE_LICENSE("GPL");
 
@@ -48,12 +50,27 @@ static u32 vmx_possible_passthrough_msrs[MAX_POSSIBLE_PASSTHROUGH_MSRS] = {
 	MSR_CORE_C7_RESIDENCY,
 };
 
+bool __read_mostly enable_vpid = 1;
+module_param_named(vpid, enable_vpid, bool, 0444);
+
+static bool __read_mostly enable_vnmi = 1;
+module_param_named(vnmi, enable_vnmi, bool, S_IRUGO);
+
+bool __read_mostly flexpriority_enabled = 1;
+module_param_named(flexpriority, flexpriority_enabled, bool, S_IRUGO);
+
 bool __read_mostly enable_ept = 1;
 module_param_named(ept, enable_ept, bool, S_IRUGO);
 
 bool __read_mostly enable_unrestricted_guest = 1;
 module_param_named(unrestricted_guest,
 			enable_unrestricted_guest, bool, S_IRUGO);
+
+bool __read_mostly enable_ept_ad_bits = 1;
+module_param_named(eptad, enable_ept_ad_bits, bool, S_IRUGO);
+
+bool __read_mostly enable_ipiv = true;
+module_param(enable_ipiv, bool, 0444);
 
 /*
  * If nested=1, nested virtualization is supported, i.e., guests may use
@@ -63,8 +80,53 @@ module_param_named(unrestricted_guest,
 static bool __read_mostly nested = 1;
 module_param(nested, bool, S_IRUGO);
 
+bool __read_mostly enable_pml = 1;
+module_param_named(pml, enable_pml, bool, S_IRUGO);
+
 static bool __read_mostly error_on_inconsistent_vmcs_config = true;
 module_param(error_on_inconsistent_vmcs_config, bool, 0444);
+
+#define KVM_VMX_TSC_MULTIPLIER_MAX     0xffffffffffffffffULL
+
+/* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
+static int __read_mostly cpu_preemption_timer_multi;
+static bool __read_mostly enable_preemption_timer = 1;
+#ifdef CONFIG_X86_64
+module_param_named(preemption_timer, enable_preemption_timer, bool, S_IRUGO);
+#endif
+
+extern bool __read_mostly allow_smaller_maxphyaddr;
+module_param(allow_smaller_maxphyaddr, bool, S_IRUGO);
+
+
+/*
+ * These 2 parameters are used to config the controls for Pause-Loop Exiting:
+ * ple_gap:    upper bound on the amount of time between two successive
+ *             executions of PAUSE in a loop. Also indicate if ple enabled.
+ *             According to test, this time is usually smaller than 128 cycles.
+ * ple_window: upper bound on the amount of time a guest is allowed to execute
+ *             in a PAUSE loop. Tests indicate that most spinlocks are held for
+ *             less than 2^12 cycles
+ * Time is measured based on a counter that runs at the same rate as the TSC,
+ * refer SDM volume 3b section 21.6.13 & 22.1.3.
+ */
+static unsigned int ple_gap = KVM_DEFAULT_PLE_GAP;
+module_param(ple_gap, uint, 0444);
+
+static unsigned int ple_window = KVM_VMX_DEFAULT_PLE_WINDOW;
+module_param(ple_window, uint, 0444);
+
+/* Default doubles per-vcpu window every exit. */
+static unsigned int ple_window_grow = KVM_DEFAULT_PLE_WINDOW_GROW;
+module_param(ple_window_grow, uint, 0444);
+
+/* Default resets per-vcpu window every exit to ple_window. */
+static unsigned int ple_window_shrink = KVM_DEFAULT_PLE_WINDOW_SHRINK;
+module_param(ple_window_shrink, uint, 0444);
+
+/* Default is to compute the maximum so we can never overflow. */
+static unsigned int ple_window_max        = KVM_VMX_DEFAULT_PLE_WINDOW_MAX;
+module_param(ple_window_max, uint, 0444);
 
 /* Default is SYSTEM mode, 1 for host-guest mode */
 int __read_mostly pt_mode = PT_MODE_SYSTEM;
@@ -277,6 +339,8 @@ static inline void tyche_segment_cache_clear(struct vcpu_tyche *tyche)
 {
 	tyche->segment_cache.bitmask = 0;
 }
+
+static unsigned long host_idt_base;
 
 /*
  * Comment's format: document - errata name - stepping - processor name.
@@ -1220,6 +1284,29 @@ static bool cpu_has_sgx(void)
 	return cpuid_eax(0) >= 0x12 && (cpuid_eax(0x12) & BIT(0));
 }
 
+/*
+ * Some cpus support VM_{ENTRY,EXIT}_IA32_PERF_GLOBAL_CTRL but they
+ * can't be used due to errata where VM Exit may incorrectly clear
+ * IA32_PERF_GLOBAL_CTRL[34:32]. Work around the errata by using the
+ * MSR load mechanism to switch IA32_PERF_GLOBAL_CTRL.
+ */
+static bool cpu_has_perf_global_ctrl_bug(void)
+{
+	if (boot_cpu_data.x86 == 0x6) {
+		switch (boot_cpu_data.x86_model) {
+		case INTEL_FAM6_NEHALEM_EP:	/* AAK155 */
+		case INTEL_FAM6_NEHALEM:	/* AAP115 */
+		case INTEL_FAM6_WESTMERE:	/* AAT100 */
+		case INTEL_FAM6_WESTMERE_EP:	/* BC86,AAY89,BD102 */
+		case INTEL_FAM6_NEHALEM_EX:	/* BA97 */
+			return true;
+		default:
+			break;
+		}
+	}
+
+	return false;
+}
 
 static __init int adjust_vmx_controls(u32 ctl_min, u32 ctl_opt,
 				      u32 msr, u32 *result)
@@ -1409,6 +1496,65 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf,
 	vmcs_conf->misc	= misc_msr;
 
 	return 0;
+}
+
+struct vmcs *alloc_vmcs_cpu(bool shadow, int cpu, gfp_t flags)
+{
+	int node = cpu_to_node(cpu);
+	struct page *pages;
+	struct vmcs *vmcs;
+
+	pages = __alloc_pages_node(node, flags, 0);
+	if (!pages)
+		return NULL;
+	vmcs = page_address(pages);
+	memset(vmcs, 0, vmcs_config.size);
+
+	vmcs->hdr.revision_id = vmcs_config.revision_id;
+
+	if (shadow)
+		vmcs->hdr.shadow_vmcs = 1;
+	return vmcs;
+}
+
+void free_vmcs(struct vmcs *vmcs)
+{
+	free_page((unsigned long)vmcs);
+}
+
+static void free_kvm_area(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		free_vmcs(per_cpu(vmxarea, cpu));
+		per_cpu(vmxarea, cpu) = NULL;
+	}
+}
+
+static __init int alloc_kvm_area(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct vmcs *vmcs;
+
+		vmcs = alloc_vmcs_cpu(false, cpu, GFP_KERNEL);
+		if (!vmcs) {
+			free_kvm_area();
+			return -ENOMEM;
+		}
+
+		per_cpu(vmxarea, cpu) = vmcs;
+	}
+	return 0;
+}
+
+static int vmx_get_max_tdp_level(void)
+{
+	if (cpu_has_vmx_ept_5levels())
+		return 5;
+	return 4;
 }
 
 static bool tyche_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
@@ -1602,6 +1748,82 @@ static int __init vmx_check_processor_compat(void)
 	return 0;
 }
 
+static u64 vmx_get_perf_capabilities(void)
+{
+	u64 perf_cap = PMU_CAP_FW_WRITES;
+	struct x86_pmu_lbr lbr;
+	u64 host_perf_cap = 0;
+
+	if (!enable_pmu)
+		return 0;
+
+	if (boot_cpu_has(X86_FEATURE_PDCM))
+		rdmsrl(MSR_IA32_PERF_CAPABILITIES, host_perf_cap);
+
+	x86_perf_get_lbr(&lbr);
+	if (lbr.nr)
+		perf_cap |= host_perf_cap & PMU_CAP_LBR_FMT;
+
+	if (vmx_pebs_supported()) {
+		perf_cap |= host_perf_cap & PERF_CAP_PEBS_MASK;
+		if ((perf_cap & PERF_CAP_PEBS_FORMAT) < 4)
+			perf_cap &= ~PERF_CAP_PEBS_BASELINE;
+	}
+
+	return perf_cap;
+}
+
+static __init void vmx_set_cpu_caps(void)
+{
+	kvm_set_cpu_caps();
+
+	/* CPUID 0x1 */
+	if (nested)
+		kvm_cpu_cap_set(X86_FEATURE_VMX);
+
+	/* CPUID 0x7 */
+	if (kvm_mpx_supported())
+		kvm_cpu_cap_check_and_set(X86_FEATURE_MPX);
+	if (!cpu_has_vmx_invpcid())
+		kvm_cpu_cap_clear(X86_FEATURE_INVPCID);
+	if (vmx_pt_mode_is_host_guest())
+		kvm_cpu_cap_check_and_set(X86_FEATURE_INTEL_PT);
+	if (vmx_pebs_supported()) {
+		kvm_cpu_cap_check_and_set(X86_FEATURE_DS);
+		kvm_cpu_cap_check_and_set(X86_FEATURE_DTES64);
+	}
+
+	if (!enable_pmu)
+		kvm_cpu_cap_clear(X86_FEATURE_PDCM);
+	kvm_caps.supported_perf_cap = vmx_get_perf_capabilities();
+
+#if 0
+	if (!enable_sgx) {
+		kvm_cpu_cap_clear(X86_FEATURE_SGX);
+		kvm_cpu_cap_clear(X86_FEATURE_SGX_LC);
+		kvm_cpu_cap_clear(X86_FEATURE_SGX1);
+		kvm_cpu_cap_clear(X86_FEATURE_SGX2);
+	}
+#endif
+
+	if (vmx_umip_emulated())
+		kvm_cpu_cap_set(X86_FEATURE_UMIP);
+
+	/* CPUID 0xD.1 */
+	kvm_caps.supported_xss = 0;
+	if (!cpu_has_vmx_xsaves())
+		kvm_cpu_cap_clear(X86_FEATURE_XSAVES);
+
+	/* CPUID 0x80000001 and 0x7 (RDPID) */
+	if (!cpu_has_vmx_rdtscp()) {
+		kvm_cpu_cap_clear(X86_FEATURE_RDTSCP);
+		kvm_cpu_cap_clear(X86_FEATURE_RDPID);
+	}
+
+	if (cpu_has_vmx_waitpkg())
+		kvm_cpu_cap_check_and_set(X86_FEATURE_WAITPKG);
+}
+
 static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.name = "tyche_intel",
 
@@ -1741,11 +1963,281 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
 };
 
+static unsigned int vmx_handle_intel_pt_intr(void)
+{
+	struct kvm_vcpu *vcpu = kvm_get_running_vcpu();
+
+	/* '0' on failure so that the !PT case can use a RET0 static call. */
+	if (!vcpu || !kvm_handling_nmi_from_guest(vcpu))
+		return 0;
+
+	kvm_make_request(KVM_REQ_PMI, vcpu);
+	__set_bit(MSR_CORE_PERF_GLOBAL_OVF_CTRL_TRACE_TOPA_PMI_BIT,
+		  (unsigned long *)&vcpu->arch.pmu.global_status);
+	return 1;
+}
+
+static __init void vmx_setup_user_return_msrs(void)
+{
+
+	/*
+	 * Though SYSCALL is only supported in 64-bit mode on Intel CPUs, kvm
+	 * will emulate SYSCALL in legacy mode if the vendor string in guest
+	 * CPUID.0:{EBX,ECX,EDX} is "AuthenticAMD" or "AMDisbetter!" To
+	 * support this emulation, MSR_STAR is included in the list for i386,
+	 * but is never loaded into hardware.  MSR_CSTAR is also never loaded
+	 * into hardware and is here purely for emulation purposes.
+	 */
+	const u32 vmx_uret_msrs_list[] = {
+	#ifdef CONFIG_X86_64
+		MSR_SYSCALL_MASK, MSR_LSTAR, MSR_CSTAR,
+	#endif
+		MSR_EFER, MSR_TSC_AUX, MSR_STAR,
+		MSR_IA32_TSX_CTRL,
+	};
+	int i;
+
+	BUILD_BUG_ON(ARRAY_SIZE(vmx_uret_msrs_list) != MAX_NR_USER_RETURN_MSRS);
+
+	for (i = 0; i < ARRAY_SIZE(vmx_uret_msrs_list); ++i)
+		kvm_add_user_return_msr(vmx_uret_msrs_list[i]);
+}
+
+static void __init vmx_setup_me_spte_mask(void)
+{
+	u64 me_mask = 0;
+
+	/*
+	 * kvm_get_shadow_phys_bits() returns shadow_phys_bits.  Use
+	 * the former to avoid exposing shadow_phys_bits.
+	 *
+	 * On pre-MKTME system, boot_cpu_data.x86_phys_bits equals to
+	 * shadow_phys_bits.  On MKTME and/or TDX capable systems,
+	 * boot_cpu_data.x86_phys_bits holds the actual physical address
+	 * w/o the KeyID bits, and shadow_phys_bits equals to MAXPHYADDR
+	 * reported by CPUID.  Those bits between are KeyID bits.
+	 */
+	if (boot_cpu_data.x86_phys_bits != kvm_get_shadow_phys_bits())
+		me_mask = rsvd_bits(boot_cpu_data.x86_phys_bits,
+			kvm_get_shadow_phys_bits() - 1);
+	/*
+	 * Unlike SME, host kernel doesn't support setting up any
+	 * MKTME KeyID on Intel platforms.  No memory encryption
+	 * bits should be included into the SPTE.
+	 */
+	kvm_mmu_set_me_spte_mask(0, me_mask);
+}
+
+static struct kvm_x86_init_ops vmx_init_ops __initdata;
+
+static __init int hardware_setup(void)
+{
+	unsigned long host_bndcfgs;
+	struct desc_ptr dt;
+	int r;
+
+	store_idt(&dt);
+	host_idt_base = dt.address;
+
+	vmx_setup_user_return_msrs();
+
+	if (setup_vmcs_config(&vmcs_config, &vmx_capability) < 0)
+		return -EIO;
+
+	if (cpu_has_perf_global_ctrl_bug())
+		pr_warn_once("kvm: VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL "
+			     "does not work properly. Using workaround\n");
+
+	if (boot_cpu_has(X86_FEATURE_NX))
+		kvm_enable_efer_bits(EFER_NX);
+
+	if (boot_cpu_has(X86_FEATURE_MPX)) {
+		rdmsrl(MSR_IA32_BNDCFGS, host_bndcfgs);
+		WARN_ONCE(host_bndcfgs, "KVM: BNDCFGS in host will be lost");
+	}
+
+	if (!cpu_has_vmx_mpx())
+		kvm_caps.supported_xcr0 &= ~(XFEATURE_MASK_BNDREGS |
+					     XFEATURE_MASK_BNDCSR);
+
+	if (!cpu_has_vmx_vpid() || !cpu_has_vmx_invvpid() ||
+	    !(cpu_has_vmx_invvpid_single() || cpu_has_vmx_invvpid_global()))
+		enable_vpid = 0;
+
+	if (!cpu_has_vmx_ept() ||
+	    !cpu_has_vmx_ept_4levels() ||
+	    !cpu_has_vmx_ept_mt_wb() ||
+	    !cpu_has_vmx_invept_global())
+		enable_ept = 0;
+
+	/* NX support is required for shadow paging. */
+	if (!enable_ept && !boot_cpu_has(X86_FEATURE_NX)) {
+		pr_err_ratelimited("kvm: NX (Execute Disable) not supported\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (!cpu_has_vmx_ept_ad_bits() || !enable_ept)
+		enable_ept_ad_bits = 0;
+
+	if (!cpu_has_vmx_unrestricted_guest() || !enable_ept)
+		enable_unrestricted_guest = 0;
+
+	if (!cpu_has_vmx_flexpriority())
+		flexpriority_enabled = 0;
+
+	if (!cpu_has_virtual_nmis())
+		enable_vnmi = 0;
+
+#ifdef CONFIG_X86_SGX_KVM
+	if (!cpu_has_vmx_encls_vmexit())
+		enable_sgx = false;
+#endif
+
+	/*
+	 * set_apic_access_page_addr() is used to reload apic access
+	 * page upon invalidation.  No need to do anything if not
+	 * using the APIC_ACCESS_ADDR VMCS field.
+	 */
+	if (!flexpriority_enabled)
+		tyche_x86_ops.set_apic_access_page_addr = NULL;
+
+	if (!cpu_has_vmx_tpr_shadow())
+		tyche_x86_ops.update_cr8_intercept = NULL;
+
+#if IS_ENABLED(CONFIG_HYPERV)
+	if (ms_hyperv.nested_features & HV_X64_NESTED_GUEST_MAPPING_FLUSH
+	    && enable_ept) {
+		tyche_x86_ops.tlb_remote_flush = hv_remote_flush_tlb;
+		tyche_x86_ops.tlb_remote_flush_with_range =
+				hv_remote_flush_tlb_with_range;
+	}
+#endif
+
+	if (!cpu_has_vmx_ple()) {
+		ple_gap = 0;
+		ple_window = 0;
+		ple_window_grow = 0;
+		ple_window_max = 0;
+		ple_window_shrink = 0;
+	}
+
+	if (!cpu_has_vmx_apicv())
+		enable_apicv = 0;
+	if (!enable_apicv)
+		tyche_x86_ops.sync_pir_to_irr = NULL;
+
+	if (!enable_apicv || !cpu_has_vmx_ipiv())
+		enable_ipiv = false;
+
+	if (cpu_has_vmx_tsc_scaling())
+		kvm_caps.has_tsc_control = true;
+
+	kvm_caps.max_tsc_scaling_ratio = KVM_VMX_TSC_MULTIPLIER_MAX;
+	kvm_caps.tsc_scaling_ratio_frac_bits = 48;
+	kvm_caps.has_bus_lock_exit = cpu_has_vmx_bus_lock_detection();
+	kvm_caps.has_notify_vmexit = cpu_has_notify_vmexit();
+
+	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
+
+	if (enable_ept)
+		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
+				      cpu_has_vmx_ept_execute_only());
+
+	/*
+	 * Setup shadow_me_value/shadow_me_mask to include MKTME KeyID
+	 * bits to shadow_zero_check.
+	 */
+	vmx_setup_me_spte_mask();
+
+	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
+			  ept_caps_to_lpage_level(vmx_capability.ept));
+
+	/*
+	 * Only enable PML when hardware supports PML feature, and both EPT
+	 * and EPT A/D bit features are enabled -- PML depends on them to work.
+	 */
+	if (!enable_ept || !enable_ept_ad_bits || !cpu_has_vmx_pml())
+		enable_pml = 0;
+
+	if (!enable_pml)
+		tyche_x86_ops.cpu_dirty_log_size = 0;
+
+	if (!cpu_has_vmx_preemption_timer())
+		enable_preemption_timer = false;
+
+	if (enable_preemption_timer) {
+		u64 use_timer_freq = 5000ULL * 1000 * 1000;
+
+		cpu_preemption_timer_multi =
+			vmcs_config.misc & VMX_MISC_PREEMPTION_TIMER_RATE_MASK;
+
+		if (tsc_khz)
+			use_timer_freq = (u64)tsc_khz * 1000;
+		use_timer_freq >>= cpu_preemption_timer_multi;
+
+		/*
+		 * KVM "disables" the preemption timer by setting it to its max
+		 * value.  Don't use the timer if it might cause spurious exits
+		 * at a rate faster than 0.1 Hz (of uninterrupted guest time).
+		 */
+		if (use_timer_freq > 0xffffffffu / 10)
+			enable_preemption_timer = false;
+	}
+
+	if (!enable_preemption_timer) {
+		tyche_x86_ops.set_hv_timer = NULL;
+		tyche_x86_ops.cancel_hv_timer = NULL;
+		tyche_x86_ops.request_immediate_exit = __kvm_request_immediate_exit;
+	}
+
+	kvm_caps.supported_mce_cap |= MCG_LMCE_P;
+	kvm_caps.supported_mce_cap |= MCG_CMCI_P;
+
+	if (pt_mode != PT_MODE_SYSTEM && pt_mode != PT_MODE_HOST_GUEST)
+		return -EINVAL;
+	if (!enable_ept || !enable_pmu || !cpu_has_vmx_intel_pt())
+		pt_mode = PT_MODE_SYSTEM;
+	if (pt_mode == PT_MODE_HOST_GUEST)
+		vmx_init_ops.handle_intel_pt_intr = vmx_handle_intel_pt_intr;
+	else
+		vmx_init_ops.handle_intel_pt_intr = NULL;
+
+#if 0 // FIXME
+	setup_default_sgx_lepubkeyhash();
+#endif
+	if (nested) {
+		printk(KERN_ERR "nested... fixme");
+#if 0
+		nested_vmx_setup_ctls_msrs(&vmcs_config, vmx_capability.ept);
+
+		r = nested_vmx_hardware_setup(kvm_vmx_exit_handlers);
+		if (r)
+			return r;
+#endif
+	}
+
+	vmx_set_cpu_caps();
+
+	r = alloc_kvm_area();
+	if (r && nested) {
+		printk(KERN_ERR "nested... fixme");
+#if 0
+		nested_vmx_hardware_unsetup();
+#endif
+	}
+
+#if 0 // FIXME: posted interrupt
+	kvm_set_posted_intr_wakeup_handler(pi_wakeup_handler);
+#endif
+
+	return r;
+}
+
 static struct kvm_x86_init_ops tyche_init_ops __initdata = {
 	.cpu_has_kvm_support = cpu_has_kvm_support,
 	.disabled_by_bios = vmx_disabled_by_bios,
 	.check_processor_compatibility = vmx_check_processor_compat,
-	// .hardware_setup = hardware_setup,
+	.hardware_setup = hardware_setup,
 	// .handle_intel_pt_intr = NULL,
 
 	.runtime_ops = &tyche_x86_ops,
