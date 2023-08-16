@@ -221,4 +221,5 @@ bool is_vmware_backdoor_pmc(u32 pmc_idx);
 
 extern struct kvm_pmu_ops intel_pmu_ops;
 extern struct kvm_pmu_ops amd_pmu_ops;
+extern struct kvm_pmu_ops tyche_pmu_ops;
 #endif /* __KVM_X86_PMU_H */

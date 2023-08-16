@@ -2,6 +2,7 @@
 #include "nested.h"
 #include "vmcs12.h"
 #include "mmu.h"
+#include "pmu.h"
 
 #include <asm/desc.h>
 #include <asm/virtext.h>

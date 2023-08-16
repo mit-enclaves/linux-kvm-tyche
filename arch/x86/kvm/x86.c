@@ -11987,8 +11987,9 @@ void kvm_arch_hardware_disable(void)
 	drop_user_return_notifiers();
 }
 
-static inline void kvm_ops_update(struct kvm_x86_init_ops *ops)
+static void kvm_ops_update(struct kvm_x86_init_ops *ops)
 {
+	printk(KERN_ERR "kvm_ops_update: memcpy\n");
 	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
 
 #define __KVM_X86_OP(func) \
@@ -12002,6 +12003,7 @@ static inline void kvm_ops_update(struct kvm_x86_init_ops *ops)
 #include <asm/kvm-x86-ops.h>
 #undef __KVM_X86_OP
 
+	printk(KERN_ERR "kvm_ops_update: kvm_pmu_ops_update\n");
 	kvm_pmu_ops_update(ops->pmu_ops);
 }
 
@@ -12010,19 +12012,26 @@ int kvm_arch_hardware_setup(void *opaque)
 	struct kvm_x86_init_ops *ops = opaque;
 	int r;
 
+	printk(KERN_ERR "rdmsrl_safe(MSR_EFER, &host_efer);\n");
+
 	rdmsrl_safe(MSR_EFER, &host_efer);
 
 	if (boot_cpu_has(X86_FEATURE_XSAVES))
 		rdmsrl(MSR_IA32_XSS, host_xss);
 
+	printk(KERN_ERR "kvm_init_pmu_capability\n");
+
 	kvm_init_pmu_capability();
 
+	printk(KERN_ERR "hardware_setup\n");
 	r = ops->hardware_setup();
 	if (r != 0)
 		return r;
 
+	printk(KERN_ERR "kvm_ops_update\n");
 	kvm_ops_update(ops);
 
+	printk(KERN_ERR "kvm_register_perf_callbacks\n");
 	kvm_register_perf_callbacks(ops->handle_intel_pt_intr);
 
 	if (!kvm_cpu_cap_has(X86_FEATURE_XSAVES))
@@ -12044,6 +12053,7 @@ int kvm_arch_hardware_setup(void *opaque)
 		kvm_caps.max_guest_tsc_khz = max;
 	}
 	kvm_caps.default_tsc_scaling_ratio = 1ULL << kvm_caps.tsc_scaling_ratio_frac_bits;
+	printk(KERN_ERR "kvm_init_msr_list\n");
 	kvm_init_msr_list();
 	return 0;
 }
