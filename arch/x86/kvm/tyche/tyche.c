@@ -1,6 +1,7 @@
 #include "tyche.h"
 #include "nested.h"
 #include "vmcs12.h"
+#include "pmu.h"
 
 #include <asm/desc.h>
 #include <asm/virtext.h>
@@ -1310,6 +1311,76 @@ static void tyche_set_dr7(struct kvm_vcpu *vcpu, unsigned long val)
 	tyche_vmcs_writel(GUEST_DR7, val);
 }
 
+// ————————————————————————— AGHOSN Implementations ————————————————————————— //
+
+struct kvm_pmu_ops tyche_pmu_ops __initdata = {
+	.hw_event_available = 0x1,//intel_hw_event_available,
+	.pmc_is_enabled = 0x2,//intel_pmc_is_enabled,
+	.pmc_idx_to_pmc = 0x3, //intel_pmc_idx_to_pmc,
+	.rdpmc_ecx_to_pmc = 0x4, //intel_rdpmc_ecx_to_pmc,
+	.msr_idx_to_pmc = 0x5, //intel_msr_idx_to_pmc,
+	.is_valid_rdpmc_ecx = 0x6, //intel_is_valid_rdpmc_ecx,
+	.is_valid_msr = 0x7, //intel_is_valid_msr,
+	.get_msr = 0x8, //intel_pmu_get_msr,
+	.set_msr = 0x9, //intel_pmu_set_msr,
+	.refresh = 0xa, //intel_pmu_refresh,
+	.init = 0xb ,//intel_pmu_init,
+	.reset = 0xc, // intel_pmu_reset,
+	.deliver_pmi = 0xd, //intel_pmu_deliver_pmi,
+	.cleanup = 0xe, // intel_pmu_cleanup,
+};
+
+
+/*
+ * The kvm parameter can be NULL (module initialization, or invocation before
+ * VM creation). Be sure to check the kvm parameter before using it.
+ */
+static bool tyche_has_emulated_msr(struct kvm *kvm, u32 index)
+{
+	switch (index) {
+	case MSR_IA32_SMBASE:
+		if (!IS_ENABLED(CONFIG_KVM_SMM))
+			return false;
+		/*
+		 * We cannot do SMM unless we can run the guest in big
+		 * real mode.
+		 */
+		return false; //enable_unrestricted_guest || emulate_invalid_guest_state;
+	case MSR_IA32_VMX_BASIC ... MSR_IA32_VMX_VMFUNC:
+		return false; //nested;
+	case MSR_AMD64_VIRT_SPEC_CTRL:
+	case MSR_AMD64_TSC_RATIO:
+		/* This is AMD only.  */
+		return false;
+	default:
+		return true;
+	}
+}
+
+static __init int tyche_cpu_has_kvm_support(void ) {
+  //This has to be 1 otherwise kvm_init fails inside kvm_arch_init.
+  return 1;
+}
+
+static __init int tyche_disabled_by_bios(void)
+{
+	return 0;
+}
+
+
+static __init int hardware_setup(void) {
+  //TODO this could be used to call tyche, init the capabilities etc.
+  //The original function in vmx seems to be setting a lot of constants.
+  //We need to go line by line and understand what they are doing there.
+  printk(KERN_NOTICE "In tyche hardware setup\n\n");
+  return 0;
+}
+
+static __init int tyche_check_processor_compat(void) {
+  //TODO let's see what this does.
+  return 0;
+}
+
 static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.name = "tyche_intel",
 
@@ -1317,7 +1388,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 
 	// .hardware_enable = vmx_hardware_enable,
 	// .hardware_disable = vmx_hardware_disable,
-	// .has_emulated_msr = vmx_has_emulated_msr,
+	.has_emulated_msr = tyche_has_emulated_msr,
 
 	.vm_size = sizeof(struct kvm_tyche),
 	// .vm_init = vmx_vm_init,
@@ -1450,14 +1521,14 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 };
 
 static struct kvm_x86_init_ops tyche_init_ops __initdata = {
-	// .cpu_has_kvm_support = cpu_has_kvm_support,
-	// .disabled_by_bios = vmx_disabled_by_bios,
-	// .check_processor_compatibility = vmx_check_processor_compat,
-	// .hardware_setup = hardware_setup,
+	.cpu_has_kvm_support = tyche_cpu_has_kvm_support,
+  .disabled_by_bios = tyche_disabled_by_bios,
+	.check_processor_compatibility = tyche_check_processor_compat,
+	.hardware_setup = hardware_setup,
 	// .handle_intel_pt_intr = NULL,
 
 	.runtime_ops = &tyche_x86_ops,
-	// .pmu_ops = &intel_pmu_ops,
+	.pmu_ops = &tyche_pmu_ops,
 };
 
 static void vmx_cleanup_l1d_flush(void)
@@ -1490,9 +1561,9 @@ module_exit(tyche_exit);
 static int __init tyche_init(void)
 {
 	int r, cpu;
-
 	r = kvm_init(&tyche_init_ops, sizeof(struct vcpu_tyche),
 		     __alignof__(struct vcpu_tyche), THIS_MODULE);
+  trace_printk("Done with kvm_init");
 	if (r)
 		return r;
 	
@@ -1533,6 +1604,8 @@ static int __init tyche_init(void)
 	 */
 	if (!enable_ept)
 		allow_smaller_maxphyaddr = true;
+
+  trace_printk("Done with tyche_init\n");
 
 	return 0;
 }
