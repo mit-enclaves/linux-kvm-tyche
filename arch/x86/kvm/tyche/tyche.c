@@ -7218,6 +7218,9 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmx_update_hv_timer(vcpu);
 
 	kvm_wait_lapic_expire(vcpu);
+	if (vmx->loaded_vmcs->launched == 0) {
+		printk(KERN_ERR "vmlaunch\n");
+	}
 
 	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
 	vmx_vcpu_enter_exit(vcpu, vmx, __vmx_vcpu_run_flags(vmx));
@@ -7285,6 +7288,7 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		return EXIT_FASTPATH_NONE;
 
 	vmx->loaded_vmcs->launched = 1;
+	panic("vmlaunched and exited 1st time");
 
 	vmx_recover_nmi_blocking(vmx);
 	vmx_complete_interrupts(vmx);
