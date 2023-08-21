@@ -1,173 +1,12 @@
 #include "tyche.h"
-#include "nested.h"
-#include "vmcs12.h"
+#include "x86.h"
 #include "pmu.h"
-
-#include <asm/desc.h>
-#include <asm/virtext.h>
-#include <asm/msr-index.h>
 
 MODULE_LICENSE("GPL");
 
-#define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
-#define KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR0_NE
-#define KVM_VM_CR0_ALWAYS_ON \
-	(KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST | X86_CR0_PG | X86_CR0_PE)
-
-#define KVM_VM_CR4_ALWAYS_ON_UNRESTRICTED_GUEST X86_CR4_VMXE
-#define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
-#define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
-
-#define RMODE_GUEST_OWNED_EFLAGS_BITS (~(X86_EFLAGS_IOPL | X86_EFLAGS_VM))
-
-#define MSR_IA32_RTIT_STATUS_MASK                                            \
-	(~(RTIT_STATUS_FILTEREN | RTIT_STATUS_CONTEXTEN |                    \
-	   RTIT_STATUS_TRIGGEREN | RTIT_STATUS_ERROR | RTIT_STATUS_STOPPED | \
-	   RTIT_STATUS_BYTECNT))
-
-/*
- * List of MSRs that can be directly passed to the guest.
- * In addition to these x2apic and PT MSRs are handled specially.
- */
-static u32 vmx_possible_passthrough_msrs[MAX_POSSIBLE_PASSTHROUGH_MSRS] = {
-	MSR_IA32_SPEC_CTRL,
-	MSR_IA32_PRED_CMD,
-	MSR_IA32_TSC,
-#ifdef CONFIG_X86_64
-	MSR_FS_BASE,
-	MSR_GS_BASE,
-	MSR_KERNEL_GS_BASE,
-	MSR_IA32_XFD,
-	MSR_IA32_XFD_ERR,
-#endif
-	MSR_IA32_SYSENTER_CS,
-	MSR_IA32_SYSENTER_ESP,
-	MSR_IA32_SYSENTER_EIP,
-	MSR_CORE_C1_RES,
-	MSR_CORE_C3_RESIDENCY,
-	MSR_CORE_C6_RESIDENCY,
-	MSR_CORE_C7_RESIDENCY,
-};
-
-bool __read_mostly enable_ept = 1;
-module_param_named(ept, enable_ept, bool, S_IRUGO);
-
-bool __read_mostly enable_unrestricted_guest = 1;
-module_param_named(unrestricted_guest,
-			enable_unrestricted_guest, bool, S_IRUGO);
-
-/*
- * If nested=1, nested virtualization is supported, i.e., guests may use
- * VMX and be a hypervisor for its own guests. If nested=0, guests may not
- * use VMX instructions.
- */
-static bool __read_mostly nested = 1;
-module_param(nested, bool, S_IRUGO);
-
-/* Default is SYSTEM mode, 1 for host-guest mode */
-int __read_mostly pt_mode = PT_MODE_SYSTEM;
-module_param(pt_mode, int, S_IRUGO);
-
-static DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
-static DEFINE_STATIC_KEY_FALSE(vmx_l1d_flush_cond);
-static DEFINE_MUTEX(vmx_l1d_flush_mutex);
-
-/* Storage for pre module init parameter parsing */
-static enum vmx_l1d_flush_state __read_mostly vmentry_l1d_flush_param = VMENTER_L1D_FLUSH_AUTO;
-
-static const struct {
-	const char *option;
-	bool for_parse;
-} vmentry_l1d_param[] = {
-	[VMENTER_L1D_FLUSH_AUTO]	 = {"auto", true},
-	[VMENTER_L1D_FLUSH_NEVER]	 = {"never", true},
-	[VMENTER_L1D_FLUSH_COND]	 = {"cond", true},
-	[VMENTER_L1D_FLUSH_ALWAYS]	 = {"always", true},
-	[VMENTER_L1D_FLUSH_EPT_DISABLED] = {"EPT disabled", false},
-	[VMENTER_L1D_FLUSH_NOT_REQUIRED] = {"not required", false},
-};
-
-#define L1D_CACHE_ORDER 4
-static void *vmx_l1d_flush_pages;
-
-/* Control for disabling CPU Fill buffer clear */
-static bool __read_mostly vmx_fb_clear_ctrl_available;
-
-static DEFINE_PER_CPU(struct vmcs *, vmxarea);
-DEFINE_PER_CPU(struct vmcs *, current_vmcs);
-
-/*
- * We maintain a per-CPU linked-list of VMCS loaded on that CPU. This is needed
- * when a CPU is brought down, and we need to VMCLEAR all VMCSs loaded on it.
- */
-static DEFINE_PER_CPU(struct list_head, loaded_vmcss_on_cpu);
-
-static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
-static DEFINE_SPINLOCK(vmx_vpid_lock);
+// ————————————————————————— AGHOSN Implementations ————————————————————————— //
 
 struct vmcs_config vmcs_config;
-struct vmx_capability vmx_capability;
-
-//void tyche_update_exception_bitmap(struct kvm_vcpu *vcpu)
-//{
-//	u32 eb;
-//
-//	eb = (1u << PF_VECTOR) | (1u << UD_VECTOR) | (1u << MC_VECTOR) |
-//	     (1u << DB_VECTOR) | (1u << AC_VECTOR);
-//	/*
-//	 * Guest access to VMware backdoor ports could legitimately
-//	 * trigger #GP because of TSS I/O permission bitmap.
-//	 * We intercept those #GP and allow access to them anyway
-//	 * as VMware does.
-//	 */
-//	if (enable_vmware_backdoor)
-//		eb |= (1u << GP_VECTOR);
-//	if ((vcpu->guest_debug &
-//	     (KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)) ==
-//	    (KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP))
-//		eb |= 1u << BP_VECTOR;
-//	if (to_tyche(vcpu)->rmode.vm86_active)
-//		eb = ~0;
-//	if (!vmx_need_pf_intercept(vcpu))
-//		eb &= ~(1u << PF_VECTOR);
-//
-//	/* When we are running a nested L2 guest and L1 specified for it a
-//	 * certain exception bitmap, we must trap the same exceptions and pass
-//	 * them to L1. When running L2, we will only handle the exceptions
-//	 * specified above if L1 did not want them.
-//	 */
-//	if (is_guest_mode(vcpu))
-//		eb |= get_vmcs12(vcpu)->exception_bitmap;
-//        else {
-//		int mask = 0, match = 0;
-//
-//		if (enable_ept && (eb & (1u << PF_VECTOR))) {
-//			/*
-//			 * If EPT is enabled, #PF is currently only intercepted
-//			 * if MAXPHYADDR is smaller on the guest than on the
-//			 * host.  In that case we only care about present,
-//			 * non-reserved faults.  For vmcs02, however, PFEC_MASK
-//			 * and PFEC_MATCH are set in prepare_vmcs02_rare.
-//			 */
-//			mask = PFERR_PRESENT_MASK | PFERR_RSVD_MASK;
-//			match = PFERR_PRESENT_MASK;
-//		}
-//		tyche_vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK, mask);
-//		tyche_vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH, match);
-//	}
-//
-//	/*
-//	 * Disabling xfd interception indicates that dynamic xfeatures
-//	 * might be used in the guest. Always trap #NM in this case
-//	 * to save guest xfd_err timely.
-//	 */
-//	if (vcpu->arch.xfd_no_write_intercept)
-//		eb |= (1u << NM_VECTOR);
-//
-//	tyche_vmcs_write32(EXCEPTION_BITMAP, eb);
-//}
-
-// ————————————————————————— AGHOSN Implementations ————————————————————————— //
 
 struct kvm_pmu_ops tyche_pmu_ops __initdata = {
 	.hw_event_available = 0x1,//intel_hw_event_available,
@@ -246,7 +85,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .hardware_disable = vmx_hardware_disable,
 	.has_emulated_msr = tyche_has_emulated_msr,
 
-	.vm_size = sizeof(struct kvm_tyche),
+	.vm_size = 666,//sizeof(struct kvm_tyche),
 	// .vm_init = vmx_vm_init,
 	// .vm_destroy = vmx_vm_destroy,
 
@@ -406,7 +245,7 @@ module_exit(tyche_exit);
 
 static int __init tyche_init(void)
 {
-	int r, cpu;
+	int r;
 	r = kvm_init(&tyche_init_ops, sizeof(struct vcpu_tyche),
 		     __alignof__(struct vcpu_tyche), THIS_MODULE);
   trace_printk("Done with kvm_init\n");
