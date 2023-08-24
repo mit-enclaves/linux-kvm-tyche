@@ -5,7 +5,6 @@
 MODULE_LICENSE("GPL");
 
 // ————————————————————————————— PMU Operations ————————————————————————————— //
-
 //TODO most of this can be imported from vmx I think.
 //See with @yuchen.
 static void intel_pmu_init(struct kvm_vcpu *vcpu)
@@ -67,7 +66,7 @@ static bool tyche_has_emulated_msr(struct kvm *kvm, u32 index)
 	}
 }
 
-static __init int tyche_cpu_has_kvm_support(void ) {
+static __init int tyche_cpu_has_kvm_support(void) {
   //This has to be 1 otherwise kvm_init fails inside kvm_arch_init.
   return 1;
 }
@@ -268,11 +267,9 @@ static int __init tyche_init(void)
 	int r;
 	r = kvm_init(&tyche_init_ops, sizeof(struct vcpu_tyche),
 		     __alignof__(struct vcpu_tyche), THIS_MODULE);
-  trace_printk("Done with kvm_init\n");
 	if (r)
 		return r;
-	
-  trace_printk("Done with tyche_init\n");
+  
 	return 0;
 }
 module_init(tyche_init);
