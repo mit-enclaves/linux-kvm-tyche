@@ -10,6 +10,7 @@
 #include <linux/ktime.h>
 #include <linux/list.h>
 #include <linux/nospec.h>
+#include <linux/spinlock.h>
 
 #include "../kvm_cache_regs.h"
 
@@ -18,6 +19,10 @@ struct vmcs_config {
 extern struct vmcs_config vmcs_config;
 
 struct vcpu_tyche {
-	int placeholder;
+	struct kvm_vcpu vcpu;
+};
+
+struct kvm_tyche {
+	struct kvm kvm;
 };
 #endif /* __KVM_X86_TYCHE_H */
