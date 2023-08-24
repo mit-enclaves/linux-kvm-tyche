@@ -4,6 +4,9 @@
 
 MODULE_LICENSE("GPL");
 
+// ———————————————————————————— External symbols ———————————————————————————— //
+extern void tyche_debug_print(void);
+
 // ————————————————————————————— PMU Operations ————————————————————————————— //
 //TODO most of this can be imported from vmx I think.
 //See with @yuchen.
@@ -21,8 +24,8 @@ static void intel_pmu_refresh(struct kvm_vcpu *vcpu)
 struct vmcs_config vmcs_config;
 
 struct kvm_pmu_ops tyche_pmu_ops __initdata = {
-	.hw_event_available = 0x1dead,//intel_hw_event_available,
-	.pmc_is_enabled = 0x2dead,//intel_pmc_is_enabled,
+	.hw_event_available = false,//intel_hw_event_available,
+	.pmc_is_enabled = false,//intel_pmc_is_enabled,
 	.pmc_idx_to_pmc = 0x3dead, //intel_pmc_idx_to_pmc,
 	.rdpmc_ecx_to_pmc = 0x4dead, //intel_rdpmc_ecx_to_pmc,
 	.msr_idx_to_pmc = 0x5dead, //intel_msr_idx_to_pmc,
@@ -269,7 +272,7 @@ static int __init tyche_init(void)
 		     __alignof__(struct vcpu_tyche), THIS_MODULE);
 	if (r)
 		return r;
-  
+  tyche_debug_print();
 	return 0;
 }
 module_init(tyche_init);
