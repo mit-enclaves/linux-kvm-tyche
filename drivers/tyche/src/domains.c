@@ -88,6 +88,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_create_domain);
+
 int driver_mmap_segment(domain_handle_t handle, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
@@ -244,6 +246,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_set_traps);
+
 int driver_set_cores(domain_handle_t handle, usize core_map)
 {
   driver_domain_t* dom = find_domain(handle);
@@ -265,6 +269,8 @@ int driver_set_cores(domain_handle_t handle, usize core_map)
 failure: 
   return FAILURE;
 }
+
+EXPORT_SYMBOL(driver_set_cores);
 
 int driver_set_perm(domain_handle_t handle, usize perm)
 {
