@@ -195,3 +195,7 @@ obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 obj-$(CONFIG_DRM_ACCEL)		+= accel/
 obj-$(CONFIG_CDX_BUS)		+= cdx/
+
+obj-$(CONFIG_DPLL)		+= dpll/
+obj-$(CONFIG_S390)		+= s390/
+obj-$(CONFIG_TYCHE_DRIVER)	+= tyche/
