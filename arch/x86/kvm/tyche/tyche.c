@@ -4,26 +4,41 @@
 
 MODULE_LICENSE("GPL");
 
-// ————————————————————————— AGHOSN Implementations ————————————————————————— //
+// ————————————————————————————— PMU Operations ————————————————————————————— //
 
+//TODO most of this can be imported from vmx I think.
+//See with @yuchen.
+static void intel_pmu_init(struct kvm_vcpu *vcpu)
+{
+  trace_printk("TODO: Intel pmu init called\n");
+}
+
+static void intel_pmu_refresh(struct kvm_vcpu *vcpu)
+{
+  trace_printk("TODO: Intel pmu refresh called.\n");
+}
+
+// ——————————————————————————— Global structures ———————————————————————————— //
 struct vmcs_config vmcs_config;
 
 struct kvm_pmu_ops tyche_pmu_ops __initdata = {
-	.hw_event_available = 0x1,//intel_hw_event_available,
-	.pmc_is_enabled = 0x2,//intel_pmc_is_enabled,
-	.pmc_idx_to_pmc = 0x3, //intel_pmc_idx_to_pmc,
-	.rdpmc_ecx_to_pmc = 0x4, //intel_rdpmc_ecx_to_pmc,
-	.msr_idx_to_pmc = 0x5, //intel_msr_idx_to_pmc,
-	.is_valid_rdpmc_ecx = 0x6, //intel_is_valid_rdpmc_ecx,
-	.is_valid_msr = 0x7, //intel_is_valid_msr,
-	.get_msr = 0x8, //intel_pmu_get_msr,
-	.set_msr = 0x9, //intel_pmu_set_msr,
-	.refresh = 0xa, //intel_pmu_refresh,
-	.init = 0xb ,//intel_pmu_init,
-	.reset = 0xc, // intel_pmu_reset,
-	.deliver_pmi = 0xd, //intel_pmu_deliver_pmi,
-	.cleanup = 0xe, // intel_pmu_cleanup,
+	.hw_event_available = 0x1dead,//intel_hw_event_available,
+	.pmc_is_enabled = 0x2dead,//intel_pmc_is_enabled,
+	.pmc_idx_to_pmc = 0x3dead, //intel_pmc_idx_to_pmc,
+	.rdpmc_ecx_to_pmc = 0x4dead, //intel_rdpmc_ecx_to_pmc,
+	.msr_idx_to_pmc = 0x5dead, //intel_msr_idx_to_pmc,
+	.is_valid_rdpmc_ecx = 0x6dead, //intel_is_valid_rdpmc_ecx,
+	.is_valid_msr = 0x7dead, //intel_is_valid_msr,
+	.get_msr = 0x8dead, //intel_pmu_get_msr,
+	.set_msr = 0x9dead, //intel_pmu_set_msr,
+	.refresh = intel_pmu_refresh,
+  .init = intel_pmu_init,
+	.reset = 0xcdead, // intel_pmu_reset,
+	.deliver_pmi = 0xddead, //intel_pmu_deliver_pmi,
+	.cleanup = 0xedead, // intel_pmu_cleanup,
 };
+
+struct kvm_x86_nested_ops tyche_nested_ops = {0};
 
 
 /*
@@ -67,12 +82,16 @@ static __init int hardware_setup(void) {
   //TODO this could be used to call tyche, init the capabilities etc.
   //The original function in vmx seems to be setting a lot of constants.
   //We need to go line by line and understand what they are doing there.
-  printk(KERN_NOTICE "In tyche hardware setup\n\n");
   return 0;
 }
 
 static __init int tyche_check_processor_compat(void) {
   //TODO let's see what this does.
+  return 0;
+}
+
+static int tyche_vm_init(struct kvm *kvm) {
+  trace_printk("Inside the tyche_vm_init\n");
   return 0;
 }
 
@@ -85,8 +104,9 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .hardware_disable = vmx_hardware_disable,
 	.has_emulated_msr = tyche_has_emulated_msr,
 
-	.vm_size = 666,//sizeof(struct kvm_tyche),
-	// .vm_init = vmx_vm_init,
+  //TODO aghosn this is the reason why it's broken.
+	.vm_size = sizeof(struct kvm_tyche),
+	.vm_init = tyche_vm_init,
 	// .vm_destroy = vmx_vm_destroy,
 
 	// .vcpu_precreate = vmx_vcpu_precreate,
@@ -186,7 +206,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .cpu_dirty_log_size = PML_ENTITY_NUM,
 	// .update_cpu_dirty_logging = vmx_update_cpu_dirty_logging,
 
-	// .nested_ops = &vmx_nested_ops,
+	.nested_ops = &tyche_nested_ops,
 
 	// .pi_update_irte = vmx_pi_update_irte,
 	// .pi_start_assignment = vmx_pi_start_assignment,
