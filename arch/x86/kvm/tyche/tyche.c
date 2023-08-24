@@ -61,6 +61,7 @@
 #include "pmu.h"
 #include "sgx.h"
 #include "trace.h"
+#include "tychecall.h"
 #include "vmcs.h"
 #include "vmcs12.h"
 #include "vmx.h"
@@ -2484,6 +2485,16 @@ static int vmx_hardware_enable(void)
 	int cpu = raw_smp_processor_id();
 	u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
 	int r;
+
+	struct file tyche_handle;
+
+	tyche_create_domain(&tyche_handle);
+
+	printk(KERN_ERR "calling tyche_set_traps\n");
+	tyche_set_traps(&tyche_handle, 123);
+
+	printk(KERN_ERR "calling tyche_set_cores\n");
+	tyche_set_cores(&tyche_handle, 456);
 
 	if (cr4_read_shadow() & X86_CR4_VMXE)
 		return -EBUSY;
