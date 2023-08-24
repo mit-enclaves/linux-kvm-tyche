@@ -32,3 +32,12 @@ static void __exit tyche_exit(void)
 
 module_init(tyche_init);
 module_exit(tyche_exit);
+
+// ———————————————————————— Exported symbol attempt ————————————————————————— //
+
+void tyche_debug_print(void)
+{
+  trace_printk("This is a print from tyche.\n");
+}
+
+EXPORT_SYMBOL(tyche_debug_print);
