@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Virtualization support drivers
+#
+
+config TYCHE_DRIVER
+	tristate "Tyche Isolation Monitor driver"
+	help
+	  Say Y here to enable the tyche isolation monitor non-root ring 0 dirver
+
