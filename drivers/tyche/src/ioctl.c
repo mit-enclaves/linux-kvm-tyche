@@ -69,6 +69,7 @@ int tyche_register(void)
 
   driver_init_domains();
   LOG("Tyche driver registered!\n");
+  trace_printk("Tyche driver initialized\n");
   return SUCCESS; 
 
 r_device:
@@ -106,7 +107,8 @@ failure:
 
 int tyche_close(struct inode* inode, struct file* handle)
 {
-   if (driver_delete_domain(handle) != SUCCESS) {
+  driver_domain_t * dom = find_domain(handle);
+   if (dom == NULL || driver_delete_domain(dom) != SUCCESS) {
         ERROR("Unable to delete the domain %p", handle);
         goto failure;
     }
@@ -123,9 +125,14 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_mprotect_t mprotect = {0, 0, 0, 0};
   msg_switch_t transition = {0};
   msg_set_perm_t perm = {0};
+  driver_domain_t *domain = find_domain(handle);
+  if (domain == NULL) {
+    ERROR("Unable to find the domain %p!\n", handle);
+    goto failure;
+  }
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
-      if (driver_get_physoffset_domain(handle, &info.physoffset) != SUCCESS) {
+      if (driver_get_physoffset_domain(domain, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for domain %p", handle);
         goto failure;
       }
@@ -138,7 +145,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       break;
     case TYCHE_COMMIT:
-      if (driver_commit_domain(handle) != SUCCESS) {
+      if (driver_commit_domain(domain) != SUCCESS) {
         ERROR("Commit failed for domain %p", handle);
         goto failure;
       }
@@ -151,7 +158,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_traps(handle, perm.value) != SUCCESS) {
+      if (driver_set_traps(domain, perm.value) != SUCCESS) {
         ERROR("Setting traps failed for domain %p", handle);
         goto failure;
       }
@@ -164,7 +171,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_cores(handle, perm.value) != SUCCESS) {
+      if (driver_set_cores(domain, perm.value) != SUCCESS) {
         ERROR("Setting cores failed for domain %p", handle);
         goto failure;
       }
@@ -177,7 +184,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_perm(handle, perm.value) != SUCCESS) {
+      if (driver_set_perm(domain, perm.value) != SUCCESS) {
         ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
@@ -190,7 +197,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_switch(handle, perm.value) != SUCCESS) {
+      if (driver_set_switch(domain, perm.value) != SUCCESS) {
         ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
@@ -204,7 +211,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       if (driver_set_entry_on_core(
-            handle,
+            domain,
             commit.core,
             commit.page_tables,
             commit.entry,
@@ -222,7 +229,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       if (driver_mprotect_domain(
-            handle,
+            domain,
             mprotect.start,
             mprotect.size,
             mprotect.flags,
@@ -239,7 +246,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (driver_switch_domain(handle, transition.args) != SUCCESS) {
+      if (driver_switch_domain(domain, transition.args) != SUCCESS) {
         ERROR("Unable to switch to domain %p", handle);
         goto failure;
       }
@@ -255,5 +262,10 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  return driver_mmap_segment(file, vma);
+  driver_domain_t *dom = find_domain(file);
+  if (dom == NULL) {
+    ERROR("Unable to find domain for handle %p", file);
+    return FAILURE;
+  }
+  return driver_mmap_segment(dom, vma);
 }
