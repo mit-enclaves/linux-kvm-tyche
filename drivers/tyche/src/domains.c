@@ -19,7 +19,7 @@ static dll_list(driver_domain_t, domains);
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //
 
-static driver_domain_t* find_domain(domain_handle_t handle)
+driver_domain_t* find_domain(domain_handle_t handle)
 {
   driver_domain_t* dom = NULL;
   dll_foreach((&domains), dom, list) {
@@ -53,7 +53,9 @@ void driver_init_domains(void)
 int driver_create_domain(domain_handle_t handle)
 {
   driver_domain_t* dom = NULL;
-  dom = find_domain(handle);
+  // This function can be called from the kvm backend as well.
+  // In such cases, the domain handle will be null.
+  dom = (handle != NULL)? find_domain(handle) : NULL;
   if (dom != NULL) {
     ERROR("The domain with handle %p already exists.", handle);
     goto failure;
@@ -90,11 +92,10 @@ failure:
 
 EXPORT_SYMBOL(driver_create_domain);
 
-int driver_mmap_segment(domain_handle_t handle, struct vm_area_struct *vma)
+int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
-  driver_domain_t* dom = NULL;
   if (vma == NULL) {
     ERROR("The provided vma is null.");
     goto failure;
@@ -108,7 +109,6 @@ int driver_mmap_segment(domain_handle_t handle, struct vm_area_struct *vma)
     ERROR("End or/and Start is/are not page-aligned.");
     goto failure;
   }
-  dom = find_domain(handle);
   if (dom == NULL) {
     ERROR("Unable to find the right domain.");
     goto failure;
@@ -149,20 +149,18 @@ failure:
   return FAILURE;
 }
 
-int driver_get_physoffset_domain(domain_handle_t handle, usize* phys_offset)
+int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
 {
-  driver_domain_t* dom = NULL;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
   }
-  dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("The handle %p does not correspond to a domain.", handle);
+    ERROR("The provided domain is NULL.");
     goto failure;
   }
   if (dom->virt_start == UNINIT_USIZE || dom->phys_start == UNINIT_USIZE) {
-    ERROR("The domain %p has not been initialized, call mmap first!", handle);
+    ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
   }
   *phys_offset = dom->phys_start;
@@ -172,17 +170,15 @@ failure:
 }
 
 int driver_mprotect_domain(
-    domain_handle_t handle,
+    driver_domain_t *dom,
     usize vstart,
     usize size,
     memory_access_right_t flags,
     segment_type_t tpe)
 {
-  driver_domain_t* dom = NULL;
   segment_t* segment = NULL; 
-  dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain.");
+    ERROR("The domain is null.");
     goto failure;
   } 
   if (dom->pid != current->pid) {
@@ -191,7 +187,7 @@ int driver_mprotect_domain(
     goto failure;
   }
   if (dom->virt_start == UNINIT_USIZE) {
-    ERROR("The domain %p doesn't have mmaped memory.", handle);
+    ERROR("The domain %p doesn't have mmaped memory.", dom);
     goto failure;
   }
   // Check the mprotect has the correct bounds.
@@ -227,17 +223,16 @@ int driver_mprotect_domain(
   dll_init_elem(segment, list);
   dll_add(&(dom->segments), segment, list);
   DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
-      handle, vstart, vstart + size);
+      domain, vstart, vstart + size);
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
-int driver_set_traps(domain_handle_t handle, usize traps)
+int driver_set_traps(driver_domain_t *dom, usize traps)
 {
-  driver_domain_t* dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain");
+    ERROR("The domain is null");
     goto failure;
   }
   dom->traps = traps;
@@ -248,11 +243,10 @@ failure:
 
 EXPORT_SYMBOL(driver_set_traps);
 
-int driver_set_cores(domain_handle_t handle, usize core_map)
+int driver_set_cores(driver_domain_t *dom, usize core_map)
 {
-  driver_domain_t* dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain");
+    ERROR("The domain is null");
     goto failure;
   }
   dom->cores = core_map;
@@ -272,11 +266,10 @@ failure:
 
 EXPORT_SYMBOL(driver_set_cores);
 
-int driver_set_perm(domain_handle_t handle, usize perm)
+int driver_set_perm(driver_domain_t *dom, usize perm)
 {
-  driver_domain_t* dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain");
+    ERROR("The domain is null.");
     goto failure;
   }
   dom->perm = perm;
@@ -285,11 +278,10 @@ failure:
   return FAILURE;
 }
 
-int driver_set_switch(domain_handle_t handle, usize sw)
+int driver_set_switch(driver_domain_t *dom, usize sw)
 {
-  driver_domain_t* dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain");
+    ERROR("The domain is null.");
     goto failure;
   }
   dom->switch_type = sw;
@@ -299,15 +291,14 @@ failure:
 }
 
 int driver_set_entry_on_core(
-    domain_handle_t handle,
+    driver_domain_t *dom,
     usize core,
     usize cr3,
     usize rip,
     usize rsp)
 {
-  driver_domain_t* dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain");
+    ERROR("The domain is null.");
     goto failure;
   }
   if ((dom->cores & (1 << core)) == 0) {
@@ -327,15 +318,13 @@ failure:
   return FAILURE;
 }
 
-int driver_commit_domain(domain_handle_t handle)
+int driver_commit_domain(driver_domain_t *dom)
 {
   usize vbase = 0;
   usize poffset = 0;
-  driver_domain_t* dom = NULL;
   segment_t* segment = NULL;
-  dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain.");
+    ERROR("The domain is null.");
     goto failure;
   } 
   if (dom->pid != current->pid) {
@@ -344,20 +333,20 @@ int driver_commit_domain(domain_handle_t handle)
     goto failure;
   }
   if (dom->virt_start == UNINIT_USIZE) {
-    ERROR("The domain %p doesn't have mmaped memory.", handle);
+    ERROR("The domain %p doesn't have mmaped memory.", dom);
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
-    ERROR("Missing segments for domain %p", handle);
+    ERROR("Missing segments for domain %p", dom);
     goto failure;
   }
   if ((dom->segments.tail->vstart + dom->segments.tail->size)
       != (dom->virt_start + dom->size)) {
-    ERROR("Some segments were not specified for the domain %p", handle);
+    ERROR("Some segments were not specified for the domain %p", dom);
     goto failure;
   }
   if (dom->domain_id != UNINIT_DOM_ID) {
-    ERROR("The domain %p is already committed.", handle);
+    ERROR("The domain %p is already committed.", dom);
     goto failure;
   }
 
@@ -368,7 +357,7 @@ int driver_commit_domain(domain_handle_t handle)
 
   // All checks are done, call into the capability library.
   if (create_domain(&(dom->domain_id)) != SUCCESS) {
-    ERROR("Monitor rejected the creation of a domain for domain %p", handle);
+    ERROR("Monitor rejected the creation of a domain for domain %p", dom);
     goto failure;
   }
 
@@ -451,7 +440,7 @@ int driver_commit_domain(domain_handle_t handle)
 
   // Commit the domain.
   if (seal_domain(dom->domain_id) != SUCCESS) {
-    ERROR("Unable to seal domain %p", handle);
+    ERROR("Unable to seal domain %p", dom);
     goto delete_fail;
   }
   
@@ -461,19 +450,17 @@ int driver_commit_domain(domain_handle_t handle)
 delete_fail:
   if (revoke_domain(dom->domain_id) != SUCCESS) {
     ERROR("Failed to revoke the domain %lld for domain %p.",
-        dom->domain_id, handle);
+        dom->domain_id, dom);
   }
   dom->domain_id = UNINIT_DOM_ID;
 failure:
   return FAILURE;
 }
 
-int driver_switch_domain(domain_handle_t handle, void* args)
+int driver_switch_domain(driver_domain_t * dom, void* args)
 {
-  driver_domain_t* dom = NULL;
-  dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("Unable to find the domain %p", handle);
+    ERROR("The domain is null.");
     goto failure;
   }
   DEBUG("About to try to switch to domain %lld| dom %lld",
@@ -487,13 +474,11 @@ failure:
   return FAILURE;
 }
 
-int driver_delete_domain(domain_handle_t handle)
+int driver_delete_domain(driver_domain_t *dom)
 {
-  driver_domain_t* dom = NULL;
   segment_t* segment = NULL;
-  dom = find_domain(handle);
   if (dom == NULL) {
-    ERROR("The domain %p does not exist.", handle);
+    ERROR("The domain is null.");
     goto failure;
   }
   if (dom->domain_id == UNINIT_DOM_ID) {
@@ -501,7 +486,7 @@ int driver_delete_domain(domain_handle_t handle)
   }
   if (revoke_domain(dom->domain_id) != SUCCESS) {
     ERROR("Unable to delete the domain %lld for domain %p",
-        dom->domain_id, handle);
+        dom->domain_id, dom);
     goto failure;
   }
 
