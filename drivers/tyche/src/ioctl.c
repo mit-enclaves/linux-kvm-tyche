@@ -96,7 +96,7 @@ int tyche_open(struct inode* inode, struct file* file)
     ERROR("We received a Null file descriptor.");
     goto failure;
   }
-  if (driver_create_domain(file) != SUCCESS) {
+  if (driver_create_domain(file, NULL) != SUCCESS) {
     ERROR("Unable to create a new domain");
     goto failure;
   }
