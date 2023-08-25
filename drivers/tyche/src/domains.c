@@ -50,7 +50,7 @@ void driver_init_domains(void)
 }
 
 
-int driver_create_domain(domain_handle_t handle)
+int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
 {
   driver_domain_t* dom = NULL;
   // This function can be called from the kvm backend as well.
@@ -85,6 +85,9 @@ int driver_create_domain(domain_handle_t handle)
   // Add the domain to the list.
   dll_add((&domains), dom, list);
   LOG("A new domain was added to the driver with id %p", handle);
+  if (ptr != NULL) {
+    *ptr = dom;
+  }
   return SUCCESS;
 failure:
   return FAILURE;
