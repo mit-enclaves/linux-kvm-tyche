@@ -239,6 +239,8 @@ static void *vmx_l1d_flush_pages;
 /* Control for disabling CPU Fill buffer clear */
 static bool __read_mostly vmx_fb_clear_ctrl_available;
 
+driver_domain_t domain;
+
 static int vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf)
 {
 	struct page *page;
@@ -2486,15 +2488,27 @@ static int vmx_hardware_enable(void)
 	u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
 	int r;
 
-	struct file tyche_handle;
-
-	tyche_create_domain(&tyche_handle);
+	driver_domain_t *d = &domain;
+	printk(KERN_ERR "calling tyche_create_domain\n");
+	tyche_create_domain(NULL, &d);
 
 	printk(KERN_ERR "calling tyche_set_traps\n");
-	tyche_set_traps(&tyche_handle, 123);
+	tyche_set_traps(d, (~(0)));
 
 	printk(KERN_ERR "calling tyche_set_cores\n");
-	tyche_set_cores(&tyche_handle, 456);
+	tyche_set_cores(d, 1);
+
+	printk(KERN_ERR "calling tyche_set_perms\n");
+	tyche_set_perm(d, 0);
+
+	printk(KERN_ERR "calling tyche_set_switch\n");
+	tyche_set_switch(d, TYCHE_SWITCH_NEW_VCPU);
+
+	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
+	tyche_set_entry_on_core(d, 0, 0x1, 0x2, 0x3);
+
+	printk(KERN_ERR "commit\n");
+	tyche_commit_domain(d);
 
 	if (cr4_read_shadow() & X86_CR4_VMXE)
 		return -EBUSY;

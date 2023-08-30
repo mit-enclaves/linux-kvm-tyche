@@ -152,6 +152,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_mmap_segment);
+
 int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
 {
   if (phys_offset == NULL) {
@@ -171,6 +173,8 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
 failure:
   return FAILURE;
 }
+
+EXPORT_SYMBOL(driver_get_physoffset_domain);
 
 int driver_mprotect_domain(
     driver_domain_t *dom,
@@ -232,6 +236,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_mprotect_domain);
+
 int driver_set_traps(driver_domain_t *dom, usize traps)
 {
   if (dom == NULL) {
@@ -281,6 +287,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_set_perm);
+
 int driver_set_switch(driver_domain_t *dom, usize sw)
 {
   if (dom == NULL) {
@@ -292,6 +300,8 @@ int driver_set_switch(driver_domain_t *dom, usize sw)
 failure: 
   return FAILURE;
 }
+
+EXPORT_SYMBOL(driver_set_switch);
 
 int driver_set_entry_on_core(
     driver_domain_t *dom,
@@ -321,6 +331,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_set_entry_on_core);
+
 int driver_commit_domain(driver_domain_t *dom)
 {
   usize vbase = 0;
@@ -335,19 +347,19 @@ int driver_commit_domain(driver_domain_t *dom)
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  if (dom->virt_start == UNINIT_USIZE) {
-    ERROR("The domain %p doesn't have mmaped memory.", dom);
-    goto failure;
-  }
-  if (dll_is_empty(&dom->segments)) {
-    ERROR("Missing segments for domain %p", dom);
-    goto failure;
-  }
-  if ((dom->segments.tail->vstart + dom->segments.tail->size)
-      != (dom->virt_start + dom->size)) {
-    ERROR("Some segments were not specified for the domain %p", dom);
-    goto failure;
-  }
+  // if (dom->virt_start == UNINIT_USIZE) {
+  //   ERROR("The domain %p doesn't have mmaped memory.", dom);
+  //   goto failure;
+  // }
+  // if (dll_is_empty(&dom->segments)) {
+  //   ERROR("Missing segments for domain %p", dom);
+  //   goto failure;
+  // }
+  // if ((dom->segments.tail->vstart + dom->segments.tail->size)
+  //     != (dom->virt_start + dom->size)) {
+  //   ERROR("Some segments were not specified for the domain %p", dom);
+  //   goto failure;
+  // }
   if (dom->domain_id != UNINIT_DOM_ID) {
     ERROR("The domain %p is already committed.", dom);
     goto failure;
@@ -460,6 +472,8 @@ failure:
   return FAILURE;
 }
 
+EXPORT_SYMBOL(driver_commit_domain);
+
 int driver_switch_domain(driver_domain_t * dom, void* args)
 {
   if (dom == NULL) {
@@ -476,6 +490,8 @@ int driver_switch_domain(driver_domain_t * dom, void* args)
 failure:
   return FAILURE;
 }
+
+EXPORT_SYMBOL(driver_switch_domain);
 
 int driver_delete_domain(driver_domain_t *dom)
 {
