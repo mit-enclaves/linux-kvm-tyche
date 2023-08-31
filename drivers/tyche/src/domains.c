@@ -69,6 +69,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
   dom->pid = current->pid;
   dom->handle = handle;
   dom->domain_id = UNINIT_DOM_ID;
+  dom->state = DOMAIN_NOT_COMMITED;
   dom->phys_start = UNINIT_USIZE;
   dom->virt_start = UNINIT_USIZE;
   dom->size = UNINIT_USIZE;
@@ -348,7 +349,7 @@ int driver_commit_domain(driver_domain_t *dom)
     ERROR("Some segments were not specified for the domain %p", dom);
     goto failure;
   }
-  if (dom->domain_id != UNINIT_DOM_ID) {
+  if (dom->domain_id != UNINIT_DOM_ID || dom->state != DOMAIN_NOT_COMMITED) {
     ERROR("The domain %p is already committed.", dom);
     goto failure;
   }
@@ -447,6 +448,9 @@ int driver_commit_domain(driver_domain_t *dom)
     goto delete_fail;
   }
   
+  // Mark the state of the domain as committed.
+  dom->state = DOMAIN_COMMITED;
+  
   DEBUG("Managed to seal domain %lld | dom %p", dom->domain_id, dom->handle);
   // We are all done!
   return SUCCESS;
@@ -484,7 +488,7 @@ int driver_delete_domain(driver_domain_t *dom)
     ERROR("The domain is null.");
     goto failure;
   }
-  if (dom->domain_id == UNINIT_DOM_ID) {
+  if (dom->domain_id == UNINIT_DOM_ID || dom->state != DOMAIN_COMMITED) {
     goto delete_dom_struct;
   }
   if (revoke_domain(dom->domain_id) != SUCCESS) {
@@ -511,3 +515,4 @@ delete_dom_struct:
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_delete_domain);

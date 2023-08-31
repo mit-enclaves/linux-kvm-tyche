@@ -48,6 +48,13 @@ typedef struct entries_t {
 	entry_t *entries;
 } entries_t;
 
+/// The state of the domain.
+typedef enum domain_state_t {
+	DOMAIN_NOT_COMMITED = 0,
+	DOMAIN_COMMITED = 1,
+	DOMAIN_DEAD = 2,
+} domain_state_t;
+
 /// Describes an domain.
 typedef struct driver_domain_t {
 	/// The creator task's pid.
@@ -58,6 +65,9 @@ typedef struct driver_domain_t {
 
 	/// The domain's domain id.
 	domain_id_t domain_id;
+
+	/// The domain's state.
+	domain_state_t state;
 
 	/// The start of the domain's physical contiguous memory region.
 	usize phys_start;

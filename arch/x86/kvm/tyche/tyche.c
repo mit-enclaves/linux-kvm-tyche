@@ -20,6 +20,11 @@ static void intel_pmu_refresh(struct kvm_vcpu *vcpu)
   trace_printk("TODO: Intel pmu refresh called.\n");
 }
 
+static void intel_pmu_reset(struct kvm_vcpu *vcpu)
+{
+  trace_printk("Intel PMU reset\n");
+}
+
 // ——————————————————————————— Global structures ———————————————————————————— //
 struct vmcs_config vmcs_config;
 
@@ -35,13 +40,20 @@ struct kvm_pmu_ops tyche_pmu_ops __initdata = {
 	.set_msr = 0x9dead, //intel_pmu_set_msr,
 	.refresh = intel_pmu_refresh,
   .init = intel_pmu_init,
-	.reset = 0xcdead, // intel_pmu_reset,
+	.reset = intel_pmu_reset, // intel_pmu_reset,
 	.deliver_pmi = 0xddead, //intel_pmu_deliver_pmi,
 	.cleanup = 0xedead, // intel_pmu_cleanup,
 };
 
+//TODO this might be the source of the difference in CPUID?
 struct kvm_x86_nested_ops tyche_nested_ops = {0};
 
+
+// ———————————————————————————— Helper functions ———————————————————————————— //
+static inline struct kvm_tyche *to_kvm_tyche(struct kvm *kvm)
+{
+	return container_of(kvm, struct kvm_tyche, kvm);
+}
 
 /*
  * The kvm parameter can be NULL (module initialization, or invocation before
@@ -59,7 +71,7 @@ static bool tyche_has_emulated_msr(struct kvm *kvm, u32 index)
 		 */
 		return false; //enable_unrestricted_guest || emulate_invalid_guest_state;
 	case MSR_IA32_VMX_BASIC ... MSR_IA32_VMX_VMFUNC:
-		return false; //nested;
+		return true; //nested;
 	case MSR_AMD64_VIRT_SPEC_CTRL:
 	case MSR_AMD64_TSC_RATIO:
 		/* This is AMD only.  */
@@ -84,6 +96,12 @@ static __init int hardware_setup(void) {
   //TODO this could be used to call tyche, init the capabilities etc.
   //The original function in vmx seems to be setting a lot of constants.
   //We need to go line by line and understand what they are doing there.
+
+
+  // Enable tyche mmu (which is basically no mmu).
+  kvm_enable_tyche_mmu();
+  //TODO figure that out.
+	kvm_configure_mmu(1, 0, 4, 0);
   return 0;
 }
 
@@ -92,11 +110,70 @@ static __init int tyche_check_processor_compat(void) {
   return 0;
 }
 
+/// Creates a domain vm.
 static int tyche_vm_init(struct kvm *kvm) {
-  trace_printk("Inside the tyche_vm_init\n");
+  struct kvm_tyche *tyche = to_kvm_tyche(kvm);
+  if (driver_create_domain(NULL, &(tyche->domain)) != SUCCESS) {
+    ERROR("Unable to create a new domain.");
+    return -1;
+  }
+  trace_printk("Successfully created a new domain %p\n", tyche->domain);
   return 0;
 }
 
+static void tyche_vm_destroy(struct kvm *kvm)
+{
+  struct kvm_tyche *tyche = to_kvm_tyche(kvm);
+  if (driver_delete_domain(tyche->domain) != SUCCESS) {
+    ERROR("Unable to delete the domain %p", tyche->domain);
+    return;
+  }
+  trace_printk("Deleted domain successfully.\n");
+}
+
+static int tyche_vcpu_precreate(struct kvm *kvm)
+{
+	//return vmx_alloc_ipiv_pid_table(kvm);
+  trace_printk("vcpu precreate\n");
+  return 0;
+}
+
+
+static int tyche_vcpu_create(struct kvm_vcpu *vcpu)
+{
+  trace_printk("In vcpu create %p\n", vcpu->arch.walk_mmu);
+  return 0;
+}
+
+static int tyche_vcpu_pre_run(struct kvm_vcpu *vcpu)
+{
+  struct kvm_tyche* tyche = to_kvm_tyche(vcpu->kvm);
+  if (tyche->domain == NULL) {
+    ERROR("The domain is null.");
+    return -1;
+  }
+  if (tyche->domain->state != DOMAIN_COMMITED) {
+    ERROR("Trying to run a domain that is not initialized!");
+    return -1;
+  }
+  trace_printk("The vcpu %p\n", vcpu->arch.walk_mmu);
+  return 0;
+}
+
+static void tyche_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
+{
+  trace_printk("Vcpu reset %p\n", vcpu->arch.walk_mmu);
+}
+
+// ———————————————————————————— Memory Functions ———————————————————————————— //
+
+
+
+static void tyche_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
+{
+  trace_printk("In the load mmup pgd: %p\n", vcpu->arch.walk_mmu); 
+}
+// ———————————————————————————————— x86 Ops ————————————————————————————————— //
 static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.name = "tyche_intel",
 
@@ -106,15 +183,14 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .hardware_disable = vmx_hardware_disable,
 	.has_emulated_msr = tyche_has_emulated_msr,
 
-  //TODO aghosn this is the reason why it's broken.
 	.vm_size = sizeof(struct kvm_tyche),
 	.vm_init = tyche_vm_init,
-	// .vm_destroy = vmx_vm_destroy,
+	.vm_destroy = tyche_vm_destroy,
 
-	// .vcpu_precreate = vmx_vcpu_precreate,
-	// .vcpu_create = vmx_vcpu_create,
+	.vcpu_precreate = tyche_vcpu_precreate,
+	.vcpu_create = tyche_vcpu_create,
 	// .vcpu_free = vmx_vcpu_free,
-	// .vcpu_reset = vmx_vcpu_reset,
+	.vcpu_reset = tyche_vcpu_reset,
 
 	// .prepare_switch_to_guest = vmx_prepare_switch_to_guest,
 	//.vcpu_load = tyche_vcpu_load,
@@ -149,7 +225,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .flush_tlb_gva = vmx_flush_tlb_gva,
 	// .flush_tlb_guest = vmx_flush_tlb_guest,
 
-	// .vcpu_pre_run = vmx_vcpu_pre_run,
+	.vcpu_pre_run = tyche_vcpu_pre_run,
 	// .vcpu_run = vmx_vcpu_run,
 	// .handle_exit = vmx_handle_exit,
 	// .skip_emulated_instruction = vmx_skip_emulated_instruction,
@@ -196,7 +272,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	// .write_tsc_offset = vmx_write_tsc_offset,
 	// .write_tsc_multiplier = vmx_write_tsc_multiplier,
 
-	// .load_mmu_pgd = vmx_load_mmu_pgd,
+	.load_mmu_pgd = tyche_load_mmu_pgd,
 
 	// .check_intercept = vmx_check_intercept,
 	// .handle_exit_irqoff = vmx_handle_exit_irqoff,
