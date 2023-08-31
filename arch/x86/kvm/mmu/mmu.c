@@ -107,6 +107,11 @@ static bool __ro_after_init tdp_mmu_allowed;
 bool __read_mostly tdp_mmu_enabled = true;
 module_param_named(tdp_mmu, tdp_mmu_enabled, bool, 0444);
 #endif
+/*
+ * @Tyche when setting this variable, tyche is responsible for the setup
+ * of second-level page tables and the mmu is mostly entirely ignored.
+ */
+bool tyche_enabled = false;
 
 static int max_huge_page_level __read_mostly;
 static int tdp_root_level __read_mostly;
@@ -4320,6 +4325,11 @@ static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 {
 	int r;
 
+	fault->gfn = fault->addr >> PAGE_SHIFT;
+	fault->slot = kvm_vcpu_gfn_to_memslot(vcpu, fault->gfn);
+  /*trace_printk("The fault addr %llx | %llx | %d | %d\n",
+      fault->addr, fault->gfn, fault->slot->id, fault->slot->as_id);*/
+
 	if (page_fault_handle_page_track(vcpu, fault))
 		return RET_PF_EMULATE;
 
@@ -5144,6 +5154,17 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
 	return role;
 }
 
+
+/*
+ * @Tyche must implement.
+ * We might need to reconfigure this thing.
+ */
+static void init_kvm_tyche_mmu(struct kvm_vcpu *vcpu, union kvm_cpu_role cpu_role)
+{
+  //TODO(aghosn)
+  return;
+}
+
 static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu,
 			     union kvm_cpu_role cpu_role)
 {
@@ -5360,6 +5381,8 @@ void kvm_init_mmu(struct kvm_vcpu *vcpu)
 
 	if (mmu_is_nested(vcpu))
 		init_kvm_nested_mmu(vcpu, cpu_role);
+  else if (tyche_enabled)
+    init_kvm_tyche_mmu(vcpu, cpu_role);
 	else if (tdp_enabled)
 		init_kvm_tdp_mmu(vcpu, cpu_role);
 	else
@@ -5785,6 +5808,19 @@ void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 	 * for them.
 	 */
 }
+
+/*
+ * Turn on tyche mmu.
+ */
+void kvm_enable_tyche_mmu(void)
+{
+  if (tdp_enabled) {
+    printk(KERN_ERR "tdp was enabled before tyche.\n");
+    return;
+  }
+  tyche_enabled = true;
+}
+EXPORT_SYMBOL_GPL(kvm_enable_tyche_mmu);
 
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 		       int tdp_max_root_level, int tdp_huge_page_level)

@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0
 
 ccflags-y += -I $(srctree)/arch/x86/kvm
+ccflags-y += -I $(srctree)/drivers/tyche/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/pts/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
 ccflags-$(CONFIG_KVM_WERROR) += -Werror
 
 ifeq ($(CONFIG_FRAME_POINTER),y)
