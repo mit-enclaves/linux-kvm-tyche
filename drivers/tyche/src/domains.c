@@ -70,9 +70,6 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
   dom->handle = handle;
   dom->domain_id = UNINIT_DOM_ID;
   dom->state = DOMAIN_NOT_COMMITED;
-  dom->phys_start = UNINIT_USIZE;
-  dom->virt_start = UNINIT_USIZE;
-  dom->size = UNINIT_USIZE;
   // Init bitmaps. 
   dom->perm = 0;
   dom->cores = 0;
@@ -80,6 +77,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
   // Setup the entries.
   dom->entries.size = 0;
   dom->entries.entries = NULL;
+  dll_init_list(&(dom->raw_segments));
   dll_init_list(&(dom->segments));
   dll_init_elem(dom, list);
 
@@ -100,8 +98,8 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
-  if (vma == NULL) {
-    ERROR("The provided vma is null.");
+  if (vma == NULL || dom->handle == NULL) {
+    ERROR("The provided vma is null or handle is null.");
     goto failure;
   }
   // Checks on the vma.
@@ -117,7 +115,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     ERROR("Unable to find the right domain.");
     goto failure;
   }
-  if (dom->virt_start != UNINIT_USIZE || dom->phys_start != UNINIT_USIZE) {
+  if (!dll_is_empty(&(dom->raw_segments)) || !dll_is_empty(&(dom->segments))) {
     ERROR("The domain has already been initialized.");
     goto failure;
   }
@@ -142,13 +140,43 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     goto fail_free_pages;
   }
 
-  // Set the values inside the domain structure.
-  dom->phys_start = (usize) virt_to_phys(allocation);
-  dom->virt_start = (usize) vma->vm_start;
-  dom->size = size;
+  if (driver_add_raw_segment(
+        dom, (usize) vma->vm_start, 
+        (usize) virt_to_phys(allocation), size) != SUCCESS) {
+    ERROR("Unable to allocate a segment");
+    goto fail_free_pages;
+  }
   return SUCCESS;
 fail_free_pages:
   free_pages_exact(allocation, size);
+failure:
+  return FAILURE;
+}
+
+int driver_add_raw_segment(
+    driver_domain_t *dom,
+    usize va,
+    usize pa,
+    usize size)
+{
+  segment_t *segment = NULL;
+  if (dom == NULL) {
+    ERROR("Provided domain is null.");
+    goto failure;
+  }
+
+  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
+  if (segment == NULL) {
+    ERROR("Unable to allocate a segment");
+    goto failure;
+  }
+  memset(segment, 0, sizeof(segment_t));
+  segment->va = va;
+  segment->pa = pa;
+  segment->size = size;
+  dll_init_elem(segment, list);
+  dll_add(&(dom->raw_segments), segment, list);
+  return SUCCESS;
 failure:
   return FAILURE;
 }
@@ -163,11 +191,15 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
     ERROR("The provided domain is NULL.");
     goto failure;
   }
-  if (dom->virt_start == UNINIT_USIZE || dom->phys_start == UNINIT_USIZE) {
+  if (dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
   }
-  *phys_offset = dom->phys_start;
+  if (dom->raw_segments.head->list.next != NULL) {
+    ERROR("An mmap-based domain should not have more than one raw segment.\n");
+    goto failure;
+  }
+  *phys_offset = dll_head(&(dom->raw_segments))->pa;
   return SUCCESS;
 failure:
   return FAILURE;
@@ -180,52 +212,69 @@ int driver_mprotect_domain(
     memory_access_right_t flags,
     segment_type_t tpe)
 {
-  segment_t* segment = NULL; 
+  segment_t* head = NULL, *segment = NULL; 
+
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
   } 
+
   if (dom->pid != current->pid) {
     ERROR("Wrong pid for domain");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  if (dom->virt_start == UNINIT_USIZE) {
+  /// The logic here is as follows:
+  /// 1. We can only mprotect the top address of raw segments.
+  /// 2. When we do so, we carve out the memory segment and add it to segments.
+  /// 3. We adapt the raw segment to point to the next raw address if any.
+  if (dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p doesn't have mmaped memory.", dom);
     goto failure;
   }
+
+  // Check the properties on the segment.
+  head = dll_head(&(dom->raw_segments));
+
   // Check the mprotect has the correct bounds.
-  if (dll_is_empty(&(dom->segments)) && vstart != dom->virt_start) {
+  if (head->va != vstart) {
     ERROR("Out of order specification of segment: wrong start");
-    ERROR("Expected: %llx, got: %llx", dom->virt_start, vstart);
+    ERROR("Expected: %llx, got: %llx", head->va, vstart);
     goto failure;
   }
-  if (!dll_is_empty(&(dom->segments)) 
-      && (dom->segments.tail->vstart + dom->segments.tail->size) != vstart) {
-    ERROR("Out of order specification of segment: non-contiguous.");
-    ERROR("Expected %llx, got: %llx",
-        (dom->segments.tail->vstart + dom->segments.tail->size), vstart);
+
+  if (head->va + head->size < vstart + size) {
+    ERROR("The specified segment is not contained in the raw one.");
+    ERROR("Raw: start(%llx) size(%llx)", head->va, head->size);
+    ERROR("Prot: start(%llx) size(%llx)", vstart, size);
     goto failure;
   }
-  if(vstart + size > dom->virt_start + dom->size) {
-    ERROR("Mapping overflows the registered memory region.");
-    ERROR("Max valid address: %llx, got: %llx", dom->virt_start + dom->size,
-        vstart + size);
-    goto failure;
-  }
-  
+
   // Add the segment.
   segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
   if (segment == NULL) {
     ERROR("Unable to allocate new segment");
   }
+
   memset(segment, 0, sizeof(segment_t));
-  segment->vstart = vstart;
+  segment->va = vstart;
+  segment->pa = head->pa;
   segment->size = size;
   segment->flags = flags;
   segment->tpe = tpe;
   dll_init_elem(segment, list);
   dll_add(&(dom->segments), segment, list);
+
+  // Adjust the head.
+  // Easy case, we just remove the head.
+  if (segment->size == head->size) {
+    dll_remove(&(dom->raw_segments), head, list);
+    kfree(head);
+  } else {
+    head->va += size;
+    head->pa += size;
+    head->size -= size;
+  } 
   DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
       domain, vstart, vstart + size);
   return SUCCESS;
@@ -324,8 +373,6 @@ failure:
 
 int driver_commit_domain(driver_domain_t *dom)
 {
-  usize vbase = 0;
-  usize poffset = 0;
   segment_t* segment = NULL;
   if (dom == NULL) {
     ERROR("The domain is null.");
@@ -336,19 +383,15 @@ int driver_commit_domain(driver_domain_t *dom)
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  if (dom->virt_start == UNINIT_USIZE) {
-    ERROR("The domain %p doesn't have mmaped memory.", dom);
+  if (!dll_is_empty(&(dom->raw_segments))) {
+    ERROR("The domain %p's memory is not correctly initialized.", dom);
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
     ERROR("Missing segments for domain %p", dom);
     goto failure;
   }
-  if ((dom->segments.tail->vstart + dom->segments.tail->size)
-      != (dom->virt_start + dom->size)) {
-    ERROR("Some segments were not specified for the domain %p", dom);
-    goto failure;
-  }
+
   if (dom->domain_id != UNINIT_DOM_ID || dom->state != DOMAIN_NOT_COMMITED) {
     ERROR("The domain %p is already committed.", dom);
     goto failure;
@@ -366,18 +409,15 @@ int driver_commit_domain(driver_domain_t *dom)
   }
 
   // Add the segments.
-  vbase = dom->virt_start;
-  poffset = dom->phys_start;
   dll_foreach(&(dom->segments), segment, list) {
-    usize paddr = segment->vstart - vbase + poffset; 
     switch(segment->tpe) {
       case SHARED:
         if (share_region(
               dom->domain_id, 
-              paddr,
-              paddr + segment->size,
+              segment->pa,
+              segment->pa + segment->size,
               segment->flags) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->vstart,
+          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto delete_fail;
         }
@@ -385,10 +425,10 @@ int driver_commit_domain(driver_domain_t *dom)
       case CONFIDENTIAL:
         if (grant_region(
               dom->domain_id,
-              paddr,
-              paddr + segment->size,
+              segment->pa,
+              segment->pa + segment->size,
               segment->flags) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->vstart,
+          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto delete_fail;
         }
@@ -398,7 +438,7 @@ int driver_commit_domain(driver_domain_t *dom)
         goto delete_fail;
     }
     DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
-        paddr, paddr + segment->size, segment->tpe);
+        segment->pa, segment->pa + segment->size, segment->tpe);
   }
 
   // Set the cores and traps.
@@ -484,6 +524,8 @@ failure:
 int driver_delete_domain(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
+  usize phys_start = 0;
+  usize size = 0;
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
@@ -500,14 +542,21 @@ int driver_delete_domain(driver_domain_t *dom)
 delete_dom_struct:
   // Delete all segments;
   while(!dll_is_empty(&(dom->segments))) {
-    segment = dom->segments.head;
+    segment = dll_head(&(dom->segments));
+    if (phys_start == 0) {
+      phys_start = segment->pa;
+    }
+    size += segment->size;
     dll_remove(&(dom->segments), segment, list);
     kfree(segment);
     segment = NULL;
   }
 
   // Delete the domain memory region.
-  free_pages_exact(phys_to_virt((phys_addr_t)(dom->phys_start)), dom->size);
+  // If the memory was allocated with mmap, we need to free the pages.
+  if (dom->handle != NULL) {
+    free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
+  }
   dll_remove(&domains, dom, list);
   kfree(dom->entries.entries);
   kfree(dom);

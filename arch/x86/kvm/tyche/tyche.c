@@ -133,30 +133,57 @@ static void tyche_vm_destroy(struct kvm *kvm)
 
 static int tyche_vcpu_precreate(struct kvm *kvm)
 {
+  //TODO some of the ipi must be initialized here I guess.
+  //Need to look into it.
 	//return vmx_alloc_ipiv_pid_table(kvm);
-  trace_printk("vcpu precreate\n");
+  trace_printk("In vcpu pre create %d.\n", kvm->created_vcpus);
   return 0;
 }
 
 
 static int tyche_vcpu_create(struct kvm_vcpu *vcpu)
 {
-  trace_printk("In vcpu create %p\n", vcpu->arch.walk_mmu);
+  trace_printk("In vcpu create %p, %d\n", vcpu->arch.walk_mmu, vcpu->kvm->created_vcpus);
+  //TODO: kvm will keep track of all the vcpus for us.
+  //What we can do here, is keep the state of the vcpu inside a tyche_vcpu.
+  //Then, when we reach the first run, we check if the domain has been sealed.
+  //If not, we know that we have to initialize everything.
+  //For each vcpu (except the first one), we will duplicate the transition
+  //capability (and thus have a separate context).
   return 0;
 }
 
 static int tyche_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
+  struct kvm_memslots *slots =  NULL;
+  struct kvm_memory_slot *slot = NULL;
   struct kvm_tyche* tyche = to_kvm_tyche(vcpu->kvm);
+  struct kvm* kvm = vcpu->kvm;
+  int i = 0, bkt = 0;
   if (tyche->domain == NULL) {
     ERROR("The domain is null.");
     return -1;
   }
-  if (tyche->domain->state != DOMAIN_COMMITED) {
-    ERROR("Trying to run a domain that is not initialized!");
-    return -1;
+  // TODO: here we can finalize the initialization.
+  // We need to go through the entire domain configuration and do the proper
+  // initialization of the memory segments and cpu configuration.
+  if (tyche->domain->state == DOMAIN_COMMITED) {
+    // The domain is already inited.
+    return 0;
   }
-  trace_printk("The vcpu %p\n", vcpu->arch.walk_mmu);
+  trace_printk("The vcpu %p, %d\n", vcpu->arch.walk_mmu, vcpu->kvm->created_vcpus);
+  
+  // Try to go through all the memory regions.
+  // For each valid one, we register the corresponding region with tyche.
+  mutex_lock(&kvm->slots_arch_lock);
+  for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+    slots = __kvm_memslots(kvm, i);
+    kvm_for_each_memslot(slot, bkt, slots) {
+      trace_printk("gnf: %llx, uaddr: %lx, size: %ld, slot %d\n",
+          slot->base_gfn, slot->userspace_addr, slot->npages, slot->id); 
+    }
+  }
+  mutex_unlock(&kvm->slots_arch_lock);
   return 0;
 }
 
