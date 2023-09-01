@@ -18,7 +18,10 @@
 /// Describes an domain's memory segment in user process address space.
 typedef struct segment_t {
 	/// Start of the virtual memory segment.
-	usize vstart;
+	usize va;
+
+	/// Corresponding start of the physical segment.
+	usize pa;
 
 	/// Size of the memory segment.
 	usize size;
@@ -69,15 +72,6 @@ typedef struct driver_domain_t {
 	/// The domain's state.
 	domain_state_t state;
 
-	/// The start of the domain's physical contiguous memory region.
-	usize phys_start;
-
-	/// The start of the domain's virtual memory region in the untrusted process.
-	usize virt_start;
-
-	/// The size of the domain's contiguous memory region.
-	usize size;
-
 	/// The domain's traps.
 	usize traps;
 
@@ -93,7 +87,13 @@ typedef struct driver_domain_t {
 	/// The domain's entry points per core.
 	entries_t entries;
 
-	/// The segments for the domain.
+	/// The available raw memory segments.
+	/// This is typically allocated during the mmap (from userspace),
+	/// or taken from KVM (kvm_memory_regions).
+	dll_list(segment_t, raw_segments);
+
+	/// The initialized segments for the domain.
+	/// The access rights have been set.
 	dll_list(segment_t, segments);
 
 	/// Domains are stored in a global list by the driver.
@@ -117,6 +117,9 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr);
 /// Handles an mmap call to the driver.
 /// This reserves a contiguous region and registers it until a domain claims it.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
+/// Add a raw memory segment to the domain.
+int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
+			   usize size);
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
 int driver_get_physoffset_domain(driver_domain_t *domain, usize *phys_offset);
