@@ -9,6 +9,9 @@
 #include "hyperv.h"
 #include "vmcs.h"
 #include "../x86.h"
+#include "tychecall.h"
+
+extern driver_domain_t* dom;
 
 void vmread_error(unsigned long field, bool fault);
 void vmwrite_error(unsigned long field, unsigned long value);

@@ -239,7 +239,8 @@ static void *vmx_l1d_flush_pages;
 /* Control for disabling CPU Fill buffer clear */
 static bool __read_mostly vmx_fb_clear_ctrl_available;
 
-driver_domain_t domain;
+static driver_domain_t domain;
+driver_domain_t *dom = &domain;
 
 static int vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf)
 {
@@ -2462,6 +2463,39 @@ static __init int vmx_disabled_by_bios(void)
 	       !boot_cpu_has(X86_FEATURE_VMX);
 }
 
+// As the tyche domain already has vmx enabled, we can skip the vmxon
+// instruction on the kvm-tyche backend
+static int tyche_hardware_enable(void)
+{
+	// Skip checking CR4 VMXE
+
+	printk(KERN_ERR "calling tyche_create_domain\n");
+	tyche_create_domain(NULL, &dom);
+
+	printk(KERN_ERR "calling tyche_set_traps\n");
+	tyche_set_traps(dom, (~(0)));
+
+	printk(KERN_ERR "calling tyche_set_cores\n");
+	tyche_set_cores(dom, 1);
+
+	printk(KERN_ERR "calling tyche_set_perms\n");
+	tyche_set_perm(dom, 0);
+
+	printk(KERN_ERR "calling tyche_set_switch\n");
+	tyche_set_switch(dom, TYCHE_SWITCH_NEW_VCPU);
+#if 0
+	// TODO: happens later
+	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
+	tyche_set_entry_on_core(dom, 0, 0x1, 0x2, 0x3);
+
+	// commit before we run
+	printk(KERN_ERR "commit\n");
+	tyche_commit_domain(dom);
+#endif
+
+	return 0;
+}
+
 static int kvm_cpu_vmxon(u64 vmxon_pointer)
 {
 	u64 msr;
@@ -2487,28 +2521,6 @@ static int vmx_hardware_enable(void)
 	int cpu = raw_smp_processor_id();
 	u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
 	int r;
-
-	driver_domain_t *d = &domain;
-	printk(KERN_ERR "calling tyche_create_domain\n");
-	tyche_create_domain(NULL, &d);
-
-	printk(KERN_ERR "calling tyche_set_traps\n");
-	tyche_set_traps(d, (~(0)));
-
-	printk(KERN_ERR "calling tyche_set_cores\n");
-	tyche_set_cores(d, 1);
-
-	printk(KERN_ERR "calling tyche_set_perms\n");
-	tyche_set_perm(d, 0);
-
-	printk(KERN_ERR "calling tyche_set_switch\n");
-	tyche_set_switch(d, TYCHE_SWITCH_NEW_VCPU);
-
-	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
-	tyche_set_entry_on_core(d, 0, 0x1, 0x2, 0x3);
-
-	printk(KERN_ERR "commit\n");
-	tyche_commit_domain(d);
 
 	if (cr4_read_shadow() & X86_CR4_VMXE)
 		return -EBUSY;
@@ -8101,7 +8113,7 @@ static struct kvm_x86_ops vmx_x86_ops __initdata = {
 
 	.hardware_unsetup = vmx_hardware_unsetup,
 
-	.hardware_enable = vmx_hardware_enable,
+	.hardware_enable = tyche_hardware_enable,
 	.hardware_disable = vmx_hardware_disable,
 	.has_emulated_msr = vmx_has_emulated_msr,
 
