@@ -253,6 +253,22 @@ failure:
   return FAILURE;
 }
 
+int set_domain_vmcs_field(domain_id_t id, usize idx, usize value)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_vmcs_field(child->management->local_id, idx, value) != SUCCESS) {
+    ERROR("Unable to set vmcs field with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
   capability_t *transition = NULL;

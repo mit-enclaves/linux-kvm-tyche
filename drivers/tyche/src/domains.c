@@ -7,6 +7,7 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
+#include <asm/vmx.h>
 
 #include "common.h"
 #include "domains.h"
@@ -432,6 +433,13 @@ int driver_commit_domain(driver_domain_t *dom)
     goto delete_fail;
   }
 
+  for (int i = 0; i < 20; ++i) {
+    if (set_domain_vmcs_field(dom->domain_id, i, dom->vmcs_fields[i]) != SUCCESS) {
+      ERROR("Unable to set the domain's vmcs field idx=%u, value=%llu", i, dom->vmcs_fields[i]);
+      goto delete_fail;
+    }
+  }
+
   // Set the entries for all the cores of the domain.
   do {
     usize value = dom->cores, counter = 0;
@@ -527,3 +535,100 @@ delete_dom_struct:
 failure:
   return FAILURE;
 }
+
+EXPORT_SYMBOL(driver_delete_domain);
+
+int set_vmcs_field(driver_domain_t *dom, usize field, usize value)
+{
+  uint32_t idx = -1;
+  switch (field) {
+	  case GUEST_CR0:
+		  idx = 0;
+		  break;
+	  case GUEST_CR3:
+		  idx = 1;
+		  break;
+	  case GUEST_CR4:
+		  idx = 2;
+		  break;
+	  case GUEST_RIP:
+		  idx = 3;
+		  break;
+	  case GUEST_RSP:
+		  idx = 4;
+		  break;
+	  case GUEST_IA32_EFER:
+		  idx = 5;
+		  break;
+	  case GUEST_IA32_PAT:
+		  idx = 6;
+		  break;
+	  case EPT_POINTER:
+		  idx = 7;
+		  break;
+	  case MSR_BITMAP:
+		  idx = 8;
+		  break;
+	  case GUEST_DR7:
+		  idx = 9;
+		  break;
+	  case POSTED_INTR_DESC_ADDR:
+		  idx = 10;
+		  break;
+	  case POSTED_INTR_NV:
+		  idx = 11;
+		  break;
+	  case VMREAD_BITMAP:
+		  idx = 12;
+		  break;
+	  case VMWRITE_BITMAP:
+		  idx = 13;
+		  break;
+	  case VIRTUAL_PROCESSOR_ID:
+		  idx = 14;
+		  break;
+	  case APIC_ACCESS_ADDR:
+		  idx = 15;
+		  break;
+	  case VIRTUAL_APIC_PAGE_ADDR:
+		  idx = 16;
+		  break;
+	  case GUEST_INTERRUPTIBILITY_INFO:
+		  idx = 17;
+		  break;
+	  case EXCEPTION_BITMAP:
+		  idx = 18;
+		  break;
+	  case TSC_OFFSET:
+		  idx = 19;
+		  break;
+  }
+  if (idx >= 0 && idx < 20) {
+	ERROR("Setting VMCS[%u] field 0x%04x to value 0x%04x", idx, field, value);
+	dom->vmcs_fields[idx] = value;
+  }
+  if (idx < 0) {
+	ERROR("Ignore set vmcs field 0x%04x field with value 0x%04x on domain %lld", field, value, dom->domain_id);
+	return SUCCESS;
+  }
+  return SUCCESS;
+}
+
+// We want tyche to commit and seal in one call, so instead of doing a hypercall everytime,
+// we need to change write the field/value onto an array instead and commit at once for all
+int driver_set_vmcs_field(driver_domain_t *dom, usize field, usize value)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (set_vmcs_field(dom, field, value) != SUCCESS) {
+    ERROR("Failed to set vmcs field %llu to value %llu on domain %lld",
+        field, value, dom->domain_id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_set_vmcs_field);

@@ -10,6 +10,7 @@ ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/pts/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
+ccflags-y += -I $(srctree)/arch/x86/include/
 
 obj-y += $(TARGET_MODULE).o
 $(TARGET_MODULE)-objs += src/driver.o src/ioctl.o src/domains.o src/capabilities.o

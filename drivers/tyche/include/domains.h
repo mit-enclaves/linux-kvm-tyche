@@ -83,6 +83,9 @@ typedef struct driver_domain_t {
 	/// The domain's entry points per core.
 	entries_t entries;
 
+	/// The domain's initial binary-critical vmcs value
+	usize vmcs_fields[20];
+
 	/// The segments for the domain.
 	dll_list(segment_t, segments);
 

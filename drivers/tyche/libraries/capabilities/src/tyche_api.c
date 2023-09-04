@@ -296,6 +296,23 @@ failure:
   return FAILURE;
 }
 
+int tyche_set_vmcs_field(capa_index_t management, usize idx, usize value)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SET_VMCS,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = idx,
+    .arg_4 = value,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tyche_switch(capa_index_t* transition_handle, void* args)
 {
   usize result = FAILURE;
