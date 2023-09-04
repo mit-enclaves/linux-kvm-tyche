@@ -2483,15 +2483,6 @@ static int tyche_hardware_enable(void)
 
 	printk(KERN_ERR "calling tyche_set_switch\n");
 	tyche_set_switch(dom, TYCHE_SWITCH_NEW_VCPU);
-#if 0
-	// TODO: happens later
-	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
-	tyche_set_entry_on_core(dom, 0, 0x1, 0x2, 0x3);
-
-	// commit before we run
-	printk(KERN_ERR "commit\n");
-	tyche_commit_domain(dom);
-#endif
 
 	return 0;
 }
@@ -5819,8 +5810,17 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+// Commit the tyche trust domain before we run the vcpu
 static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
+	// FIXME
+	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
+	tyche_set_entry_on_core(dom, 0, 0x1, 0x2, 0x3);
+
+	// Commit the domain before we run
+	printk(KERN_ERR "commit\n");
+	tyche_commit_domain(dom);
+
 	if (vmx_emulation_required_with_pending_exception(vcpu)) {
 		kvm_prepare_emulation_failure_exit(vcpu);
 		return 0;
