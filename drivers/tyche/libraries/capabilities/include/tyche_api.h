@@ -1,6 +1,8 @@
 #ifndef __INCLUDE_TYCHE_API_H__
 #define __INCLUDE_TYCHE_API_H__
 
+#include <linux/kvm_types.h>
+
 #include "tyche_capabilities_types.h"
 
 /// Copied from the tyche source code
@@ -18,6 +20,13 @@ typedef enum tyche_monitor_call_t {
   TYCHE_CONFIGURE = 12,
   TYCHE_SET_ENTRY_ON_CORE = 13,
   TYCHE_SET_VMCS = 14,
+  TYCHE_VMREAD = 15,
+  TYCHE_VMWRITE = 16,
+  TYCHE_VMCLEAR = 17,
+  TYCHE_VMPTRLD = 18,
+  TYCHE_INVVPID = 19,
+  TYCHE_INVEPT = 20,
+  TYCHE_VMLAUNCH = 21,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -101,5 +110,19 @@ int tyche_switch(capa_index_t* transition_handle, void* args);
 int tyche_duplicate(capa_index_t* new_capa, capa_index_t capa);
 
 int tyche_set_vmcs_field(capa_index_t management, usize idx, usize value);
+
+int tyche_vmread_field(capa_index_t* management, usize field, usize* value);
+
+int tyche_vmwrite_field(capa_index_t* management, usize field, usize value);
+
+int tyche_vmclear(capa_index_t *management, usize addr);
+
+int tyche_vmptrld(capa_index_t *management, usize addr);
+
+int tyche_invvpid(capa_index_t *management, unsigned long ext, u16 vpid, gva_t gva);
+
+int tyche_invept(capa_index_t *management, unsigned long ext, u64 eptp, gpa_t gpa);
+
+int tyche_vmlaunch(capa_index_t *management);
 
 #endif

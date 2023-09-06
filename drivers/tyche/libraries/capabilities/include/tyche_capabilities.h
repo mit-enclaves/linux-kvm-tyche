@@ -1,6 +1,8 @@
 #ifndef __INCLUDE_TYCHE_CAPABILITIES_H__
 #define __INCLUDE_TYCHE_CAPABILITIES_H__
 
+#include <linux/kvm_types.h>
+
 #include "ecs.h"
 #include "tyche_capabilities_types.h"
 
@@ -75,5 +77,19 @@ int set_domain_switch(domain_id_t id, usize swtype);
 int set_domain_entry_on_core(domain_id_t id, usize core, usize cr3, usize rip, usize rsp);
 
 int set_domain_vmcs_field(domain_id_t id, usize idx, usize value);
+
+int vmread_field(domain_id_t id, usize field, usize* value);
+
+int vmwrite_field(domain_id_t id, usize field, usize value);
+
+int vmclear_domain(domain_id_t id, usize addr);
+
+int vmptrld_domain(domain_id_t id, usize addr);
+
+int invvpid_domain(domain_id_t id, unsigned long ext, u16 vpid, gva_t gva);
+
+int invept_domain(domain_id_t id, unsigned long ext, u64 eptp, gpa_t gpa);
+
+int vmlaunch_domain(domain_id_t id);
 
 #endif

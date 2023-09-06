@@ -2484,6 +2484,14 @@ static int tyche_hardware_enable(void)
 	printk(KERN_ERR "calling tyche_set_switch\n");
 	tyche_set_switch(dom, TYCHE_SWITCH_NEW_VCPU);
 
+	// FIXME
+	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
+	tyche_set_entry_on_core(dom, 0, 0x1, 0x2, 0x3);
+
+	// Commit the domain before we run
+	printk(KERN_ERR "commit\n");
+	tyche_commit_domain(dom);
+
 	return 0;
 }
 
@@ -2512,6 +2520,8 @@ static int vmx_hardware_enable(void)
 	int cpu = raw_smp_processor_id();
 	u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
 	int r;
+
+	tyche_hardware_enable();
 
 	if (cr4_read_shadow() & X86_CR4_VMXE)
 		return -EBUSY;
@@ -4239,6 +4249,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 
 	cr0 = read_cr0();
 	WARN_ON(cr0 & X86_CR0_TS);
+	cr0 = 0x80010033;
 	vmcs_writel(HOST_CR0, cr0);  /* 22.2.3 */
 
 	/*
@@ -4251,6 +4262,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 
 	/* Save the most likely value for this task's CR4 in the VMCS. */
 	cr4 = cr4_read_shadow();
+	cr4 = 0x42668;
 	vmcs_writel(HOST_CR4, cr4);			/* 22.2.3, 22.2.5 */
 	vmx->loaded_vmcs->host_state.cr4 = cr4;
 
@@ -5813,14 +5825,6 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 // Commit the tyche trust domain before we run the vcpu
 static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
-	// FIXME
-	printk(KERN_ERR "calling tyche_set_entry_on_core\n");
-	tyche_set_entry_on_core(dom, 0, 0x1, 0x2, 0x3);
-
-	// Commit the domain before we run
-	printk(KERN_ERR "commit\n");
-	tyche_commit_domain(dom);
-
 	if (vmx_emulation_required_with_pending_exception(vcpu)) {
 		kvm_prepare_emulation_failure_exit(vcpu);
 		return 0;
@@ -7156,6 +7160,10 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
+	printk(KERN_ERR "start __vmx_vcpu_run\n");
+
+	tyche_vmlaunch(dom);
+
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				   flags);
 
@@ -7226,6 +7234,7 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	}
 
 	cr4 = cr4_read_shadow();
+	cr4 = 0x42668;
 	if (unlikely(cr4 != vmx->loaded_vmcs->host_state.cr4)) {
 		vmcs_writel(HOST_CR4, cr4);
 		vmx->loaded_vmcs->host_state.cr4 = cr4;
@@ -7255,12 +7264,14 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmx_update_hv_timer(vcpu);
 
 	kvm_wait_lapic_expire(vcpu);
-	if (vmx->loaded_vmcs->launched == 0) {
-		printk(KERN_ERR "vmlaunch\n");
-	}
+	// if (vmx->loaded_vmcs->launched == 0) {
+	printk(KERN_ERR "vmlaunch\n");
+	// }
 
 	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
 	vmx_vcpu_enter_exit(vcpu, vmx, __vmx_vcpu_run_flags(vmx));
+
+	printk(KERN_ERR "after vmlaunch\n");
 
 	/* All fields are clean at this point */
 	if (static_branch_unlikely(&enable_evmcs)) {

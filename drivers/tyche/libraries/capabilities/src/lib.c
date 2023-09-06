@@ -269,6 +269,118 @@ failure:
   return FAILURE;
 }
 
+int vmread_field(domain_id_t id, usize field, usize* value)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_vmread_field(child->management->local_id, field, value) != SUCCESS) {
+    ERROR("Unable to read vmcs field with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int vmwrite_field(domain_id_t id, usize field, usize value)
+{	
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_vmwrite_field(child->management->local_id, field, value) != SUCCESS) {
+    ERROR("Unable to write vmcs field with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int vmclear_domain(domain_id_t id, usize addr)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_vmclear(child->management->local_id, addr) != SUCCESS) {
+    ERROR("Unable to vmclear with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int vmptrld_domain(domain_id_t id, usize addr)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_vmptrld(child->management->local_id, addr) != SUCCESS) {
+    ERROR("Unable to vmptrld with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int invvpid_domain(domain_id_t id, unsigned long ext, u16 vpid, gva_t gva)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_invvpid(child->management->local_id, ext, vpid, gva) != SUCCESS) {
+    ERROR("Unable to invvpid with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int invept_domain(domain_id_t id, unsigned long ext, u64 eptp, gpa_t gpa)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_invept(child->management->local_id, ext, eptp, gpa) != SUCCESS) {
+    ERROR("Unable to invvpid with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int vmlaunch_domain(domain_id_t id)
+{
+  child_domain_t *child = find_child(0);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_vmlaunch(child->management->local_id) != SUCCESS) {
+    ERROR("Unable to invvpid with a vmcall");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
   capability_t *transition = NULL;

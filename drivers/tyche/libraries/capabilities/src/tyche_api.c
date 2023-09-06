@@ -313,6 +313,121 @@ failure:
   return FAILURE;
 }
 
+int tyche_vmread_field(capa_index_t* management, usize field, usize* value) {
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_VMREAD,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = field,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  *value = frame.value_1;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_vmwrite_field(capa_index_t* management, usize field, usize value) {
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_VMWRITE,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = field,
+    .arg_4 = value,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_vmclear(capa_index_t *management, usize addr)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_VMCLEAR,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = addr,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_vmptrld(capa_index_t *management, usize addr)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_VMPTRLD,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = addr,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_invvpid(capa_index_t *management, unsigned long ext, u16 vpid, gva_t gva)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_INVVPID,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = ext,
+    .arg_4 = vpid,
+    .arg_5 = gva,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_invept(capa_index_t *management, unsigned long ext, u64 eptp, gpa_t gpa)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_INVEPT,
+    .arg_1 = management,
+    .arg_2 = 0,
+    .arg_3 = ext,
+    .arg_4 = eptp,
+    .arg_5 = gpa,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_vmlaunch(capa_index_t *management)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_VMLAUNCH,
+    .arg_1 = management,
+    .arg_2 = 0,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tyche_switch(capa_index_t* transition_handle, void* args)
 {
   usize result = FAILURE;

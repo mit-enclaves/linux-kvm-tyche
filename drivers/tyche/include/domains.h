@@ -2,6 +2,7 @@
 #define __SRC_DOMAINS_H__
 
 #include <linux/fs.h>
+#include <linux/kvm_types.h>
 #include <linux/mm_types.h>
 
 #include "dll.h"
@@ -133,4 +134,17 @@ int driver_commit_domain(driver_domain_t *domain);
 int driver_switch_domain(driver_domain_t *domain, void *args);
 /// Delete the domain and revoke the capabilities.
 int driver_delete_domain(driver_domain_t *domain);
+
+int driver_vmread(driver_domain_t *dom, usize field, usize *val);
+
+int driver_vmwrite(driver_domain_t *dom, usize field, usize value);
+
+int driver_vmptrld(driver_domain_t *dom, usize addr);
+
+int driver_invvpid(driver_domain_t *dom, unsigned long ext, u16 vpid, gva_t gva);
+
+int driver_invept(driver_domain_t *dom, unsigned long ext, u64 eptp, gpa_t gpa);
+
+int driver_vmlaunch(driver_domain_t *dom);
+
 #endif /*__SRC_DOMAINS_H__*/

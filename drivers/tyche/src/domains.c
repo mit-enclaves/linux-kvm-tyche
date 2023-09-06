@@ -433,12 +433,12 @@ int driver_commit_domain(driver_domain_t *dom)
     goto delete_fail;
   }
 
-  for (int i = 0; i < 20; ++i) {
-    if (set_domain_vmcs_field(dom->domain_id, i, dom->vmcs_fields[i]) != SUCCESS) {
-      ERROR("Unable to set the domain's vmcs field idx=%u, value=%llu", i, dom->vmcs_fields[i]);
-      goto delete_fail;
-    }
-  }
+  // for (int i = 0; i < 20; ++i) {
+  //   if (set_domain_vmcs_field(dom->domain_id, i, dom->vmcs_fields[i]) != SUCCESS) {
+  //     ERROR("Unable to set the domain's vmcs field idx=%u, value=%llu", i, dom->vmcs_fields[i]);
+  //     goto delete_fail;
+  //   }
+  // }
 
   // Set the entries for all the cores of the domain.
   do {
@@ -632,3 +632,119 @@ failure:
 }
 
 EXPORT_SYMBOL(driver_set_vmcs_field);
+
+int driver_vmread(driver_domain_t *dom, usize field, usize *val)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (vmread_field(dom, field, val) != SUCCESS) {
+    ERROR("Failed to vmread vmcs field %04x on domain %lld",
+        field, dom->domain_id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_vmread);
+
+int driver_vmwrite(driver_domain_t *dom, usize field, usize value)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (vmwrite_field(dom, field, value) != SUCCESS) {
+    ERROR("Failed to vmwrite vmcs field %04x to value %04x on domain %lld",
+        field, value, dom->domain_id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_vmwrite);
+
+int driver_vmclear(driver_domain_t *dom, usize addr)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (vmclear_domain(dom, addr) != SUCCESS) {
+    ERROR("Failed to vmclear on address %04x on domain %lld",
+        addr, dom->domain_id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_vmclear);
+
+int driver_vmptrld(driver_domain_t *dom, usize addr)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (vmptrld_domain(dom, addr) != SUCCESS) {
+    ERROR("Failed to vmptrld on address %04x on domain %lld",
+        addr, dom->domain_id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_vmptrld);
+
+int driver_invvpid(driver_domain_t *dom, unsigned long ext, u16 vpid, gva_t gva)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (invvpid_domain(dom, ext, vpid, gva) != SUCCESS) {
+    ERROR("Failed to invvpid");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_invvpid);
+
+int driver_invept(driver_domain_t *dom, unsigned long ext, u64 eptp, gpa_t gpa)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (invept_domain(dom, ext, eptp, gpa) != SUCCESS) {
+    ERROR("Failed to invept");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_invept);
+
+int driver_vmlaunch(driver_domain_t *dom)
+{
+  if (dom == NULL) {
+    goto failure;
+  }
+  if (vmlaunch_domain(dom) != SUCCESS) {
+    ERROR("Failed to vmlaunch");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+EXPORT_SYMBOL(driver_vmlaunch);

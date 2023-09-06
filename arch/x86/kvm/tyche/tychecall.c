@@ -18,6 +18,12 @@ extern int driver_set_perm(driver_domain_t *dom, usize perm);
 extern int driver_set_switch(driver_domain_t *dom, usize sw);
 extern int driver_set_entry_on_core(driver_domain_t *dom, usize core, usize cr3, usize rip, usize rsp);
 extern int driver_commit_domain(driver_domain_t *dom);
+extern int driver_vmread(driver_domain_t *dom, usize field, usize *value);
+extern int driver_vmwrite(driver_domain_t *dom, usize field, usize value);
+extern int driver_vmclear(driver_domain_t *dom, usize phys_addr);
+extern int driver_vmptrld(driver_domain_t *dom, usize phys_addr);
+extern int driver_invvpid(driver_domain_t *dom, unsigned long ext, u16 vpid, gva_t gva);
+extern int driver_invept(driver_domain_t *dom, unsigned long ext, u64 eptp, gpa_t gpa);
 
 int tyche_create_domain(domain_handle_t handle, driver_domain_t **ptr)
 {
@@ -52,4 +58,45 @@ int tyche_set_entry_on_core(driver_domain_t *dom, usize core, usize cr3, usize r
 int tyche_commit_domain(driver_domain_t *dom)
 {
 	return driver_commit_domain(dom);
+}
+
+__always_inline int tyche_vmread(driver_domain_t *dom, usize field)
+{
+	usize val;
+
+	printk(KERN_ERR "tyche_vmread: start\n");
+	driver_vmread(dom, field, &val);
+	printk(KERN_ERR "tyche_vmread: val=%llu\n", val);
+
+	return val;
+}
+
+__always_inline int tyche_vmwrite(driver_domain_t *dom, usize field, usize value)
+{
+	return driver_vmwrite(dom, field, value);
+}
+
+__always_inline int tyche_vmclear(driver_domain_t *dom, usize phys_addr)
+{
+	return driver_vmclear(dom, phys_addr);
+}
+
+__always_inline int tyche_vmptrld(driver_domain_t *dom, usize phys_addr)
+{
+	return driver_vmptrld(dom, phys_addr);
+}
+
+__always_inline int tyche_invvpid(driver_domain_t *dom, unsigned long ext, u16 vpid, gva_t gva)
+{
+	return driver_invvpid(dom, ext, vpid, gva);
+}
+
+__always_inline int tyche_invept(driver_domain_t *dom, unsigned long ext, u64 eptp, gpa_t gpa)
+{
+	return driver_invept(dom, ext, eptp, gpa);
+}
+
+__always_inline int tyche_vmlaunch(driver_domain_t *dom)
+{
+	return driver_vmlaunch(dom);
 }

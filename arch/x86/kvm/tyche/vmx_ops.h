@@ -86,6 +86,8 @@ static __always_inline void vmcs_checkl(unsigned long field)
 
 static __always_inline unsigned long __vmcs_readl(unsigned long field)
 {
+	return tyche_vmread(dom, field);
+#if 0
 	unsigned long value;
 
 #ifdef CONFIG_CC_HAS_ASM_GOTO_OUTPUT
@@ -143,6 +145,7 @@ do_exception:
 	return value;
 
 #endif /* CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+#endif
 }
 
 static __always_inline u16 vmcs_read16(unsigned long field)
@@ -217,7 +220,10 @@ fault:									\
 
 static __always_inline void __vmcs_writel(unsigned long field, unsigned long value)
 {
+#if 0
 	vmx_asm2(vmwrite, "r"(field), "rm"(value), field, value);
+#endif
+	tyche_vmwrite(dom, field, value);
 }
 
 static __always_inline void vmcs_write16(unsigned long field, u16 value)
@@ -282,8 +288,10 @@ static __always_inline void vmcs_set_bits(unsigned long field, u32 mask)
 static inline void vmcs_clear(struct vmcs *vmcs)
 {
 	u64 phys_addr = __pa(vmcs);
-
+#if 0
 	vmx_asm1(vmclear, "m"(phys_addr), vmcs, phys_addr);
+#endif
+	tyche_vmclear(dom, phys_addr);
 }
 
 static inline void vmcs_load(struct vmcs *vmcs)
@@ -292,8 +300,10 @@ static inline void vmcs_load(struct vmcs *vmcs)
 
 	if (static_branch_unlikely(&enable_evmcs))
 		return evmcs_load(phys_addr);
-
+#if 0
 	vmx_asm1(vmptrld, "m"(phys_addr), vmcs, phys_addr);
+#endif
+	tyche_vmptrld(dom, phys_addr);
 }
 
 static inline void __invvpid(unsigned long ext, u16 vpid, gva_t gva)
@@ -303,8 +313,10 @@ static inline void __invvpid(unsigned long ext, u16 vpid, gva_t gva)
 		u64 rsvd : 48;
 		u64 gva;
 	} operand = { vpid, 0, gva };
-
+#if 0
 	vmx_asm2(invvpid, "r"(ext), "m"(operand), ext, vpid, gva);
+#endif
+	tyche_invvpid(dom, ext, vpid, gva);
 }
 
 static inline void __invept(unsigned long ext, u64 eptp, gpa_t gpa)
@@ -312,8 +324,10 @@ static inline void __invept(unsigned long ext, u64 eptp, gpa_t gpa)
 	struct {
 		u64 eptp, gpa;
 	} operand = {eptp, gpa};
-
+#if 0
 	vmx_asm2(invept, "r"(ext), "m"(operand), ext, eptp, gpa);
+#endif
+	tyche_invept(dom, ext, eptp, gpa);
 }
 
 static inline void vpid_sync_vcpu_single(int vpid)
