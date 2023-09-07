@@ -32,6 +32,9 @@ typedef struct segment_t {
 	/// Type for the region: {Shared|Confidential}.
 	segment_type_t tpe;
 
+	/// The offset at which the segment is mapped (gpa).
+	usize alias;
+
 	/// Segments are stored in a double linked list.
 	dll_elem(struct segment_t, list);
 } segment_t;
@@ -125,7 +128,8 @@ int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
 int driver_get_physoffset_domain(driver_domain_t *domain, usize *phys_offset);
 /// Sets up access rights and conf|share for the segment.
 int driver_mprotect_domain(driver_domain_t *domain, usize vstart, usize size,
-			   memory_access_right_t flags, segment_type_t tpe);
+			   memory_access_right_t flags, segment_type_t tpe,
+			   usize alias);
 /// Register the trap bitmap for the domain.
 int driver_set_traps(driver_domain_t *domain, usize traps);
 /// Register the core map for the domain.

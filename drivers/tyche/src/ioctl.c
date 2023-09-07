@@ -233,7 +233,8 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
             mprotect.start,
             mprotect.size,
             mprotect.flags,
-            mprotect.tpe) != SUCCESS) {
+            mprotect.tpe,
+            NO_ALIAS) != SUCCESS) {
         ERROR("Unable to mprotect he region for domain %p", handle);
         goto failure;
       }

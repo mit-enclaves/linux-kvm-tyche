@@ -212,7 +212,8 @@ int driver_mprotect_domain(
     usize vstart,
     usize size,
     memory_access_right_t flags,
-    segment_type_t tpe)
+    segment_type_t tpe,
+    usize alias)
 {
   segment_t* segment = NULL; 
   segment_t* head = NULL;
@@ -263,6 +264,7 @@ int driver_mprotect_domain(
   segment->size = size;
   segment->flags = flags;
   segment->tpe = tpe;
+  segment->alias = alias;
   dll_init_elem(segment, list);
   dll_add(&(dom->segments), segment, list);
 
@@ -421,7 +423,7 @@ int driver_commit_domain(driver_domain_t *dom)
               dom->domain_id, 
               segment->pa,
               segment->pa + segment->size,
-              segment->flags) != SUCCESS) {
+              segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto delete_fail;
@@ -432,7 +434,7 @@ int driver_commit_domain(driver_domain_t *dom)
               dom->domain_id,
               segment->pa,
               segment->pa + segment->size,
-              segment->flags) != SUCCESS) {
+              segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto delete_fail;
