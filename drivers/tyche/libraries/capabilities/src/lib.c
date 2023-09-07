@@ -409,6 +409,81 @@ failure:
   return FAILURE;
 }
 
+int segment_region_null(
+    capability_t *capa,
+    capability_t **left,
+    capability_t **right,
+    usize start1,
+    usize end1,
+    usize prot1,
+    usize alias) {
+  if (left == NULL || right == NULL || capa == NULL) {
+    goto failure;
+  }
+
+  // Attempt to allocate left and right.
+  *left = (capability_t *)local_domain.alloc(sizeof(capability_t));
+  if (*left == NULL) {
+    ERROR("Left alloc failed.");
+    goto failure;
+  }
+  *right = (capability_t *)local_domain.alloc(sizeof(capability_t));
+  if (*right == NULL) {
+    ERROR("Right alloc failed.");
+    goto fail_left;
+  }
+
+  // Call duplicate.
+  if (tyche_segment_null(
+        capa->local_id,
+        &((*left)->local_id),
+        &((*right)->local_id),
+        start1, end1, prot1, alias) != SUCCESS) {
+    ERROR("Duplicate rejected.");
+    goto fail_right;
+  }
+
+  // Update the capability.
+  if (enumerate_capa(capa->local_id, NULL, capa) != SUCCESS) {
+    ERROR("We failed to enumerate the root of a duplicate!");
+    goto fail_right;
+  }
+  capa->left = *left;
+  capa->right = *right;
+
+  // Initialize the left.
+  if (enumerate_capa((*left)->local_id, NULL, *left) != SUCCESS) {
+    ERROR("We failed to enumerate the left of duplicate!");
+    goto fail_right;
+  }
+  dll_init_elem((*left), list);
+  dll_add(&(local_domain.capabilities), (*left), list);
+  (*left)->parent = capa;
+  (*left)->left = NULL;
+  (*left)->right = NULL;
+
+  // Initialize the right.
+  if (enumerate_capa((*right)->local_id, NULL, (*right)) != SUCCESS) {
+    ERROR("We failed to enumerate the right of duplicate!");
+    goto fail_right;
+  }
+  dll_init_elem((*right), list);
+  dll_add(&(local_domain.capabilities), (*right), list);
+  (*right)->parent = capa;
+  (*right)->left = NULL;
+  (*right)->right = NULL;
+
+  // All done!
+  return SUCCESS;
+
+  // Failure paths.
+fail_right:
+  local_domain.dealloc(*right);
+fail_left:
+  local_domain.dealloc(*left);
+failure:
+  return FAILURE;
+}
 
 /* This function takes a capability and performs a split such that:
 *       capa
@@ -418,7 +493,7 @@ failure:
 * It returns the copy(capa) and makes sure to update capa to be a revocation.
 * The returned value is not part of any list and can be freed with local_domain.dealloc.
 */
-static capability_t* trick_segment_null_copy(capability_t* capa)
+static capability_t* trick_segment_null_copy(capability_t* capa, usize alias)
 {
   capability_t *left = NULL, *right = NULL;
   if (capa == NULL) {
@@ -434,14 +509,22 @@ static capability_t* trick_segment_null_copy(capability_t* capa)
   }
 
   // Perform the split.
-  if (segment_region_capa(
+  if (alias == NO_ALIAS && (segment_region_capa(
         capa, &left, &right,
         // This is NULL
         capa->info.region.start, capa->info.region.start, capa->info.region.flags >> 2,
         // This is copy(capa)
         capa->info.region.start, capa->info.region.end, capa->info.region.flags >> 2
-        ) != SUCCESS) {
+        ) != SUCCESS)) {
     ERROR("Unable to perform the duplicate");
+    goto failure;
+  }
+  // Case where we need an alias.
+  if (alias != NO_ALIAS && segment_region_null(
+        capa, &left, &right,
+        capa->info.region.start, capa->info.region.end,
+        capa->info.region.flags >> 2, alias) != SUCCESS) {
+    ERROR("Unable to perform null region duplicate.");
     goto failure;
   }
 
@@ -471,11 +554,11 @@ failure:
 // TODO: for the moment only handle the case where the region is fully contained
 // within one capability.
 int carve_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access, int is_shared) {
+                 memory_access_right_t access, int is_shared, usize alias) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
 
-  DEBUG("[grant_region] start");
+  DEBUG("[carve_region] start");
   // Quick checks.
   if (start >= end) {
     ERROR("Start is greater or equal to end.\n");
@@ -599,7 +682,7 @@ int carve_region(domain_id_t id, paddr_t start, paddr_t end,
 
   // One last duplicate to have a revocation {NULL, to_send}.
   do {
-    capability_t *to_send = trick_segment_null_copy(capa);
+    capability_t *to_send = trick_segment_null_copy(capa, alias);
     if (to_send == NULL) {
       ERROR("To send is null.");
       goto failure;
@@ -633,15 +716,15 @@ failure:
 }
 
 int grant_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access)
+                 memory_access_right_t access, usize alias)
 {
-  return carve_region(id, start, end, access, 0);
+  return carve_region(id, start, end, access, 0, alias);
 } 
 
 int share_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access) {
-  return carve_region(id, start, end, access, 1); 
-}
+                 memory_access_right_t access, usize alias) {
+  return carve_region(id, start, end, access, 1, alias); 
+} 
 
 // TODO for now we only handle exact matches.
 int internal_revoke(child_domain_t *child, capability_t *capa) {
