@@ -110,6 +110,102 @@ static __init int tyche_check_processor_compat(void) {
   return 0;
 }
 
+// ———————————————————————— Memory Helper Functions ————————————————————————— //
+
+/// Called from the vcpu_pre_run to initialize a domain's resources.
+/// Specifically, it goes through the kvm memory slots and performs the appropriate
+/// capability operations to transfer memory resources to the VM domain.
+/// TODO: for now, only do share operations.
+static int setup_memory_capabilities(struct kvm* kvm)
+{
+  int i = 0, bkt = 0;
+  struct kvm_tyche* tyche = NULL; to_kvm_tyche(kvm);
+  if (kvm == NULL) {
+    ERROR("The provided kvm structure is null.");
+    goto failure;
+  }
+  // Extract the tyche domain.
+  tyche = to_kvm_tyche(kvm);
+  if (tyche == NULL || tyche->domain == NULL) {
+    ERROR("No tyche domain found for the provided kvm struct.");
+    goto failure;
+  } 
+  if (tyche->domain->state == DOMAIN_COMMITED) {
+    ERROR("The domain is already committed!");
+    goto failure;
+  }
+
+  // Go through the address spaces.
+  // For each of them, inspect the kvm memory slots.
+  // If they are valid ones (not RO or missing pfn), find contiguous segments
+  // and perform a share/grant capability operation.
+  mutex_lock(&kvm->slots_arch_lock);
+  for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+    struct kvm_memslots * slots = __kvm_memslots(kvm, i);
+    struct kvm_memory_slot *slot = NULL;
+
+    kvm_for_each_memslot(slot, bkt, slots) {
+      usize paddr = 0, vaddr = 0, size = 0;
+      kvm_pfn_t pfn = gfn_to_pfn_memslot(slot, slot->base_gfn);
+      if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
+        // For the moment ignore these entries.
+        continue;
+      }
+      // We are going through the physical address space that corresponds
+      // to this domain's kvm memory slots. The goal is to identify "gaps", i.e.,
+      // non contiguous physical memory pages. Everytime we have a gap, we need
+      // to perform a different tyche driver capability call to transfer the right
+      // portion of physical memory.
+      // Note: with transparent hugepages enabled in the kernel, we should see
+      // very few gaps ( < 10) for a the default linux VM, and < 40 in regular 
+      // kvm virtual machines.
+      // start and size below represent a contiguous segment of physical memory.
+      paddr = pfn;
+      vaddr = slot->userspace_addr;
+      size = 1;
+      for (i = 0; i < slot->npages; i++) {
+        gfn_t gfn = slot->base_gfn + i;
+        kvm_pfn_t npfn = gfn_to_pfn_memslot(slot, gfn);
+        if (npfn != pfn) {
+          // There is a gap in the address space, call tyche.
+          if (driver_add_raw_segment(tyche->domain, vaddr, paddr, size) != SUCCESS) {
+            ERROR("Unable to add the segment to the domain.");
+            goto failure;
+          }
+          // Update the address space.
+          paddr = npfn;
+          vaddr = vaddr + size;
+          size = 1;
+          continue;
+        }
+        // Contiguous entry, keep going.
+        size++;
+      }
+      // Sanity check.
+      if (i != slot->npages) {
+        ERROR("Why is the loop not going till the end?");
+        goto failure;
+      }
+      // Register last segment.
+      if (driver_add_raw_segment(tyche->domain, vaddr, paddr, size) != SUCCESS) {
+        ERROR("Unable to register last segment!");
+        goto failure;
+      }
+    }
+  }
+  mutex_unlock(&kvm->slots_arch_lock);
+  
+  // TODO: should also do the mprotects... Not sure yet how.
+  // We might have to go through the kvm memory slots a second time.
+  // Or we could do it in the loop above.
+
+  // All done, return!
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+// ————————————————————————————————— Hooks —————————————————————————————————— //
 /// Creates a domain vm.
 static int tyche_vm_init(struct kvm *kvm) {
   struct kvm_tyche *tyche = to_kvm_tyche(kvm);
@@ -155,36 +251,12 @@ static int tyche_vcpu_create(struct kvm_vcpu *vcpu)
 
 static int tyche_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
-  struct kvm_memslots *slots =  NULL;
-  struct kvm_memory_slot *slot = NULL;
-  struct kvm_tyche* tyche = to_kvm_tyche(vcpu->kvm);
   struct kvm* kvm = vcpu->kvm;
-  int i = 0, bkt = 0;
-  if (tyche->domain == NULL) {
-    ERROR("The domain is null.");
-    return -1;
+  if (setup_memory_capabilities(kvm) != SUCCESS) {
+    ERROR("Unable to setup the memory capabilities for the vm");
+    return FAILURE;
   }
-  // TODO: here we can finalize the initialization.
-  // We need to go through the entire domain configuration and do the proper
-  // initialization of the memory segments and cpu configuration.
-  if (tyche->domain->state == DOMAIN_COMMITED) {
-    // The domain is already inited.
-    return 0;
-  }
-  trace_printk("The vcpu %p, %d\n", vcpu->arch.walk_mmu, vcpu->kvm->created_vcpus);
-  
-  // Try to go through all the memory regions.
-  // For each valid one, we register the corresponding region with tyche.
-  mutex_lock(&kvm->slots_arch_lock);
-  for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
-    slots = __kvm_memslots(kvm, i);
-    kvm_for_each_memslot(slot, bkt, slots) {
-      trace_printk("gnf: %llx, uaddr: %lx, size: %ld, slot %d\n",
-          slot->base_gfn, slot->userspace_addr, slot->npages, slot->id); 
-    }
-  }
-  mutex_unlock(&kvm->slots_arch_lock);
-  return 0;
+  return SUCCESS;
 }
 
 static void tyche_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
