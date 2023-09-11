@@ -180,6 +180,7 @@ int driver_add_raw_segment(
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_add_raw_segment);
 
 int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
 {
