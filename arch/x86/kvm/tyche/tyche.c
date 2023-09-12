@@ -219,6 +219,7 @@ static int setup_memory_capabilities(struct kvm* kvm)
     kvm_for_each_memslot(slot, bkt, slots) {
       usize vaddr = 0, size = 0;
       kvm_pfn_t pfn = gfn_to_pfn_memslot(slot, slot->base_gfn);
+      gfn_t base_gfn = slot->base_gfn;
       if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
         // For the moment ignore these entries.
         continue;
@@ -234,6 +235,7 @@ static int setup_memory_capabilities(struct kvm* kvm)
       // start and size below represent a contiguous segment of physical memory.
       vaddr = slot->userspace_addr;
       size = 1;
+      printk(KERN_ERR "The slot flags %x\n", slot->flags);
       for (i = 1; i < slot->npages; i++) {
         gfn_t gfn = slot->base_gfn + i;
         kvm_pfn_t npfn = gfn_to_pfn_memslot(slot, gfn);
@@ -242,13 +244,21 @@ static int setup_memory_capabilities(struct kvm* kvm)
               npfn, pfn + size, pfn, size);*/
           // There is a gap in the address space, call tyche.
           if (driver_add_raw_segment(tyche->domain, 
-                vaddr,((usize)pfn) << PAGE_SIZE, size << PAGE_SIZE) != SUCCESS) {
+                vaddr,((usize)pfn) << 12, size << 12) != SUCCESS) {
             ERROR("Unable to add the segment to the domain.");
             goto failure;
           }
+          //TODO figure out access rights
+          if (driver_mprotect_domain(tyche->domain, vaddr, size << 12,
+                MEM_READ|MEM_WRITE|MEM_EXEC|MEM_SUPER|MEM_ACTIVE,
+                SHARED, ((usize)base_gfn) << 12) != SUCCESS) {
+            ERROR("Unable to mprotect the segment");
+            goto failure;
+          } 
           // Update the address space.
           pfn = npfn;
           vaddr = vaddr + size;
+          base_gfn = gfn;
           size = 1;
           continue;
         }
@@ -262,10 +272,16 @@ static int setup_memory_capabilities(struct kvm* kvm)
       }
       // Register last segment.
       if (driver_add_raw_segment(tyche->domain, vaddr,
-            ((usize) pfn) << PAGE_SIZE, size << PAGE_SIZE) != SUCCESS) {
+            ((usize) pfn) << 12, size << 12) != SUCCESS) {
         ERROR("Unable to register last segment!");
         goto failure;
       }
+      if (driver_mprotect_domain(tyche->domain, vaddr, size << 12,
+            MEM_READ|MEM_WRITE|MEM_EXEC|MEM_SUPER|MEM_ACTIVE,
+            SHARED, ((usize)base_gfn) << 12) != SUCCESS) {
+        ERROR("Unable to mprotect the segment");
+        goto failure;
+      } 
     }
   }
   mutex_unlock(&kvm->slots_arch_lock);

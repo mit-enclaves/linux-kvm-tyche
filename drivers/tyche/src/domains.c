@@ -284,6 +284,7 @@ int driver_mprotect_domain(
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_mprotect_domain);
 
 int driver_set_traps(driver_domain_t *dom, usize traps)
 {
