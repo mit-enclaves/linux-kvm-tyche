@@ -224,43 +224,30 @@ failure:
   return FAILURE;
 }
 
-//TODO cleanup duplicates.
-int tyche_segment_null(
-    capa_index_t capa,
-    capa_index_t* left,
-    capa_index_t* right,
-    usize start1,
-    usize end1,
-    usize prot1,
-    usize alias)
-{
-  vmcall_frame_t frame = {
-    TYCHE_SEGMENT_NULL,
-    capa,
-    start1,
-    end1,
-    prot1,
-    alias,
-  };
-  if (left == NULL || right == NULL) {
-    goto failure;
-  }
-  if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  } 
-  *left = frame.value_1;
-  *right = frame.value_2;
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-
 int tyche_send(capa_index_t dest, capa_index_t capa) {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEND,
     .arg_1 = capa,
     .arg_2 = dest,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  // Check that the revocation handle is the original one.
+  if (frame.value_1 != capa) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_send_aliased(capa_index_t dest, capa_index_t capa, usize alias) {
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SEND_ALIASED,
+    .arg_1 = capa,
+    .arg_2 = dest,
+    .arg_3 = alias,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
