@@ -17,7 +17,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_EXIT = 10,
 	TYCHE_CONFIGURE = 12,
 	TYCHE_SET_ENTRY_ON_CORE = 13,
-	TYCHE_SEGMENT_NULL = 14,
+	TYCHE_SEND_ALIASED = 14,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -77,13 +77,10 @@ int tyche_segment_region(capa_index_t capa, capa_index_t *left,
 			 capa_index_t *right, usize a1_1, usize a1_2,
 			 usize a1_3, usize a2_1, usize a2_2, usize a2_3);
 
-int tyche_segment_null(capa_index_t capa, capa_index_t *left,
-		       capa_index_t *right, usize start1, usize end1,
-		       usize prot1, usize alias);
-
 int tyche_send(capa_index_t dest, capa_index_t capa);
 
-// TODO: this was removed
+int tyche_send_aliased(capa_index_t dest, capa_index_t capa, usize alias);
+
 int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 		usize a1, usize a2, usize a3);
 
