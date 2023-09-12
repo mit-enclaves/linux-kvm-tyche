@@ -217,7 +217,7 @@ static int setup_memory_capabilities(struct kvm* kvm)
     struct kvm_memory_slot *slot = NULL;
 
     kvm_for_each_memslot(slot, bkt, slots) {
-      usize paddr = 0, vaddr = 0, size = 0;
+      usize vaddr = 0, size = 0;
       kvm_pfn_t pfn = gfn_to_pfn_memslot(slot, slot->base_gfn);
       if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
         // For the moment ignore these entries.
@@ -232,20 +232,22 @@ static int setup_memory_capabilities(struct kvm* kvm)
       // very few gaps ( < 10) for a the default linux VM, and < 40 in regular 
       // kvm virtual machines.
       // start and size below represent a contiguous segment of physical memory.
-      paddr = pfn;
       vaddr = slot->userspace_addr;
       size = 1;
-      for (i = 0; i < slot->npages; i++) {
+      for (i = 1; i < slot->npages; i++) {
         gfn_t gfn = slot->base_gfn + i;
         kvm_pfn_t npfn = gfn_to_pfn_memslot(slot, gfn);
-        if (npfn != pfn) {
+        if (npfn != (pfn + size)) {
+          /*printk(KERN_ERR "We have npfn(%llx) != pfn+size(%llx) [pfn(%llx) + size(%llx)]\n", 
+              npfn, pfn + size, pfn, size);*/
           // There is a gap in the address space, call tyche.
-          if (driver_add_raw_segment(tyche->domain, vaddr, paddr, size) != SUCCESS) {
+          if (driver_add_raw_segment(tyche->domain, 
+                vaddr,((usize)pfn) << PAGE_SIZE, size << PAGE_SIZE) != SUCCESS) {
             ERROR("Unable to add the segment to the domain.");
             goto failure;
           }
           // Update the address space.
-          paddr = npfn;
+          pfn = npfn;
           vaddr = vaddr + size;
           size = 1;
           continue;
@@ -259,7 +261,8 @@ static int setup_memory_capabilities(struct kvm* kvm)
         goto failure;
       }
       // Register last segment.
-      if (driver_add_raw_segment(tyche->domain, vaddr, paddr, size) != SUCCESS) {
+      if (driver_add_raw_segment(tyche->domain, vaddr,
+            ((usize) pfn) << PAGE_SIZE, size << PAGE_SIZE) != SUCCESS) {
         ERROR("Unable to register last segment!");
         goto failure;
       }
@@ -284,6 +287,8 @@ static int tyche_vm_init(struct kvm *kvm) {
   if (driver_create_domain(NULL, &(tyche->domain)) != SUCCESS) {
     ERROR("Unable to create a new domain.");
     return -1;
+  } else {
+    LOG("We have a domain! %p", tyche->domain);
   }
   trace_printk("Successfully created a new domain %p\n", tyche->domain);
   return 0;
@@ -328,6 +333,7 @@ static int tyche_vcpu_pre_run(struct kvm_vcpu *vcpu)
     ERROR("Unable to setup the memory capabilities for the vm");
     return FAILURE;
   }
+  LOG("Pre-run finished successfully.");
   return SUCCESS;
 }
 
@@ -352,16 +358,16 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 
 	.hardware_enable = NULL,
 	.hardware_disable = NULL,
-	.has_emulated_msr = NULL, //tyche_has_emulated_msr,
+	.has_emulated_msr = tyche_has_emulated_msr,
 
 	.vm_size = sizeof(struct kvm_tyche),
-	.vm_init = NULL, //tyche_vm_init,
-	.vm_destroy = NULL, //tyche_vm_destroy,
+	.vm_init = tyche_vm_init,
+	.vm_destroy = tyche_vm_destroy,
 
-	.vcpu_precreate = NULL, //tyche_vcpu_precreate,
-	.vcpu_create = NULL, //tyche_vcpu_create,
+	.vcpu_precreate = tyche_vcpu_precreate,
+	.vcpu_create = tyche_vcpu_create,
 	.vcpu_free = NULL, //vmx_vcpu_free,
-	.vcpu_reset = NULL, //tyche_vcpu_reset,
+	.vcpu_reset = tyche_vcpu_reset,
 
 	.prepare_switch_to_guest = NULL,// vmx_prepare_switch_to_guest,
 	.vcpu_load = NULL, //tyche_vcpu_load,
@@ -443,7 +449,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.write_tsc_offset =  NULL, //vmx_write_tsc_offset,
 	.write_tsc_multiplier =  NULL, //vmx_write_tsc_multiplier,
 
-	.load_mmu_pgd =  NULL, //tyche_load_mmu_pgd,
+	.load_mmu_pgd = tyche_load_mmu_pgd,
 
 	.check_intercept = NULL, //vmx_check_intercept,
 	.handle_exit_irqoff = NULL, // vmx_handle_exit_irqoff,
