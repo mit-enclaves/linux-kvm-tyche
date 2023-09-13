@@ -7,6 +7,20 @@ MODULE_LICENSE("GPL");
 // ———————————————————————————— External symbols ———————————————————————————— //
 extern void tyche_debug_print(void);
 
+// ——————————————————————————————— Constants ———————————————————————————————— //
+#define TYCHE_SEGMENT_FIELD(seg)                    \
+	[VCPU_SREG_##seg] = {                       \
+		.selector = GUEST_##seg##_SELECTOR, \
+		.base = GUEST_##seg##_BASE,         \
+		.limit = GUEST_##seg##_LIMIT,       \
+		.ar_bytes = GUEST_##seg##_AR_BYTES, \
+	}
+
+static const kvm_tyche_segment_field_t kvm_tyche_segment_fields[] = {
+	TYCHE_SEGMENT_FIELD(CS), TYCHE_SEGMENT_FIELD(DS),	TYCHE_SEGMENT_FIELD(ES),
+	TYCHE_SEGMENT_FIELD(FS), TYCHE_SEGMENT_FIELD(GS),	TYCHE_SEGMENT_FIELD(SS),
+	TYCHE_SEGMENT_FIELD(TR), TYCHE_SEGMENT_FIELD(LDTR),
+};
 // ————————————————————————————— PMU Operations ————————————————————————————— //
 //TODO most of this can be imported from vmx I think.
 
@@ -115,6 +129,11 @@ struct kvm_x86_nested_ops tyche_nested_ops = {0};
 static inline struct kvm_tyche *to_kvm_tyche(struct kvm *kvm)
 {
 	return container_of(kvm, struct kvm_tyche, kvm);
+}
+
+static inline struct vcpu_tyche *to_vcpu_tyche(struct kvm_vcpu *vcpu)
+{
+  return container_of(vcpu, struct vcpu_tyche, vcpu);
 }
 
 /*
@@ -366,6 +385,21 @@ static void tyche_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_l
 {
   trace_printk("In the load mmup pgd: %p\n", vcpu->arch.walk_mmu); 
 }
+
+// ——————————————————————————— Register Functions ——————————————————————————— //
+
+static void tyche_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
+{
+  struct vcpu_tyche *tyche = to_vcpu_tyche(vcpu);
+  const kvm_tyche_segment_field_t *sf = &kvm_tyche_segment_fields[seg];
+
+  // TODO: vmx has a cache, see if we need one.
+  // TODO: vmx checks vm86_active and if needed, fixes the selector.
+  // This is for 16bits compat, let's just ignore it for now.
+  // TODO(aghosn) -> see if we run into that with vanilla kvm.
+  tyche->segs[seg] = *var;  
+}
+
 // ———————————————————————————————— x86 Ops ————————————————————————————————— //
 static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.name = "tyche_intel",
