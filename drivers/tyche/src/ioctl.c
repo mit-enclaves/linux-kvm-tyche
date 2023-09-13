@@ -145,12 +145,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       break;
     case TYCHE_COMMIT:
-      if (driver_commit_domain(domain) != SUCCESS) {
+      if (driver_commit_domain(domain, 1) != SUCCESS) {
         ERROR("Commit failed for domain %p", handle);
         goto failure;
       }
       break;
-    case TYCHE_SET_TRAPS:
+    case TYCHE_SET_DOMAIN_CONFIGURATION:
         if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
@@ -158,47 +158,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_traps(domain, perm.value) != SUCCESS) {
+      if (perm.idx < TYCHE_CONFIG_PERMISSIONS || perm.idx > TYCHE_CONFIG_SWITCH) {
+        ERROR("Invalid configuration value.");
+        goto failure;
+      }
+      if (driver_set_domain_configuration(domain, perm.idx, perm.value) != SUCCESS) {
         ERROR("Setting traps failed for domain %p", handle);
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_CORES:
-        if (copy_from_user(
-            &perm,
-            (msg_set_perm_t*) arg,
-            sizeof(msg_set_perm_t))) {
-        ERROR("Unable to copy perm arguments from user.");
-        goto failure;
-      }
-      if (driver_set_cores(domain, perm.value) != SUCCESS) {
-        ERROR("Setting cores failed for domain %p", handle);
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_PERM:
-        if (copy_from_user(
-            &perm,
-            (msg_set_perm_t*) arg,
-            sizeof(msg_set_perm_t))) {
-        ERROR("Unable to copy perm arguments from user.");
-        goto failure;
-      }
-      if (driver_set_perm(domain, perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_SWITCH:
-        if (copy_from_user(
-            &perm,
-            (msg_set_perm_t*) arg,
-            sizeof(msg_set_perm_t))) {
-        ERROR("Unable to copy perm arguments from user.");
-        goto failure;
-      }
-      if (driver_set_switch(domain, perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
       break;

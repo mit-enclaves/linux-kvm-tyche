@@ -65,29 +65,33 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
     ERROR("Failed to allocate a new driver_domain_t structure.");
     goto failure;
   }
+  memset(dom, 0, sizeof(driver_domain_t));
   // Set up the structure.
   dom->pid = current->pid;
   dom->handle = handle;
   dom->domain_id = UNINIT_DOM_ID;
-  dom->state = DOMAIN_NOT_COMMITED;
-  // Init bitmaps. 
-  dom->perm = 0;
-  dom->cores = 0;
-  dom->traps = 0;
-  // Setup the entries.
-  dom->entries.size = 0;
-  dom->entries.entries = NULL;
+  dom->state = DRIVER_NOT_COMMITED;
   dll_init_list(&(dom->raw_segments));
   dll_init_list(&(dom->segments));
   dll_init_elem(dom, list);
 
+  // Call tyche to create the domain.
+   if (create_domain(&(dom->domain_id)) != SUCCESS) {
+    ERROR("Monitor rejected the creation of a domain for domain %p", dom);
+    goto failure_free;
+  }
+
   // Add the domain to the list.
   dll_add((&domains), dom, list);
-  LOG("A new domain was added to the driver with id %p", handle);
+
+  // If the pointer is non null, forward a reference.
   if (ptr != NULL) {
     *ptr = dom;
   }
+  LOG("A new domain was added to the driver with id %p", handle);
   return SUCCESS;
+failure_free:
+  kfree(dom);
 failure:
   return FAILURE;
 }
@@ -174,6 +178,7 @@ int driver_add_raw_segment(
   segment->va = va;
   segment->pa = pa;
   segment->size = size;
+  segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
   dll_add(&(dom->raw_segments), segment, list);
   return SUCCESS;
@@ -265,6 +270,7 @@ int driver_mprotect_domain(
   segment->flags = flags;
   segment->tpe = tpe;
   segment->alias = alias;
+  segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
   dll_add(&(dom->segments), segment, list);
 
@@ -286,64 +292,38 @@ failure:
 }
 EXPORT_SYMBOL(driver_mprotect_domain);
 
-int driver_set_traps(driver_domain_t *dom, usize traps)
+int driver_set_domain_configuration(driver_domain_t *dom, driver_domain_config_t idx, usize value)
 {
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
   }
-  dom->traps = traps;
+  if (idx < TYCHE_CONFIG_PERMISSIONS || idx >= TYCHE_NR_CONFIGS) {
+    ERROR("Invalid configuration index");
+    goto failure;
+  }
+  dom->configs[idx] = value;
   return SUCCESS;
-failure: 
+failure:
   return FAILURE;
 }
 
-EXPORT_SYMBOL(driver_set_traps);
-
-int driver_set_cores(driver_domain_t *dom, usize core_map)
+int driver_commit_domain_configuration(driver_domain_t *dom, driver_domain_config_t idx)
 {
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
   }
-  dom->cores = core_map;
-
-  // Allocate the array.
-  // TODO we could be less generous with the allocation.
-  dom->entries.size = 64;
-  dom->entries.entries = kcalloc(sizeof(entry_t), 64, GFP_KERNEL);
-  if (dom->entries.entries == NULL) {
-    ERROR("Unable to allocate the domain entry array.");
+  if (idx < TYCHE_CONFIG_PERMISSIONS || idx >= TYCHE_NR_CONFIGS) {
+    ERROR("Invalid configuration index");
+    goto failure;
+  }
+  if (set_domain_configuration(dom->domain_id, idx, dom->configs[idx]) != SUCCESS) {
+    ERROR("Capability operation to set configuration");
     goto failure;
   }
   return SUCCESS;
-failure: 
-  return FAILURE;
-}
-
-EXPORT_SYMBOL(driver_set_cores);
-
-int driver_set_perm(driver_domain_t *dom, usize perm)
-{
-  if (dom == NULL) {
-    ERROR("The domain is null.");
-    goto failure;
-  }
-  dom->perm = perm;
-  return SUCCESS;
-failure: 
-  return FAILURE;
-}
-
-int driver_set_switch(driver_domain_t *dom, usize sw)
-{
-  if (dom == NULL) {
-    ERROR("The domain is null.");
-    goto failure;
-  }
-  dom->switch_type = sw;
-  return SUCCESS;
-failure: 
+failure:
   return FAILURE;
 }
 
@@ -358,13 +338,14 @@ int driver_set_entry_on_core(
     ERROR("The domain is null.");
     goto failure;
   }
-  if ((dom->cores & (1 << core)) == 0) {
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
     ERROR("Trying to set entry point on unallowed core");
     goto failure;
   }
 
-  if (core >= dom->entries.size) {
+  if (core >= ENTRIES_PER_DOMAIN) {
     ERROR("The supplied core is greater than the number of supported cores");
+    goto failure;
   }
 
   dom->entries.entries[core].cr3 = cr3;
@@ -375,16 +356,53 @@ failure:
   return FAILURE;
 }
 
-int driver_commit_domain(driver_domain_t *dom)
+int driver_commit_entry_on_core(driver_domain_t *dom, usize core)
+{
+  if (dom == NULL) {
+    ERROR("The domain is null");
+    goto failure;
+  }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
+    ERROR("Trying to commit entry point on unallowed core");
+    goto failure;
+  }
+  if (core >= ENTRIES_PER_DOMAIN) {
+    ERROR("The supplied core is greater than supported cores.");
+    goto failure;
+  }
+
+  if (set_domain_entry_on_core(
+    dom->domain_id,
+    core,
+    dom->entries.entries[core].cr3,
+    dom->entries.entries[core].rip,
+    dom->entries.entries[core].rsp) != SUCCESS) {
+    ERROR("Unable to set the entry point on core %lld", core);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_commit_regions(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
   if (dom == NULL) {
-    ERROR("The domain is null.");
+    ERROR("The domain is null");
     goto failure;
-  } 
+  }
   if (dom->pid != current->pid) {
     ERROR("Wrong pid for dom");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
+    goto failure;
+  }
+  if (dom->domain_id == UNINIT_DOM_ID) {
+    ERROR("The domain %p is not registered with the monitor", dom);
+    goto failure;
+  }
+  if (dom->state != DRIVER_NOT_COMMITED) {
+    ERROR("The domain %p is already committed.", dom);
     goto failure;
   }
   if (!dll_is_empty(&(dom->raw_segments))) {
@@ -395,25 +413,12 @@ int driver_commit_domain(driver_domain_t *dom)
     ERROR("Missing segments for domain %p", dom);
     goto failure;
   }
-
-  if (dom->domain_id != UNINIT_DOM_ID || dom->state != DOMAIN_NOT_COMMITED) {
-    ERROR("The domain %p is already committed.", dom);
-    goto failure;
-  }
-
-  if (dom->entries.entries == NULL) {
-    ERROR("The entries should have been initialized.");
-    goto failure;
-  }
-
-  // All checks are done, call into the capability library.
-  if (create_domain(&(dom->domain_id)) != SUCCESS) {
-    ERROR("Monitor rejected the creation of a domain for domain %p", dom);
-    goto failure;
-  }
-
   // Add the segments.
   dll_foreach(&(dom->segments), segment, list) {
+    // Skip segments already commited;
+    if (segment->state == DRIVER_COMMITED) {
+      continue;
+    }
     switch(segment->tpe) {
       case SHARED:
         if (share_region(
@@ -441,69 +446,86 @@ int driver_commit_domain(driver_domain_t *dom)
         ERROR("Invalid tpe for segment!");
         goto delete_fail;
     }
+    segment->state = DRIVER_COMMITED;
     DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
         segment->pa, segment->pa + segment->size, segment->tpe);
   }
-
-  // Set the cores and traps.
-  if (set_domain_traps(dom->domain_id, dom->traps) != SUCCESS) {
-    ERROR("Unable to set the traps for the domain.");
-    goto delete_fail;
+  return SUCCESS;
+delete_fail:
+  if (revoke_domain(dom->domain_id) != SUCCESS) {
+    ERROR("Failed to revoke the domain %lld for domain %p.", dom->domain_id, dom);
   }
-  if (set_domain_cores(dom->domain_id, dom->cores) != SUCCESS) {
-    ERROR("Unable to set the cores for the domain");
-    goto delete_fail;
+  dom->domain_id = UNINIT_DOM_ID;
+failure:
+  return FAILURE;
+}
+
+int driver_commit_domain(driver_domain_t *dom, int full)
+{
+  if (dom == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  } 
+  if (dom->pid != current->pid) {
+    ERROR("Wrong pid for dom");
+    ERROR("Expected: %d, got: %d", dom->pid, current->pid);
+    goto failure;
+  }
+  if (!dll_is_empty(&(dom->raw_segments))) {
+    ERROR("The domain %p's memory is not correctly initialized.", dom);
+    goto failure;
+  }
+  if (dll_is_empty(&dom->segments)) {
+    ERROR("Missing segments for domain %p", dom);
+    goto failure;
   }
 
-  if (set_domain_perm(dom->domain_id, dom->perm) != SUCCESS) {
-    ERROR("Unable to set the permissions for the domain.");
-    goto delete_fail;
+  if (dom->domain_id == UNINIT_DOM_ID) {
+    ERROR("The domain %p is not registered with the monitor", dom);
+    goto failure;
   }
 
-  if (set_domain_switch(dom->domain_id, dom->switch_type) != SUCCESS) {
-    ERROR("Unable to set the domain's switch type.");
-    goto delete_fail;
+  if (dom->state != DRIVER_NOT_COMMITED) {
+    ERROR("The domain %p is already committed.", dom);
+    goto failure;
   }
 
-  // Set the entries for all the cores of the domain.
-  do {
-    usize value = dom->cores, counter = 0;
-    while (value > 0) {
-      if ((value & 1) != 0) {
-        if (set_domain_entry_on_core(
-          dom->domain_id,
-          counter,
-          dom->entries.entries[counter].cr3,
-          dom->entries.entries[counter].rip,
-          dom->entries.entries[counter].rsp) != SUCCESS) {
-          ERROR("Unable to set the entry point on core %lld, for %llx",
-              counter, dom->cores);
-          goto delete_fail;
-        } 
-      }
-      counter++;
-      value >>= 1;
+  // We need to commit some of the configuration.
+  if (full != 0) {
+    usize core_map = dom->configs[TYCHE_CONFIG_CORES];
+    if (driver_commit_regions(dom) != SUCCESS) {
+      ERROR("Failed to commit regions.");
+      goto failure;
     }
-  } while(0);
+    
+    // The configurations.
+    for (int i = 0; i < TYCHE_NR_CONFIGS; i++) {
+      if (driver_commit_domain_configuration(dom, i) != SUCCESS) {
+        ERROR("Failed to commit config %d", i);
+        goto failure;
+      }
+    }
 
+    // Set the entries.
+    for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
+      if (((1 << i) & core_map) != 0 && driver_commit_entry_on_core(dom, i) != SUCCESS) {
+        ERROR("Unable to set entry capability for core %d", i); 
+        goto failure;
+      }
+    } 
+  }
   // Commit the domain.
   if (seal_domain(dom->domain_id) != SUCCESS) {
     ERROR("Unable to seal domain %p", dom);
-    goto delete_fail;
+    goto failure;
   }
   
   // Mark the state of the domain as committed.
-  dom->state = DOMAIN_COMMITED;
+  dom->state = DRIVER_COMMITED;
   
   DEBUG("Managed to seal domain %lld | dom %p", dom->domain_id, dom->handle);
   // We are all done!
   return SUCCESS;
-delete_fail:
-  if (revoke_domain(dom->domain_id) != SUCCESS) {
-    ERROR("Failed to revoke the domain %lld for domain %p.",
-        dom->domain_id, dom);
-  }
-  dom->domain_id = UNINIT_DOM_ID;
 failure:
   return FAILURE;
 }
@@ -534,7 +556,7 @@ int driver_delete_domain(driver_domain_t *dom)
     ERROR("The domain is null.");
     goto failure;
   }
-  if (dom->domain_id == UNINIT_DOM_ID || dom->state != DOMAIN_COMMITED) {
+  if (dom->domain_id == UNINIT_DOM_ID) {
     goto delete_dom_struct;
   }
   if (revoke_domain(dom->domain_id) != SUCCESS) {

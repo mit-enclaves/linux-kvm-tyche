@@ -221,7 +221,7 @@ static int setup_memory_capabilities(struct kvm* kvm)
     ERROR("No tyche domain found for the provided kvm struct.");
     goto failure;
   } 
-  if (tyche->domain->state == DOMAIN_COMMITED) {
+  if (tyche->domain->state == DRIVER_COMMITED) {
     ERROR("The domain is already committed!");
     goto failure;
   }
