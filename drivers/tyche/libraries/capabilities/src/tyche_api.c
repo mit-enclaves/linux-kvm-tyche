@@ -84,63 +84,16 @@ fail:
   return FAILURE;
 }
 
-int tyche_set_traps(capa_index_t management, usize traps)
+int tyche_set_domain_config(capa_index_t management, tyche_configurations_t idx,
+			    usize value)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_CONFIGURE,
-    .arg_1 = TYCHE_CONFIG_TRAPS,
+    .arg_1 = idx,
     .arg_2 = management,
-    .arg_3 = traps,
+    .arg_3 = value,
   };
   if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int tyche_set_cores(capa_index_t management, usize cores)
-{
-  vmcall_frame_t frame = {
-    .vmcall = TYCHE_CONFIGURE,
-    .arg_1 = TYCHE_CONFIG_CORES,
-    .arg_2 = management,
-    .arg_3 = cores,
-  };
-  if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int tyche_set_perm(capa_index_t management, usize perm)
-{
-  vmcall_frame_t frame = {
-    .vmcall = TYCHE_CONFIGURE,
-    .arg_1 = TYCHE_CONFIG_PERMISSIONS,
-    .arg_2 = management,
-    .arg_3 = perm,
-  };
-  if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int tyche_set_switch(capa_index_t management, usize swtype)
-{
-  vmcall_frame_t frame = {
-    .vmcall = TYCHE_CONFIGURE,
-    .arg_1 = TYCHE_CONFIG_SWITCH,
-    .arg_2 = management,
-    .arg_3 = swtype,
-  };
-  if (tyche_call_cli(&frame) != SUCCESS) {
     goto failure;
   }
   return SUCCESS;
