@@ -584,7 +584,6 @@ delete_dom_struct:
     free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
   }
   dll_remove(&domains, dom, list);
-  kfree(dom->entries.entries);
   kfree(dom);
   return SUCCESS;
 failure:
