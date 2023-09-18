@@ -308,7 +308,6 @@ static int setup_memory_capabilities(struct kvm* kvm)
   // TODO: should also do the mprotects... Not sure yet how.
   // We might have to go through the kvm memory slots a second time.
   // Or we could do it in the loop above.
-
   // All done, return!
   return SUCCESS;
 failure:
@@ -368,8 +367,16 @@ static int tyche_vcpu_pre_run(struct kvm_vcpu *vcpu)
     ERROR("Unable to setup the memory capabilities for the vm");
     return FAILURE;
   }
+  printk(KERN_ERR "Here is the set rip: %lx\n", vcpu->arch.regs[VCPU_REGS_RIP]);
   LOG("Pre-run finished successfully.");
   return SUCCESS;
+}
+
+static fastpath_t tyche_vcpu_run(struct kvm_vcpu *vcpu)
+{
+  //TODO make sure we commit everything and then do a switch. 
+  printk(KERN_ERR "In the vcpu run\n");
+  return EXIT_FASTPATH_NONE;
 }
 
 static void tyche_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
@@ -453,7 +460,7 @@ static struct kvm_x86_ops tyche_x86_ops __initdata = {
 	.flush_tlb_guest = NULL,// vmx_flush_tlb_guest,
 
 	.vcpu_pre_run = tyche_vcpu_pre_run,
-	.vcpu_run = NULL, // vmx_vcpu_run,
+	.vcpu_run = tyche_vcpu_run, // vmx_vcpu_run,
 	.handle_exit = NULL, //vmx_handle_exit,
 	.skip_emulated_instruction = NULL, // vmx_skip_emulated_instruction,
 	.update_emulated_instruction = NULL, //vmx_update_emulated_instruction,

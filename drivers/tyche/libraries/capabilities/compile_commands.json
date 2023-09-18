@@ -1,19 +1,53 @@
 [
   {
     "arguments": [
-      "/usr/bin/gcc",
+      "/usr/bin/x86_64-linux-gnu-gcc-10",
       "-DTYCHE_USER_SPACE=1",
       "-g",
       "-Iinclude/",
       "-I../dll/include",
       "-I../common/include",
       "-c",
+      "src/ecs.c",
       "-o",
-      "src/ecs.o",
-      "src/ecs.c"
+      "src/ecs.o"
     ],
-    "directory": "/home/castes/documents/vmxvmm/C/libraries/capabilities",
-    "file": "/home/castes/documents/vmxvmm/C/libraries/capabilities/src/ecs.c",
-    "output": "/home/castes/documents/vmxvmm/C/libraries/capabilities/src/ecs.o"
+    "directory": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities",
+    "file": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/ecs.c",
+    "output": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/ecs.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/x86_64-linux-gnu-gcc-10",
+      "-DTYCHE_USER_SPACE=1",
+      "-g",
+      "-Iinclude/",
+      "-I../dll/include",
+      "-I../common/include",
+      "-c",
+      "src/lib.c",
+      "-o",
+      "src/lib.o"
+    ],
+    "directory": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities",
+    "file": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/lib.c",
+    "output": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/lib.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/x86_64-linux-gnu-gcc-10",
+      "-DTYCHE_USER_SPACE=1",
+      "-g",
+      "-Iinclude/",
+      "-I../dll/include",
+      "-I../common/include",
+      "-c",
+      "src/tyche_api.c",
+      "-o",
+      "src/tyche_api.o"
+    ],
+    "directory": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities",
+    "file": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/tyche_api.c",
+    "output": "/home/aghosn/Documents/Programs/MSR/vmxvmm/linux/drivers/tyche/libraries/capabilities/src/tyche_api.o"
   }
 ]
