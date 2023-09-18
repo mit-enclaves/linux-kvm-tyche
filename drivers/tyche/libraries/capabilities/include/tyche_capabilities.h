@@ -58,6 +58,10 @@ int revoke_domain (domain_id_t id);
 /// The domain must not be sealed and values must be subsets of the parents.
 int set_domain_configuration (domain_id_t id, tyche_configurations_t idx,
                               usize value);
+
+/// Set values inside the target domain.
+int set_domain_core_configuration (domain_id_t id, usize core, usize idx,
+                                   usize value);
 /// Set the domain's entry point of the selected core.
 int set_domain_entry_on_core (domain_id_t id, usize core, usize cr3, usize rip,
                               usize rsp);

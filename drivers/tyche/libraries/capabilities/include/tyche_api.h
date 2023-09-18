@@ -19,6 +19,7 @@ typedef enum tyche_monitor_call_t
   TYCHE_CONFIGURE = 12,
   TYCHE_SET_ENTRY_ON_CORE = 13,
   TYCHE_SEND_ALIASED = 14,
+  TYCHE_CONFIGURE_CORE = 15,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t
@@ -67,6 +68,9 @@ int tyche_create_domain (capa_index_t *management);
 
 int tyche_set_domain_config (capa_index_t management,
                              tyche_configurations_t idx, usize value);
+
+int tyche_set_domain_core_config (capa_index_t management, usize core,
+                                  usize idx, usize value);
 
 int tyche_set_entry (capa_index_t management, usize core, usize cr3, usize rip,
                      usize rsp);
