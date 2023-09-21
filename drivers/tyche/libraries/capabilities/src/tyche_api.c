@@ -101,7 +101,7 @@ failure:
   return FAILURE;
 }
 
-int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx, usize value)
+int tyche_set_domain_core_config(capa_index_t management, usize core, usize group, usize idx, usize value)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_CONFIGURE_CORE,
