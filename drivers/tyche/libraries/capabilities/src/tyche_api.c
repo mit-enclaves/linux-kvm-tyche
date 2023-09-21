@@ -101,37 +101,13 @@ failure:
   return FAILURE;
 }
 
-int tyche_set_domain_core_config(capa_index_t management, usize core, usize group, usize idx, usize value)
+int tyche_set_domain_core_config(capa_index_t management, usize core, register_group_t group, usize idx, usize value)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_CONFIGURE_CORE,
     .arg_1 = core,
     .arg_2 = idx,
     .arg_3 = value,
-  };
-  if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int tyche_set_entry(
-    capa_index_t management,
-    usize core,
-    usize cr3,
-    usize rip,
-    usize rsp)
-{
-
-  vmcall_frame_t frame = {
-    .vmcall = TYCHE_SET_ENTRY_ON_CORE,
-    .arg_1 = management,
-    .arg_2 = core,
-    .arg_3 = cr3,
-    .arg_4 = rip,
-    .arg_5 = rsp,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
