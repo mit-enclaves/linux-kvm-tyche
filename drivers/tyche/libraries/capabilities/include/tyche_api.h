@@ -70,7 +70,7 @@ int tyche_set_domain_config (capa_index_t management,
                              tyche_configurations_t idx, usize value);
 
 int tyche_set_domain_core_config (capa_index_t management, usize core,
-                                  usize idx, usize value);
+                                  usize group, usize idx, usize value);
 
 int tyche_set_entry (capa_index_t management, usize core, usize cr3, usize rip,
                      usize rsp);
