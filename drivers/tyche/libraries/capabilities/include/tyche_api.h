@@ -18,9 +18,8 @@ typedef enum tyche_monitor_call_t
   TYCHE_SWITCH = 9,
   TYCHE_EXIT = 10,
   TYCHE_CONFIGURE = 12,
-  TYCHE_SET_ENTRY_ON_CORE = 13,
-  TYCHE_SEND_ALIASED = 14,
-  TYCHE_CONFIGURE_CORE = 15,
+  TYCHE_SEND_ALIASED = 13,
+  TYCHE_CONFIGURE_CORE = 14,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t
