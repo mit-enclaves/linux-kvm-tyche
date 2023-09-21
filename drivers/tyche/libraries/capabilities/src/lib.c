@@ -183,14 +183,14 @@ failure:
   return FAILURE;
 }
 
-int set_domain_core_configuration(domain_id_t id, usize core, usize idx, usize value)
+int set_domain_core_configuration(domain_id_t id, usize core, usize group, usize idx, usize value)
 {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found.");
     goto failure;
   }
-  if (tyche_set_domain_core_config(child->management->local_id, core, idx, value) != SUCCESS) {
+  if (tyche_set_domain_core_config(child->management->local_id, core, group, idx, value) != SUCCESS) {
     ERROR("Unable to set core config %lld for dom %llx", idx, id);
     goto failure;
   }
