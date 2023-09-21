@@ -3,6 +3,7 @@
 
 #include "ecs.h"
 #include "tyche_capabilities_types.h"
+#include "tyche_register_map.h"
 
 // ———————————————————————————————— Globals —————————————————————————————————
 // //
@@ -60,10 +61,7 @@ int set_domain_configuration (domain_id_t id, tyche_configurations_t idx,
                               usize value);
 
 /// Set values inside the target domain.
-int set_domain_core_configuration (domain_id_t id, usize core, usize group,
-                                   usize idx, usize value);
-/// Set the domain's entry point of the selected core.
-int set_domain_entry_on_core (domain_id_t id, usize core, usize cr3, usize rip,
-                              usize rsp);
-
+int set_domain_core_configuration (domain_id_t id, usize core,
+                                   register_group_t group, usize idx,
+                                   usize value);
 #endif

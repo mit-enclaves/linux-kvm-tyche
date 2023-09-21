@@ -2,6 +2,7 @@
 #define __INCLUDE_TYCHE_API_H__
 
 #include "tyche_capabilities_types.h"
+#include "tyche_register_map.h"
 
 /// Copied from the tyche source code
 typedef enum tyche_monitor_call_t
@@ -70,10 +71,8 @@ int tyche_set_domain_config (capa_index_t management,
                              tyche_configurations_t idx, usize value);
 
 int tyche_set_domain_core_config (capa_index_t management, usize core,
-                                  usize group, usize idx, usize value);
-
-int tyche_set_entry (capa_index_t management, usize core, usize cr3, usize rip,
-                     usize rsp);
+                                  register_group_t group, usize idx,
+                                  usize value);
 
 int tyche_seal (capa_index_t *transition, capa_index_t management);
 
