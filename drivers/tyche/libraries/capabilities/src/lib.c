@@ -183,7 +183,7 @@ failure:
   return FAILURE;
 }
 
-int set_domain_core_configuration(domain_id_t id, usize core, usize group, usize idx, usize value)
+int set_domain_core_configuration(domain_id_t id, usize core, register_group_t group, usize idx, usize value)
 {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
@@ -192,27 +192,6 @@ int set_domain_core_configuration(domain_id_t id, usize core, usize group, usize
   }
   if (tyche_set_domain_core_config(child->management->local_id, core, group, idx, value) != SUCCESS) {
     ERROR("Unable to set core config %lld for dom %llx", idx, id);
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int set_domain_entry_on_core(
-    domain_id_t id,
-    usize core,
-    usize cr3,
-    usize rip,
-    usize rsp)
-{
-  child_domain_t *child = find_child(id);
-  if (child == NULL) {
-    ERROR("Child not found");
-    goto failure;
-  }
-  if (tyche_set_entry(child->management->local_id, core, cr3, rip, rsp) != SUCCESS) {
-    ERROR("Unable to set the entry point with a vmcall.");
     goto failure;
   }
   return SUCCESS;

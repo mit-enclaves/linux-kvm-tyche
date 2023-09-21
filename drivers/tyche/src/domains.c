@@ -371,15 +371,26 @@ int driver_commit_entry_on_core(driver_domain_t *dom, usize core)
     goto failure;
   }
 
-  if (set_domain_entry_on_core(
-    dom->domain_id,
-    core,
-    dom->entries.entries[core].cr3,
-    dom->entries.entries[core].rip,
-    dom->entries.entries[core].rsp) != SUCCESS) {
-    ERROR("Unable to set the entry point on core %lld", core);
+  // Set the domain's registers.
+  if (set_domain_core_configuration(
+        dom->domain_id, core, TYCHE_REG_GP, REG_GP_RSP, 
+        dom->entries.entries[core].rsp) != SUCCESS) {
+    ERROR("Unable to set RSP on core %llx", core);
+    goto failure;
+  } 
+  if (set_domain_core_configuration(
+        dom->domain_id, core, TYCHE_REG_GP, REG_GP_RIP,
+        dom->entries.entries[core].rip) != SUCCESS) {
+    ERROR("Unable to set RIP on core %llx", core);
     goto failure;
   }
+  if (set_domain_core_configuration(
+        dom->domain_id, core, TYCHE_REG_GP, REG_GP_CR3,
+        dom->entries.entries[core].cr3) != SUCCESS) {
+    ERROR("Unable to set CR3 on core %llx", core);
+    goto failure;
+  }
+
   return SUCCESS;
 failure:
   return FAILURE;
