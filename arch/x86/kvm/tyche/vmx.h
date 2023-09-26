@@ -16,6 +16,8 @@
 #include "../cpuid.h"
 #include "run_flags.h"
 
+#include "domains.h"
+
 #define MSR_TYPE_R	1
 #define MSR_TYPE_W	2
 #define MSR_TYPE_RW	3
@@ -384,6 +386,8 @@ struct kvm_vmx {
 	gpa_t ept_identity_map_addr;
 	/* Posted Interrupt Descriptor (PID) table for IPI virtualization */
 	u64 *pid_table;
+
+	driver_domain_t *domain;
 };
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
