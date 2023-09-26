@@ -2460,61 +2460,38 @@ static __init int vmx_disabled_by_bios(void)
 	       !boot_cpu_has(X86_FEATURE_VMX);
 }
 
-static int kvm_cpu_vmxon(u64 vmxon_pointer)
-{
-	u64 msr;
-
-	cr4_set_bits(X86_CR4_VMXE);
-
-	asm_volatile_goto("1: vmxon %[vmxon_pointer]\n\t"
-			  _ASM_EXTABLE(1b, %l[fault])
-			  : : [vmxon_pointer] "m"(vmxon_pointer)
-			  : : fault);
-	return 0;
-
-fault:
-	WARN_ONCE(1, "VMXON faulted, MSR_IA32_FEAT_CTL (0x3a) = 0x%llx\n",
-		  rdmsrl_safe(MSR_IA32_FEAT_CTL, &msr) ? 0xdeadbeef : msr);
-	cr4_clear_bits(X86_CR4_VMXE);
-
-	return -EFAULT;
-}
-
 static int vmx_hardware_enable(void)
 {
-	int cpu = raw_smp_processor_id();
-	u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
-	int r;
+	// int cpu = raw_smp_processor_id();
+	// u64 phys_addr = __pa(per_cpu(vmxarea, cpu));
+	// int r;
 
-	struct file tyche_handle;
-
-	tyche_create_domain(&tyche_handle);
-
-	printk(KERN_ERR "calling tyche_set_traps\n");
-	tyche_set_traps(&tyche_handle, 123);
-
-	printk(KERN_ERR "calling tyche_set_cores\n");
-	tyche_set_cores(&tyche_handle, 456);
-
+	// Given that tyche already runs under VMX, it would be a surprise if
+	// VMXE is not enabled on CR4
 	if (cr4_read_shadow() & X86_CR4_VMXE)
 		return -EBUSY;
 
-	/*
-	 * This can happen if we hot-added a CPU but failed to allocate
-	 * VP assist page for it.
-	 */
-	if (static_branch_unlikely(&enable_evmcs) &&
-	    !hv_get_vp_assist_page(cpu))
-		return -EFAULT;
+	// No need for evmcs
+	// /*
+	//  * This can happen if we hot-added a CPU but failed to allocate
+	//  * VP assist page for it.
+	//  */
+	// if (static_branch_unlikely(&enable_evmcs) &&
+	//     !hv_get_vp_assist_page(cpu))
+	// 	return -EFAULT;
 
-	intel_pt_handle_vmx(1);
+	// No need for performance counter
+	// intel_pt_handle_vmx(1);
 
-	r = kvm_cpu_vmxon(phys_addr);
-	if (r) {
-		intel_pt_handle_vmx(0);
-		return r;
-	}
+	// Tyche already enabled vmx on the physical CPU
+	// r = kvm_cpu_vmxon(phys_addr);
+	// if (r) {
+	// 	intel_pt_handle_vmx(0);
+	// 	return r;
+	// }
 
+	// KVM should communicate with tyche's memory region, but since we have
+	// already set enable_ept = 0, it doesn't matter here
 	if (enable_ept)
 		ept_sync_global();
 
