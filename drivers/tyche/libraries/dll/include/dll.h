@@ -26,6 +26,10 @@
 #define dll_is_empty(list) \
   ((list)->head == 0 && (list)->tail == 0)
 
+#define dll_head(list) ((list)->head)
+
+#define dll_tail(list) ((list)->tail)
+
 #define dll_foreach(list, curr, name) \
   for (curr = (list)->head; (curr) != 0; (curr) = (curr)->name.next)
 
