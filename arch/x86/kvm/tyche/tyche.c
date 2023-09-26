@@ -68,6 +68,8 @@
 #include "x86.h"
 #include "smm.h"
 
+#include "domains.h"
+
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
 
@@ -5770,10 +5772,157 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+// ———————————————————————— Memory Helper Functions ————————————————————————— //
+
+/// Called from the vcpu_pre_run to initialize a domain's resources.
+/// Specifically, it goes through the kvm memory slots and performs the appropriate
+/// capability operations to transfer memory resources to the VM domain.
+/// TODO: for now, only do share operations.
+static int setup_memory_capabilities(struct kvm *kvm)
+{
+	int i = 0, bkt = 0;
+	struct kvm_vmx *tyche = NULL;
+
+	if (kvm == NULL) {
+		printk(KERN_ERR "The provided kvm structure is null.\n");
+		goto failure;
+	}
+
+	// Extract the tyche domain.
+	tyche = to_kvm_vmx(kvm);
+	if (tyche == NULL || tyche->domain == NULL) {
+		printk(KERN_ERR
+		       "No tyche domain found for the provided kvm struct.\n");
+		goto failure;
+	}
+
+	if (tyche->domain->state == DOMAIN_COMMITED) {
+		printk(KERN_ERR "The domain is already committed!\n");
+		goto failure;
+	}
+
+	// Go through the address spaces.
+	// For each of them, inspect the kvm memory slots.
+	// If they are valid ones (not RO or missing pfn), find contiguous segments
+	// and perform a share/grant capability operation.
+	mutex_lock(&kvm->slots_arch_lock);
+	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+		struct kvm_memslots *slots = __kvm_memslots(kvm, i);
+		struct kvm_memory_slot *slot = NULL;
+
+		kvm_for_each_memslot(slot, bkt, slots) {
+			trace_printk(
+				"gnf: %llx, uaddr: %lx, size: %ld, slot %d\n",
+				slot->base_gfn, slot->userspace_addr,
+				slot->npages, slot->id);
+			usize vaddr = 0, size = 0;
+			kvm_pfn_t pfn =
+				gfn_to_pfn_memslot(slot, slot->base_gfn);
+			gfn_t base_gfn = slot->base_gfn;
+			if (pfn == KVM_PFN_NOSLOT ||
+			    pfn == KVM_PFN_ERR_RO_FAULT) {
+				// For the moment ignore these entries.
+				continue;
+			}
+			// We are going through the physical address space that corresponds
+			// to this domain's kvm memory slots. The goal is to identify "gaps", i.e.,
+			// non contiguous physical memory pages. Everytime we have a gap, we need
+			// to perform a different tyche driver capability call to transfer the right
+			// portion of physical memory.
+			// Note: with transparent hugepages enabled in the kernel, we should see
+			// very few gaps ( < 10) for a the default linux VM, and < 40 in regular
+			// kvm virtual machines.
+			// start and size below represent a contiguous segment of physical memory.
+			vaddr = slot->userspace_addr;
+			size = 1;
+			for (i = 1; i < slot->npages; i++) {
+				gfn_t gfn = slot->base_gfn + i;
+				kvm_pfn_t npfn = gfn_to_pfn_memslot(slot, gfn);
+				if (npfn != (pfn + size)) {
+					printk(KERN_ERR
+					       "Adding raw segment vaddr=%llx, size=%lld\n",
+					       vaddr, size);
+					// There is a gap in the address space, call tyche.
+					if (driver_add_raw_segment(
+						    tyche->domain, vaddr,
+						    pfn << PAGE_SHIFT,
+						    size << PAGE_SHIFT)) {
+						printk(KERN_ERR
+						       "Unable to add the segment to the domain.\n");
+						goto failure;
+					}
+					if (driver_mprotect_domain(
+						    tyche->domain, vaddr,
+						    size << PAGE_SHIFT,
+						    MEM_READ | MEM_WRITE |
+							    MEM_EXEC |
+							    MEM_SUPER |
+							    MEM_ACTIVE,
+						    SHARED,
+						    base_gfn << PAGE_SHIFT)) {
+						printk(KERN_ERR
+						       "Unable to mprotect the segment\n");
+						goto failure;
+					}
+					// Update the address space.
+					pfn = npfn;
+					vaddr = vaddr + size;
+					base_gfn = gfn;
+					size = 1;
+					continue;
+				}
+				// Contiguous entry, keep going.
+				size++;
+			}
+			// Sanity check.
+			if (i != slot->npages) {
+				printk(KERN_ERR
+				       "Why is the loop not going till the end?\n");
+				goto failure;
+			}
+			// Register last segment.
+			if (driver_add_raw_segment(tyche->domain, vaddr,
+						   pfn << PAGE_SHIFT,
+						   size << PAGE_SHIFT)) {
+				printk(KERN_ERR
+				       "Unable to register last segment!\n");
+				goto failure;
+			}
+			if (driver_mprotect_domain(
+				    tyche->domain, vaddr, size << PAGE_SHIFT,
+				    MEM_READ | MEM_WRITE | MEM_EXEC |
+					    MEM_SUPER | MEM_ACTIVE,
+				    SHARED, base_gfn << PAGE_SHIFT)) {
+				printk(KERN_ERR
+				       "Unable to mprotect the segment\n");
+				goto failure;
+			}
+		}
+	}
+	mutex_unlock(&kvm->slots_arch_lock);
+
+	// TODO: should also do the mprotects... Not sure yet how.
+	// We might have to go through the kvm memory slots a second time.
+	// Or we could do it in the loop above.
+
+	// All done, return!
+	return 0;
+
+failure:
+	return 1;
+}
+
 static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
+	struct kvm *kvm = vcpu->kvm;
+
 	if (vmx_emulation_required_with_pending_exception(vcpu)) {
 		kvm_prepare_emulation_failure_exit(vcpu);
+		return 0;
+	}
+
+	if (setup_memory_capabilities(kvm)) {
+		printk(KERN_ERR "Unable to setup the memory capabilities for the VM\n");
 		return 0;
 	}
 
@@ -7409,6 +7558,8 @@ free_vpid:
 
 static int vmx_vm_init(struct kvm *kvm)
 {
+	struct kvm_vmx *tyche = to_kvm_vmx(kvm);
+
 	if (!ple_gap)
 		kvm->arch.pause_in_guest = true;
 
@@ -7435,6 +7586,14 @@ static int vmx_vm_init(struct kvm *kvm)
 			break;
 		}
 	}
+
+	if (driver_create_domain(NULL, &(tyche->domain))) {
+		printk(KERN_ERR "Unable to create a new domain\n");
+		return 1;
+	} else {
+		printk(KERN_INFO "Created a domain: %p", tyche->domain);
+	}
+
 	return 0;
 }
 
@@ -8299,11 +8458,9 @@ static __init int hardware_setup(void)
 	    !(cpu_has_vmx_invvpid_single() || cpu_has_vmx_invvpid_global()))
 		enable_vpid = 0;
 
-	if (!cpu_has_vmx_ept() ||
-	    !cpu_has_vmx_ept_4levels() ||
-	    !cpu_has_vmx_ept_mt_wb() ||
-	    !cpu_has_vmx_invept_global())
-		enable_ept = 0;
+	// We expose the tyche region to the TD directly, KVM should not be in
+	// charge of the EPT
+	enable_ept = 0;
 
 	/* NX support is required for shadow paging. */
 	if (!enable_ept && !boot_cpu_has(X86_FEATURE_NX)) {

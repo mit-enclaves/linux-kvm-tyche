@@ -99,6 +99,12 @@ module_param_named(flush_on_reuse, force_flush_and_sync_on_reuse, bool, 0644);
  */
 bool tdp_enabled = false;
 
+/*
+ * @Tyche when setting this variable, tyche is responsible for the setup
+ * of second-level page tables and the mmu is mostly entirely ignored.
+ */
+bool tyche_enabled = false;
+
 static int max_huge_page_level __read_mostly;
 static int tdp_root_level __read_mostly;
 static int max_tdp_level __read_mostly;
@@ -5070,6 +5076,18 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
 	return role;
 }
 
+
+/*
+ * @Tyche must implement.
+ * We might need to reconfigure this thing.
+ */
+static void init_kvm_tyche_mmu(struct kvm_vcpu *vcpu,
+			       union kvm_cpu_role cpu_role)
+{
+	//TODO(aghosn)
+	return;
+}
+
 static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu,
 			     union kvm_cpu_role cpu_role)
 {
@@ -5286,6 +5304,8 @@ void kvm_init_mmu(struct kvm_vcpu *vcpu)
 
 	if (mmu_is_nested(vcpu))
 		init_kvm_nested_mmu(vcpu, cpu_role);
+	else if (tyche_enabled)
+		init_kvm_tyche_mmu(vcpu, cpu_role);
 	else if (tdp_enabled)
 		init_kvm_tdp_mmu(vcpu, cpu_role);
 	else
@@ -5711,6 +5731,20 @@ void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 	 * for them.
 	 */
 }
+
+/*
+ * Turn on tyche mmu.
+ */
+void kvm_enable_tyche_mmu(void)
+{
+  if (tdp_enabled) {
+    printk(KERN_ERR "tdp was enabled before tyche.\n");
+    return;
+  }
+  tyche_enabled = true;
+}
+
+EXPORT_SYMBOL_GPL(kvm_enable_tyche_mmu);
 
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 		       int tdp_max_root_level, int tdp_huge_page_level)
