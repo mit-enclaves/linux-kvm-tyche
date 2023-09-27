@@ -2889,16 +2889,16 @@ static void enter_pmode(struct kvm_vcpu *vcpu)
 	 * Update real mode segment cache. It may be not up-to-date if segment
 	 * register was written while vcpu was in a guest mode.
 	 */
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_ES], VCPU_SREG_ES);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_DS], VCPU_SREG_DS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_FS], VCPU_SREG_FS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_GS], VCPU_SREG_GS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_SS], VCPU_SREG_SS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_CS], VCPU_SREG_CS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_ES], VCPU_SREG_ES);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_DS], VCPU_SREG_DS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_FS], VCPU_SREG_FS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_GS], VCPU_SREG_GS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_SS], VCPU_SREG_SS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_CS], VCPU_SREG_CS);
 
 	vmx->rmode.vm86_active = 0;
 
-	__vmx_set_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_TR], VCPU_SREG_TR);
+	__vmx_set_segment(vcpu, &vmx->sregs[VCPU_SREG_TR], VCPU_SREG_TR);
 
 	flags = vmcs_readl(GUEST_RFLAGS);
 	flags &= RMODE_GUEST_OWNED_EFLAGS_BITS;
@@ -2910,17 +2910,32 @@ static void enter_pmode(struct kvm_vcpu *vcpu)
 
 	vmx_update_exception_bitmap(vcpu);
 
-	fix_pmode_seg(vcpu, VCPU_SREG_CS, &vmx->rmode.segs[VCPU_SREG_CS]);
-	fix_pmode_seg(vcpu, VCPU_SREG_SS, &vmx->rmode.segs[VCPU_SREG_SS]);
-	fix_pmode_seg(vcpu, VCPU_SREG_ES, &vmx->rmode.segs[VCPU_SREG_ES]);
-	fix_pmode_seg(vcpu, VCPU_SREG_DS, &vmx->rmode.segs[VCPU_SREG_DS]);
-	fix_pmode_seg(vcpu, VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
-	fix_pmode_seg(vcpu, VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
+	fix_pmode_seg(vcpu, VCPU_SREG_CS, &vmx->sregs[VCPU_SREG_CS]);
+	fix_pmode_seg(vcpu, VCPU_SREG_SS, &vmx->sregs[VCPU_SREG_SS]);
+	fix_pmode_seg(vcpu, VCPU_SREG_ES, &vmx->sregs[VCPU_SREG_ES]);
+	fix_pmode_seg(vcpu, VCPU_SREG_DS, &vmx->sregs[VCPU_SREG_DS]);
+	fix_pmode_seg(vcpu, VCPU_SREG_FS, &vmx->sregs[VCPU_SREG_FS]);
+	fix_pmode_seg(vcpu, VCPU_SREG_GS, &vmx->sregs[VCPU_SREG_GS]);
 }
 
-static void fix_rmode_seg(int seg, struct kvm_segment *save)
+static void __copy_segment_access_rights(struct kvm_segment *seg, struct kvm_segment *var)
 {
-	const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
+	seg->type = var->type;
+	seg->present = var->present;
+	seg->dpl = var->dpl;
+	seg->db = var->db;
+	seg->s = var->s;
+	seg->l = var->l;
+	seg->g = var->g;
+	seg->avl = var->avl;
+	seg->unusable = var->unusable;
+	seg->padding = var->padding;
+}
+
+static void fix_rmode_seg(struct kvm_vcpu *vcpu, int seg, struct kvm_segment *save)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	// const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
 	struct kvm_segment var = *save;
 
 	var.dpl = 0x3;
@@ -2945,10 +2960,11 @@ static void fix_rmode_seg(int seg, struct kvm_segment *save)
 					"protected mode (seg=%d)", seg);
 	}
 
-	vmcs_write16(sf->selector, var.selector);
-	vmcs_writel(sf->base, var.base);
-	vmcs_write32(sf->limit, var.limit);
-	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(&var));
+	__copy_segment_access_rights(&(vmx->sregs[seg]), &var);
+	// vmcs_write16(sf->selector, var.selector);
+	// vmcs_writel(sf->base, var.base);
+	// vmcs_write32(sf->limit, var.limit);
+	// vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(&var));
 }
 
 static void enter_rmode(struct kvm_vcpu *vcpu)
@@ -2957,13 +2973,13 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(vcpu->kvm);
 
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_TR], VCPU_SREG_TR);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_ES], VCPU_SREG_ES);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_DS], VCPU_SREG_DS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_FS], VCPU_SREG_FS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_GS], VCPU_SREG_GS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_SS], VCPU_SREG_SS);
-	vmx_get_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_CS], VCPU_SREG_CS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_TR], VCPU_SREG_TR);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_ES], VCPU_SREG_ES);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_DS], VCPU_SREG_DS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_FS], VCPU_SREG_FS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_GS], VCPU_SREG_GS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_SS], VCPU_SREG_SS);
+	vmx_get_segment(vcpu, &vmx->sregs[VCPU_SREG_CS], VCPU_SREG_CS);
 
 	vmx->rmode.vm86_active = 1;
 
@@ -2990,12 +3006,12 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
 	vmcs_writel(GUEST_CR4, vmcs_readl(GUEST_CR4) | X86_CR4_VME);
 	vmx_update_exception_bitmap(vcpu);
 
-	fix_rmode_seg(VCPU_SREG_SS, &vmx->rmode.segs[VCPU_SREG_SS]);
-	fix_rmode_seg(VCPU_SREG_CS, &vmx->rmode.segs[VCPU_SREG_CS]);
-	fix_rmode_seg(VCPU_SREG_ES, &vmx->rmode.segs[VCPU_SREG_ES]);
-	fix_rmode_seg(VCPU_SREG_DS, &vmx->rmode.segs[VCPU_SREG_DS]);
-	fix_rmode_seg(VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
-	fix_rmode_seg(VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
+	fix_rmode_seg(vcpu, VCPU_SREG_SS, &vmx->sregs[VCPU_SREG_SS]);
+	fix_rmode_seg(vcpu, VCPU_SREG_CS, &vmx->sregs[VCPU_SREG_CS]);
+	fix_rmode_seg(vcpu, VCPU_SREG_ES, &vmx->sregs[VCPU_SREG_ES]);
+	fix_rmode_seg(vcpu, VCPU_SREG_DS, &vmx->sregs[VCPU_SREG_DS]);
+	fix_rmode_seg(vcpu, VCPU_SREG_GS, &vmx->sregs[VCPU_SREG_GS]);
+	fix_rmode_seg(vcpu, VCPU_SREG_FS, &vmx->sregs[VCPU_SREG_FS]);
 }
 
 int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
@@ -3373,7 +3389,7 @@ void vmx_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	u32 ar;
 
 	if (vmx->rmode.vm86_active && seg != VCPU_SREG_LDTR) {
-		*var = vmx->rmode.segs[seg];
+		*var = vmx->sregs[seg];
 		if (seg == VCPU_SREG_TR
 		    || var->selector == vmx_read_guest_seg_selector(vmx, seg))
 			return;
@@ -3443,25 +3459,31 @@ static u32 vmx_segment_access_rights(struct kvm_segment *var)
 	return ar;
 }
 
+// Retain the vmx segment register cache in this implementation
 void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
+	// const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
 
 	vmx_segment_cache_clear(vmx);
 
 	if (vmx->rmode.vm86_active && seg != VCPU_SREG_LDTR) {
-		vmx->rmode.segs[seg] = *var;
-		if (seg == VCPU_SREG_TR)
-			vmcs_write16(sf->selector, var->selector);
-		else if (var->s)
-			fix_rmode_seg(seg, &vmx->rmode.segs[seg]);
+		vmx->sregs[seg] = *var;
+		// vmx->rmode.segs[seg] = *var;
+		if (seg == VCPU_SREG_TR) {
+			vmx->sregs[seg].selector = var->selector;
+			// vmcs_write16(sf->selector, var->selector);
+		} else if (var->s)
+			fix_rmode_seg(vcpu, seg, &vmx->sregs[seg]);
 		return;
 	}
 
-	vmcs_writel(sf->base, var->base);
-	vmcs_write32(sf->limit, var->limit);
-	vmcs_write16(sf->selector, var->selector);
+	vmx->sregs[seg].base = var->base;
+	vmx->sregs[seg].limit = var->limit;
+	vmx->sregs[seg].selector = var->selector;
+	// vmcs_writel(sf->base, var->base);
+	// vmcs_write32(sf->limit, var->limit);
+	// vmcs_write16(sf->selector, var->selector);
 
 	/*
 	 *   Fix the "Accessed" bit in AR field of segment registers for older
@@ -3477,7 +3499,8 @@ void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	if (is_unrestricted_guest(vcpu) && (seg != VCPU_SREG_LDTR))
 		var->type |= 0x1; /* Accessed */
 
-	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
+	__copy_segment_access_rights(&(vmx->sregs[seg]), var);
+	// vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
 }
 
 static void vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
