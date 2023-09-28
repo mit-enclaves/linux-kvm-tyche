@@ -226,7 +226,7 @@ int driver_mprotect_domain(
     goto failure;
   } 
 
-  if (dom->pid != current->pid) {
+  if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for domain");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
@@ -392,7 +392,7 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("The domain is null");
     goto failure;
   }
-  if (dom->pid != current->pid) {
+  if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for dom");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
@@ -466,7 +466,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     ERROR("The domain is null.");
     goto failure;
   } 
-  if (dom->pid != current->pid) {
+  if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for dom");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
