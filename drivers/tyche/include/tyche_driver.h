@@ -72,20 +72,20 @@ typedef struct {
 
 /// Structure to set permissions, i.e., traps or cores.
 typedef struct {
+  // Configuration type.
+  usize idx;
+  // Configuration values.
   usize value;
 } msg_set_perm_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
-#define TYCHE_GET_PHYSOFFSET _IOR('a', 'c', msg_info_t*)
-#define TYCHE_COMMIT _IOWR('a', 'd', void*)
-#define TYCHE_MPROTECT _IOW('a', 'e', msg_mprotect_t*)
-#define TYCHE_TRANSITION _IOR('a', 'f', msg_switch_t*)
-#define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_info_t*)
-#define TYCHE_SET_TRAPS _IOWR('a', 'i', msg_set_perm_t)
-#define TYCHE_SET_CORES _IOWR('a', 'j', msg_set_perm_t)
-#define TYCHE_SET_PERM _IOWR('a', 'k', msg_set_perm_t)
-#define TYCHE_SET_SWITCH _IOWR('a', 'l', msg_set_perm_t)
-#define TYCHE_SET_ENTRY_POINT _IOWR('a', 'm', msg_entry_on_core_t*)
+#define TYCHE_GET_PHYSOFFSET _IOR('a', 'c', msg_info_t *)
+#define TYCHE_COMMIT _IOWR('a', 'd', void *)
+#define TYCHE_MPROTECT _IOW('a', 'e', msg_mprotect_t *)
+#define TYCHE_TRANSITION _IOR('a', 'f', msg_switch_t *)
+#define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_info_t *)
+#define TYCHE_SET_DOMAIN_CONFIGURATION _IOWR('a', 'i', msg_set_perm_t)
+#define TYCHE_SET_ENTRY_POINT _IOWR('a', 'm', msg_entry_on_core_t *)
 
 #endif

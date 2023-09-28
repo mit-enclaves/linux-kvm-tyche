@@ -5819,7 +5819,7 @@ static int setup_memory_capabilities(struct kvm *kvm)
 		goto failure;
 	}
 
-	if (tyche->domain->state == DOMAIN_COMMITED) {
+	if (tyche->domain->state == DRIVER_COMMITED) {
 		printk(KERN_ERR "The domain is already committed!\n");
 		goto failure;
 	}

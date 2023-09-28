@@ -25,6 +25,7 @@ typedef enum tyche_configurations_t {
 	TYCHE_CONFIG_TRAPS = 1,
 	TYCHE_CONFIG_CORES = 2,
 	TYCHE_CONFIG_SWITCH = 3,
+	TYCHE_NR_CONFIGS = 4,
 } tyche_configurations_t;
 
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
@@ -60,16 +61,11 @@ int tyche_call(vmcall_frame_t *frame);
 
 int tyche_create_domain(capa_index_t *management);
 
-int tyche_set_cores(capa_index_t management, usize cores);
+int tyche_set_domain_config(capa_index_t management,
+                            tyche_configurations_t idx, usize value);
 
-int tyche_set_traps(capa_index_t management, usize traps);
-
-int tyche_set_perm(capa_index_t management, usize perm);
-
-int tyche_set_switch(capa_index_t management, usize swtype);
-
-int tyche_set_entry(capa_index_t management, usize core, usize cr3, usize rip,
-		    usize rsp);
+int tyche_set_entry (capa_index_t management, usize core, usize cr3, usize rip,
+                     usize rsp);
 
 int tyche_seal(capa_index_t *transition, capa_index_t management);
 

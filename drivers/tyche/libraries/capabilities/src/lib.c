@@ -167,70 +167,21 @@ fail:
   return FAILURE;
 }
 
-int set_domain_traps(domain_id_t id, usize traps)
+int set_domain_configuration(domain_id_t id, tyche_configurations_t idx, usize value)
 {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found");
     goto failure;
   }
-  if (tyche_set_traps(child->management->local_id, traps) != SUCCESS) {
-    ERROR("Unable to set the traps with a vmcall.");
+  if (tyche_set_domain_config(child->management->local_id, idx, value) != SUCCESS) {
+    ERROR("Unable to set config %d for dom %lld", idx, id);
     goto failure;
   }
   return SUCCESS;
 failure:
   return FAILURE;
 }
-
-int set_domain_cores(domain_id_t id, usize cores)
-{
-  child_domain_t *child = find_child(id);
-  if (child == NULL) {
-    ERROR("Child not found");
-    goto failure;
-  }
-  if (tyche_set_cores(child->management->local_id, cores) != SUCCESS) {
-    ERROR("Unable to set the cores with a vmcall.");
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int set_domain_perm(domain_id_t id, usize perm)
-{
-  child_domain_t *child = find_child(id);
-  if (child == NULL) {
-    ERROR("Child not found");
-    goto failure;
-  }
-  if (tyche_set_perm(child->management->local_id, perm) != SUCCESS) {
-    ERROR("Unable to set the perm with a vmcall.");
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int set_domain_switch(domain_id_t id, usize swtype)
-{
-  child_domain_t *child = find_child(id);
-  if (child == NULL) {
-    ERROR("Child not found");
-    goto failure;
-  }
-  if (tyche_set_switch(child->management->local_id, swtype) != SUCCESS) {
-    ERROR("Unable to set the switch with a vmcall.");
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
 
 int set_domain_entry_on_core(
     domain_id_t id,

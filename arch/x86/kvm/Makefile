@@ -30,7 +30,7 @@ kvm-amd-y		+= svm/svm.o svm/vmenter.o svm/pmu.o svm/nested.o svm/avic.o \
 			   svm/sev.o svm/hyperv.o
 
 kvm-tyche-y             += tyche/tyche.o tyche/vmenter.o tyche/pmu_intel.o tyche/vmcs12.o \
-			   tyche/hyperv.o tyche/nested.o tyche/posted_intr.o tyche/tychecall.o
+			   tyche/hyperv.o tyche/nested.o tyche/posted_intr.o
 ifdef CONFIG_KVM_TYCHE
 ccflags-y		+= -I $(srctree)/drivers/tyche/include
 ccflags-y		+= -I $(srctree)/drivers/tyche/libraries/common/include
