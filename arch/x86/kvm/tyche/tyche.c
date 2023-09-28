@@ -61,7 +61,6 @@
 #include "pmu.h"
 #include "sgx.h"
 #include "trace.h"
-#include "tychecall.h"
 #include "vmcs.h"
 #include "vmcs12.h"
 #include "vmx.h"
