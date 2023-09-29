@@ -524,36 +524,37 @@ static inline void vmx_segment_cache_clear(struct vcpu_vmx *vmx)
 
 static unsigned long host_idt_base;
 
-#if IS_ENABLED(CONFIG_HYPERV)
-static bool __read_mostly enlightened_vmcs = true;
-module_param(enlightened_vmcs, bool, 0444);
-
-static int hv_enable_l2_tlb_flush(struct kvm_vcpu *vcpu)
-{
-	struct hv_enlightened_vmcs *evmcs;
-	struct hv_partition_assist_pg **p_hv_pa_pg =
-			&to_kvm_hv(vcpu->kvm)->hv_pa_pg;
-	/*
-	 * Synthetic VM-Exit is not enabled in current code and so All
-	 * evmcs in singe VM shares same assist page.
-	 */
-	if (!*p_hv_pa_pg)
-		*p_hv_pa_pg = kzalloc(PAGE_SIZE, GFP_KERNEL_ACCOUNT);
-
-	if (!*p_hv_pa_pg)
-		return -ENOMEM;
-
-	evmcs = (struct hv_enlightened_vmcs *)to_vmx(vcpu)->loaded_vmcs->vmcs;
-
-	evmcs->partition_assist_page =
-		__pa(*p_hv_pa_pg);
-	evmcs->hv_vm_id = (unsigned long)vcpu->kvm;
-	evmcs->hv_enlightenments_control.nested_flush_hypercall = 1;
-
-	return 0;
-}
-
-#endif /* IS_ENABLED(CONFIG_HYPERV) */
+// No hyperv
+// #if IS_ENABLED(CONFIG_HYPERV)
+// static bool __read_mostly enlightened_vmcs = true;
+// module_param(enlightened_vmcs, bool, 0444);
+// 
+// static int hv_enable_l2_tlb_flush(struct kvm_vcpu *vcpu)
+// {
+// 	struct hv_enlightened_vmcs *evmcs;
+// 	struct hv_partition_assist_pg **p_hv_pa_pg =
+// 			&to_kvm_hv(vcpu->kvm)->hv_pa_pg;
+// 	/*
+// 	 * Synthetic VM-Exit is not enabled in current code and so All
+// 	 * evmcs in singe VM shares same assist page.
+// 	 */
+// 	if (!*p_hv_pa_pg)
+// 		*p_hv_pa_pg = kzalloc(PAGE_SIZE, GFP_KERNEL_ACCOUNT);
+// 
+// 	if (!*p_hv_pa_pg)
+// 		return -ENOMEM;
+// 
+// 	evmcs = (struct hv_enlightened_vmcs *)to_vmx(vcpu)->loaded_vmcs->vmcs;
+// 
+// 	evmcs->partition_assist_page =
+// 		__pa(*p_hv_pa_pg);
+// 	evmcs->hv_vm_id = (unsigned long)vcpu->kvm;
+// 	evmcs->hv_enlightenments_control.nested_flush_hypercall = 1;
+// 
+// 	return 0;
+// }
+// 
+// #endif /* IS_ENABLED(CONFIG_HYPERV) */
 
 /*
  * Comment's format: document - errata name - stepping - processor name.
@@ -7486,22 +7487,25 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 			tsx_ctrl->mask = ~(u64)TSX_CTRL_CPUID_CLEAR;
 	}
 
+	// Tyche has already loaded a new VMCS and there is no need to allocate
+	// vmcs and vmclear on KVM's side
 	err = alloc_loaded_vmcs(&vmx->vmcs01);
 	if (err < 0)
 		goto free_pml;
 
-	/*
-	 * Use Hyper-V 'Enlightened MSR Bitmap' feature when KVM runs as a
-	 * nested (L1) hypervisor and Hyper-V in L0 supports it. Enable the
-	 * feature only for vmcs01, KVM currently isn't equipped to realize any
-	 * performance benefits from enabling it for vmcs02.
-	 */
-	if (IS_ENABLED(CONFIG_HYPERV) && static_branch_unlikely(&enable_evmcs) &&
-	    (ms_hyperv.nested_features & HV_X64_NESTED_MSR_BITMAP)) {
-		struct hv_enlightened_vmcs *evmcs = (void *)vmx->vmcs01.vmcs;
+	// No need for EVMCS
+	// /*
+	//  * Use Hyper-V 'Enlightened MSR Bitmap' feature when KVM runs as a
+	//  * nested (L1) hypervisor and Hyper-V in L0 supports it. Enable the
+	//  * feature only for vmcs01, KVM currently isn't equipped to realize any
+	//  * performance benefits from enabling it for vmcs02.
+	//  */
+	// if (IS_ENABLED(CONFIG_HYPERV) && static_branch_unlikely(&enable_evmcs) &&
+	//     (ms_hyperv.nested_features & HV_X64_NESTED_MSR_BITMAP)) {
+	// 	struct hv_enlightened_vmcs *evmcs = (void *)vmx->vmcs01.vmcs;
 
-		evmcs->hv_enlightenments_control.msr_bitmap = 1;
-	}
+	// 	evmcs->hv_enlightenments_control.msr_bitmap = 1;
+	// }
 
 	/* The MSR bitmap starts with all ones */
 	bitmap_fill(vmx->shadow_msr_intercept.read, MAX_POSSIBLE_PASSTHROUGH_MSRS);
@@ -8495,14 +8499,15 @@ static __init int hardware_setup(void)
 	if (!cpu_has_vmx_tpr_shadow())
 		vmx_x86_ops.update_cr8_intercept = NULL;
 
-#if IS_ENABLED(CONFIG_HYPERV)
-	if (ms_hyperv.nested_features & HV_X64_NESTED_GUEST_MAPPING_FLUSH
-	    && enable_ept) {
-		vmx_x86_ops.tlb_remote_flush = hv_remote_flush_tlb;
-		vmx_x86_ops.tlb_remote_flush_with_range =
-				hv_remote_flush_tlb_with_range;
-	}
-#endif
+// No hyperv
+// #if IS_ENABLED(CONFIG_HYPERV)
+// 	if (ms_hyperv.nested_features & HV_X64_NESTED_GUEST_MAPPING_FLUSH
+// 	    && enable_ept) {
+// 		vmx_x86_ops.tlb_remote_flush = hv_remote_flush_tlb;
+// 		vmx_x86_ops.tlb_remote_flush_with_range =
+// 				hv_remote_flush_tlb_with_range;
+// 	}
+// #endif
 
 	if (!cpu_has_vmx_ple()) {
 		ple_gap = 0;
@@ -8644,29 +8649,30 @@ static void vmx_exit(void)
 
 	kvm_exit();
 
-#if IS_ENABLED(CONFIG_HYPERV)
-	if (static_branch_unlikely(&enable_evmcs)) {
-		int cpu;
-		struct hv_vp_assist_page *vp_ap;
-		/*
-		 * Reset everything to support using non-enlightened VMCS
-		 * access later (e.g. when we reload the module with
-		 * enlightened_vmcs=0)
-		 */
-		for_each_online_cpu(cpu) {
-			vp_ap =	hv_get_vp_assist_page(cpu);
-
-			if (!vp_ap)
-				continue;
-
-			vp_ap->nested_control.features.directhypercall = 0;
-			vp_ap->current_nested_vmcs = 0;
-			vp_ap->enlighten_vmentry = 0;
-		}
-
-		static_branch_disable(&enable_evmcs);
-	}
-#endif
+// No hyperv
+// #if IS_ENABLED(CONFIG_HYPERV)
+// 	if (static_branch_unlikely(&enable_evmcs)) {
+// 		int cpu;
+// 		struct hv_vp_assist_page *vp_ap;
+// 		/*
+// 		 * Reset everything to support using non-enlightened VMCS
+// 		 * access later (e.g. when we reload the module with
+// 		 * enlightened_vmcs=0)
+// 		 */
+// 		for_each_online_cpu(cpu) {
+// 			vp_ap =	hv_get_vp_assist_page(cpu);
+// 
+// 			if (!vp_ap)
+// 				continue;
+// 
+// 			vp_ap->nested_control.features.directhypercall = 0;
+// 			vp_ap->current_nested_vmcs = 0;
+// 			vp_ap->enlighten_vmentry = 0;
+// 		}
+// 
+// 		static_branch_disable(&enable_evmcs);
+// 	}
+// #endif
 	vmx_cleanup_l1d_flush();
 
 	allow_smaller_maxphyaddr = false;
@@ -8677,38 +8683,39 @@ static int __init vmx_init(void)
 {
 	int r, cpu;
 
-#if IS_ENABLED(CONFIG_HYPERV)
-	/*
-	 * Enlightened VMCS usage should be recommended and the host needs
-	 * to support eVMCS v1 or above. We can also disable eVMCS support
-	 * with module parameter.
-	 */
-	if (enlightened_vmcs &&
-	    ms_hyperv.hints & HV_X64_ENLIGHTENED_VMCS_RECOMMENDED &&
-	    (ms_hyperv.nested_features & HV_X64_ENLIGHTENED_VMCS_VERSION) >=
-	    KVM_EVMCS_VERSION) {
-
-		/* Check that we have assist pages on all online CPUs */
-		for_each_online_cpu(cpu) {
-			if (!hv_get_vp_assist_page(cpu)) {
-				enlightened_vmcs = false;
-				break;
-			}
-		}
-
-		if (enlightened_vmcs) {
-			pr_info("KVM: vmx: using Hyper-V Enlightened VMCS\n");
-			static_branch_enable(&enable_evmcs);
-		}
-
-		if (ms_hyperv.nested_features & HV_X64_NESTED_DIRECT_FLUSH)
-			vmx_x86_ops.enable_l2_tlb_flush
-				= hv_enable_l2_tlb_flush;
-
-	} else {
-		enlightened_vmcs = false;
-	}
-#endif
+// No hyperv
+// #if IS_ENABLED(CONFIG_HYPERV)
+// 	/*
+// 	 * Enlightened VMCS usage should be recommended and the host needs
+// 	 * to support eVMCS v1 or above. We can also disable eVMCS support
+// 	 * with module parameter.
+// 	 */
+// 	if (enlightened_vmcs &&
+// 	    ms_hyperv.hints & HV_X64_ENLIGHTENED_VMCS_RECOMMENDED &&
+// 	    (ms_hyperv.nested_features & HV_X64_ENLIGHTENED_VMCS_VERSION) >=
+// 	    KVM_EVMCS_VERSION) {
+// 
+// 		/* Check that we have assist pages on all online CPUs */
+// 		for_each_online_cpu(cpu) {
+// 			if (!hv_get_vp_assist_page(cpu)) {
+// 				enlightened_vmcs = false;
+// 				break;
+// 			}
+// 		}
+// 
+// 		if (enlightened_vmcs) {
+// 			pr_info("KVM: vmx: using Hyper-V Enlightened VMCS\n");
+// 			static_branch_enable(&enable_evmcs);
+// 		}
+// 
+// 		if (ms_hyperv.nested_features & HV_X64_NESTED_DIRECT_FLUSH)
+// 			vmx_x86_ops.enable_l2_tlb_flush
+// 				= hv_enable_l2_tlb_flush;
+// 
+// 	} else {
+// 		enlightened_vmcs = false;
+// 	}
+// #endif
 
 	r = kvm_init(&vmx_init_ops, sizeof(struct vcpu_vmx),
 		     __alignof__(struct vcpu_vmx), THIS_MODULE);
