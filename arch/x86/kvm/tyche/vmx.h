@@ -313,11 +313,6 @@ struct vcpu_vmx {
 	} msr_autostore;
 
 	struct {
-		int vm86_active;
-		ulong save_rflags;
-		struct kvm_segment segs[8];
-	} rmode;
-	struct {
 		u32 bitmask; /* 4 bits per segment (1 bit per field) */
 		struct kvm_save_segment {
 			u16 selector;
