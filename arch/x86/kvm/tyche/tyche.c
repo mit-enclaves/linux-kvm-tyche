@@ -1394,11 +1394,18 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
 static void vmx_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+ 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(vcpu->kvm);
 
-	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
+	// TODO: I'm over-simplifying things here. We need to double check
+	// which register kvm and tyche saves.
+	driver_switch_domain(kvm_vmx->domain, NULL);
+	//vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
 
+	// TODO: I assume we're going to enable APICv, so we should implement
+	// this part on tyche (load pi descriptor when doing a domain switch)
 	vmx_vcpu_pi_load(vcpu, cpu);
 
+	// TODO: ???
 	vmx->host_debugctlmsr = get_debugctlmsr();
 }
 
