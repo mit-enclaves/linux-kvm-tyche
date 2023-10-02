@@ -110,6 +110,15 @@ config KVM_TYCHE
 	  To compile this as a module, choose M here: the module
 	  will be called kvm-tyche.
 
+config KVM_THEMIS
+  tristate "KVM for **Transparent** Tyche backend support"
+  depends on KVM && IA32_FEAT_CTL
+  help
+    Provides a Transparent Tyche backend for kvm.
+    
+    To compile this as a module, choos M here: the module will be called
+    kvm-themis.
+
 config KVM_AMD
 	tristate "KVM for AMD processors support"
 	depends on KVM
