@@ -7,7 +7,6 @@
 #include "vmx.h"
 
 /// Write the domain's core configuraiton field.
-int write_domain_config(struct vcpu_vmx *vmx, usize core,
-			register_group_t group, usize idx, usize value);
+int write_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx, usize value);
 
 #endif
