@@ -36,7 +36,7 @@ kvm-amd-y		+= svm/svm.o svm/vmenter.o svm/pmu.o svm/nested.o svm/avic.o \
 
 kvm-tyche-y             += tyche/tyche.o
 kvm-themis-y	+= themis/vmx.o themis/vmenter.o themis/pmu_intel.o themis/vmcs12.o \
-			   themis/hyperv.o themis/nested.o themis/posted_intr.o
+			   themis/hyperv.o themis/nested.o themis/posted_intr.o themis/tyche.o
 
 
 ifdef CONFIG_HYPERV

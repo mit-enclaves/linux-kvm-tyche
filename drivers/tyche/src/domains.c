@@ -308,6 +308,42 @@ failure:
   return FAILURE;
 }
 
+/// Expose the configuration of fields.
+int driver_set_domain_core_config (driver_domain_t *dom, usize core,
+                                   register_group_t group, usize idx,
+                                   usize value) {
+  if (dom == NULL) {
+    ERROR("The domain is null");
+    goto failure;
+  }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
+    ERROR("Trying to commit entry point on unallowed core");
+    goto failure;
+  }
+  if (core >= ENTRIES_PER_DOMAIN) {
+    ERROR("The supplied core is greater than supported cores.");
+    goto failure;
+  }
+  if (dom->state != DRIVER_NOT_COMMITED) {
+    ERROR("The domain is already committed or dead");
+    goto failure;
+  }
+  if (dom->domain_id == UNINIT_DOM_ID) {
+    ERROR("The domain is not initialized with tyche");
+    goto failure;
+  } 
+  if (set_domain_core_configuration(dom->domain_id, core, group, idx, value)
+      != SUCCESS) {
+    ERROR("Unable to set core configuration");
+    goto failure;
+  }
+
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_set_domain_core_config);
+
 int driver_commit_domain_configuration(driver_domain_t *dom, driver_domain_config_t idx)
 {
   if (dom == NULL) {

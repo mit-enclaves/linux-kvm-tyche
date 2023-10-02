@@ -2459,24 +2459,24 @@ static __init int vmx_disabled_by_bios(void)
 	       !boot_cpu_has(X86_FEATURE_VMX);
 }
 
+/// TODO(@aghosn): we do not allow vmxon with a tyche backend.
 static int kvm_cpu_vmxon(u64 vmxon_pointer)
 {
-	u64 msr;
-
-	cr4_set_bits(X86_CR4_VMXE);
-
-	asm_volatile_goto("1: vmxon %[vmxon_pointer]\n\t"
-			  _ASM_EXTABLE(1b, %l[fault])
-			  : : [vmxon_pointer] "m"(vmxon_pointer)
-			  : : fault);
+//	u64 msr;
+//	cr4_set_bits(X86_CR4_VMXE);
+//
+//	asm_volatile_goto("1: vmxon %[vmxon_pointer]\n\t"
+//			  _ASM_EXTABLE(1b, %l[fault])
+//			  : : [vmxon_pointer] "m"(vmxon_pointer)
+//			  : : fault);
 	return 0;
 
-fault:
-	WARN_ONCE(1, "VMXON faulted, MSR_IA32_FEAT_CTL (0x3a) = 0x%llx\n",
-		  rdmsrl_safe(MSR_IA32_FEAT_CTL, &msr) ? 0xdeadbeef : msr);
-	cr4_clear_bits(X86_CR4_VMXE);
-
-	return -EFAULT;
+//fault:
+//	WARN_ONCE(1, "VMXON faulted, MSR_IA32_FEAT_CTL (0x3a) = 0x%llx\n",
+//		  rdmsrl_safe(MSR_IA32_FEAT_CTL, &msr) ? 0xdeadbeef : msr);
+//	cr4_clear_bits(X86_CR4_VMXE);
+//
+//	return -EFAULT;
 }
 
 static int vmx_hardware_enable(void)
@@ -8382,9 +8382,10 @@ static __init int hardware_setup(void)
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 
-	if (enable_ept)
+  // TODO @aghosn: removing this 
+	/*if (enable_ept)
 		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
-				      cpu_has_vmx_ept_execute_only());
+				      cpu_has_vmx_ept_execute_only());*/
 
 	/*
 	 * Setup shadow_me_value/shadow_me_mask to include MKTME KeyID
@@ -8392,8 +8393,10 @@ static __init int hardware_setup(void)
 	 */
 	vmx_setup_me_spte_mask();
 
-	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
-			  ept_caps_to_lpage_level(vmx_capability.ept));
+  // TODO @aghosn: removing this.
+	/*kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
+		 ept_caps_to_lpage_level(vmx_capability.ept));*/
+  kvm_enable_tyche_mmu();
 
 	/*
 	 * Only enable PML when hardware supports PML feature, and both EPT

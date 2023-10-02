@@ -5,8 +5,8 @@
 #include <linux/mm_types.h>
 
 #include "dll.h"
-#include "tyche_capabilities_types.h"
 #include "tyche_api.h"
+#include "tyche_capabilities_types.h"
 #define _IN_MODULE
 #include "tyche_driver.h"
 #undef _IN_MODULE
@@ -119,7 +119,8 @@ int driver_init_capabilities(void);
 /// If ptr is not null, it points to the newly created driver domain.
 int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr);
 /// Handles an mmap call to the driver.
-/// This reserves a contiguous region and registers it until a domain claims it.
+/// This reserves a contiguous region and registers it until a domain claims
+/// it.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
 /// Add a raw memory segment to the domain.
@@ -139,6 +140,11 @@ int driver_mprotect_domain(driver_domain_t *domain, usize vstart, usize size,
 int driver_set_domain_configuration(driver_domain_t *domain,
 				    driver_domain_config_t tpe, usize value);
 
+/// Expose the configuration of fields.
+int driver_set_domain_core_config(driver_domain_t *dom, usize core,
+				  register_group_t group, usize idx,
+				  usize value);
+
 /// Set the entry point on a core.
 int driver_set_entry_on_core(driver_domain_t *domain, usize core, usize cr3,
 			     usize rip, usize rsp);
@@ -153,7 +159,8 @@ int driver_commit_domain_configuration(driver_domain_t *dom,
 /// Commit the entry on a core, i.e., call the capabilities.
 int driver_commit_entry_on_core(driver_domain_t *dom, usize core);
 
-/// Commits the domain. This is where the capability operations are mostly done.
+/// Commits the domain. This is where the capability operations are mostly
+/// done.
 int driver_commit_domain(driver_domain_t *domain, int full);
 
 /// Implements the transition into a domain.
