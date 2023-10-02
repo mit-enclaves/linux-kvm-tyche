@@ -11,6 +11,9 @@ typedef enum register_group_t
   TYCHE_REG_32 = 3,
   TYCHE_REG_64 = 4,
   TYCHE_REG_NAT = 5,
+  TYCHE_CTRL_32 = 6,
+  TYCHE_CTRL_64 = 7,
+  TYCHE_CTRL_NAT = 8,
 } register_group_t;
 
 /// General purpose map.
