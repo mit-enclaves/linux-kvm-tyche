@@ -81,65 +81,67 @@ static __always_inline void vmcs_checkl(unsigned long field)
 			 "Natural width accessor invalid for 32-bit field");
 }
 
+//TODO(@aghosn) disable this.
 static __always_inline unsigned long __vmcs_readl(unsigned long field)
 {
-	unsigned long value;
-
-#ifdef CONFIG_CC_HAS_ASM_GOTO_OUTPUT
-
-	asm_volatile_goto("1: vmread %[field], %[output]\n\t"
-			  "jna %l[do_fail]\n\t"
-
-			  _ASM_EXTABLE(1b, %l[do_exception])
-
-			  : [output] "=r" (value)
-			  : [field] "r" (field)
-			  : "cc"
-			  : do_fail, do_exception);
-
-	return value;
-
-do_fail:
-	WARN_ONCE(1, "kvm: vmread failed: field=%lx\n", field);
-	pr_warn_ratelimited("kvm: vmread failed: field=%lx\n", field);
-	return 0;
-
-do_exception:
-	kvm_spurious_fault();
-	return 0;
-
-#else /* !CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
-
-	asm volatile("1: vmread %2, %1\n\t"
-		     ".byte 0x3e\n\t" /* branch taken hint */
-		     "ja 3f\n\t"
-
-		     /*
-		      * VMREAD failed.  Push '0' for @fault, push the failing
-		      * @field, and bounce through the trampoline to preserve
-		      * volatile registers.
-		      */
-		     "xorl %k1, %k1\n\t"
-		     "2:\n\t"
-		     "push %1\n\t"
-		     "push %2\n\t"
-		     "call vmread_error_trampoline\n\t"
-
-		     /*
-		      * Unwind the stack.  Note, the trampoline zeros out the
-		      * memory for @fault so that the result is '0' on error.
-		      */
-		     "pop %2\n\t"
-		     "pop %1\n\t"
-		     "3:\n\t"
-
-		     /* VMREAD faulted.  As above, except push '1' for @fault. */
-		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_ONE_REG, %1)
-
-		     : ASM_CALL_CONSTRAINT, "=&r"(value) : "r"(field) : "cc");
-	return value;
-
-#endif /* CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+//	unsigned long value;
+//
+//#ifdef CONFIG_CC_HAS_ASM_GOTO_OUTPUT
+//
+//	asm_volatile_goto("1: vmread %[field], %[output]\n\t"
+//			  "jna %l[do_fail]\n\t"
+//
+//			  _ASM_EXTABLE(1b, %l[do_exception])
+//
+//			  : [output] "=r" (value)
+//			  : [field] "r" (field)
+//			  : "cc"
+//			  : do_fail, do_exception);
+//
+//	return value;
+//
+//do_fail:
+//	WARN_ONCE(1, "kvm: vmread failed: field=%lx\n", field);
+//	pr_warn_ratelimited("kvm: vmread failed: field=%lx\n", field);
+//	return 0;
+//
+//do_exception:
+//	kvm_spurious_fault();
+//	return 0;
+//
+//#else /* !CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+//
+//	asm volatile("1: vmread %2, %1\n\t"
+//		     ".byte 0x3e\n\t" /* branch taken hint */
+//		     "ja 3f\n\t"
+//
+//		     /*
+//		      * VMREAD failed.  Push '0' for @fault, push the failing
+//		      * @field, and bounce through the trampoline to preserve
+//		      * volatile registers.
+//		      */
+//		     "xorl %k1, %k1\n\t"
+//		     "2:\n\t"
+//		     "push %1\n\t"
+//		     "push %2\n\t"
+//		     "call vmread_error_trampoline\n\t"
+//
+//		     /*
+//		      * Unwind the stack.  Note, the trampoline zeros out the
+//		      * memory for @fault so that the result is '0' on error.
+//		      */
+//		     "pop %2\n\t"
+//		     "pop %1\n\t"
+//		     "3:\n\t"
+//
+//		     /* VMREAD faulted.  As above, except push '1' for @fault. */
+//		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_ONE_REG, %1)
+//
+//		     : ASM_CALL_CONSTRAINT, "=&r"(value) : "r"(field) : "cc");
+//	return value;
+//
+//#endif /* CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+  return 0;
 }
 
 static __always_inline u16 vmcs_read16(unsigned long field)
@@ -212,9 +214,10 @@ fault:									\
 	kvm_spurious_fault();						\
 } while (0)
 
+//TODO(@aghosn) disable this.
 static __always_inline void __vmcs_writel(unsigned long field, unsigned long value)
 {
-	vmx_asm2(vmwrite, "r"(field), "rm"(value), field, value);
+//	vmx_asm2(vmwrite, "r"(field), "rm"(value), field, value);
 }
 
 static __always_inline void vmcs_write16(unsigned long field, u16 value)
@@ -276,41 +279,45 @@ static __always_inline void vmcs_set_bits(unsigned long field, u32 mask)
 	__vmcs_writel(field, __vmcs_readl(field) | mask);
 }
 
+//TODO(@aghosn) disable this.
 static inline void vmcs_clear(struct vmcs *vmcs)
 {
-	u64 phys_addr = __pa(vmcs);
-
-	vmx_asm1(vmclear, "m"(phys_addr), vmcs, phys_addr);
+//	u64 phys_addr = __pa(vmcs);
+//
+//	vmx_asm1(vmclear, "m"(phys_addr), vmcs, phys_addr);
 }
 
+//TODO(@aghosn) disable this.
 static inline void vmcs_load(struct vmcs *vmcs)
 {
-	u64 phys_addr = __pa(vmcs);
-
-	if (static_branch_unlikely(&enable_evmcs))
-		return evmcs_load(phys_addr);
-
-	vmx_asm1(vmptrld, "m"(phys_addr), vmcs, phys_addr);
+//	u64 phys_addr = __pa(vmcs);
+//
+//	if (static_branch_unlikely(&enable_evmcs))
+//		return evmcs_load(phys_addr);
+//
+//	vmx_asm1(vmptrld, "m"(phys_addr), vmcs, phys_addr);
 }
 
+//TODO(@aghosn) disable this.
 static inline void __invvpid(unsigned long ext, u16 vpid, gva_t gva)
 {
-	struct {
-		u64 vpid : 16;
-		u64 rsvd : 48;
-		u64 gva;
-	} operand = { vpid, 0, gva };
-
-	vmx_asm2(invvpid, "r"(ext), "m"(operand), ext, vpid, gva);
+//	struct {
+//		u64 vpid : 16;
+//		u64 rsvd : 48;
+//		u64 gva;
+//	} operand = { vpid, 0, gva };
+//
+//	vmx_asm2(invvpid, "r"(ext), "m"(operand), ext, vpid, gva);
 }
 
+//TODO(@aghosn) disable this.
 static inline void __invept(unsigned long ext, u64 eptp, gpa_t gpa)
 {
-	struct {
-		u64 eptp, gpa;
-	} operand = {eptp, gpa};
-
-	vmx_asm2(invept, "r"(ext), "m"(operand), ext, eptp, gpa);
+//	struct {
+//		u64 eptp, gpa;
+//	} operand = {eptp, gpa};
+//
+//	vmx_asm2(invept, "r"(ext), "m"(operand), ext, eptp, gpa);
 }
 
 static inline void vpid_sync_vcpu_single(int vpid)

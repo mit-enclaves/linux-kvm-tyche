@@ -16,23 +16,25 @@
 #include "../cpuid.h"
 #include "run_flags.h"
 
-#define MSR_TYPE_R	1
-#define MSR_TYPE_W	2
-#define MSR_TYPE_RW	3
+#include "domains.h"
+
+#define MSR_TYPE_R 1
+#define MSR_TYPE_W 2
+#define MSR_TYPE_RW 3
 
 #define X2APIC_MSR(r) (APIC_BASE_MSR + ((r) >> 4))
 
 #ifdef CONFIG_X86_64
-#define MAX_NR_USER_RETURN_MSRS	7
+#define MAX_NR_USER_RETURN_MSRS 7
 #else
-#define MAX_NR_USER_RETURN_MSRS	4
+#define MAX_NR_USER_RETURN_MSRS 4
 #endif
 
-#define MAX_NR_LOADSTORE_MSRS	8
+#define MAX_NR_LOADSTORE_MSRS 8
 
 struct vmx_msrs {
-	unsigned int		nr;
-	struct vmx_msr_entry	val[MAX_NR_LOADSTORE_MSRS];
+	unsigned int nr;
+	struct vmx_msr_entry val[MAX_NR_LOADSTORE_MSRS];
 };
 
 struct vmx_uret_msr {
@@ -50,7 +52,7 @@ enum segment_cache_field {
 	SEG_FIELD_NR = 4
 };
 
-#define RTIT_ADDR_RANGE		4
+#define RTIT_ADDR_RANGE 4
 
 struct pt_ctx {
 	u64 ctl;
@@ -72,23 +74,23 @@ struct pt_desc {
 
 union vmx_exit_reason {
 	struct {
-		u32	basic			: 16;
-		u32	reserved16		: 1;
-		u32	reserved17		: 1;
-		u32	reserved18		: 1;
-		u32	reserved19		: 1;
-		u32	reserved20		: 1;
-		u32	reserved21		: 1;
-		u32	reserved22		: 1;
-		u32	reserved23		: 1;
-		u32	reserved24		: 1;
-		u32	reserved25		: 1;
-		u32	bus_lock_detected	: 1;
-		u32	enclave_mode		: 1;
-		u32	smi_pending_mtf		: 1;
-		u32	smi_from_vmx_root	: 1;
-		u32	reserved30		: 1;
-		u32	failed_vmentry		: 1;
+		u32 basic : 16;
+		u32 reserved16 : 1;
+		u32 reserved17 : 1;
+		u32 reserved18 : 1;
+		u32 reserved19 : 1;
+		u32 reserved20 : 1;
+		u32 reserved21 : 1;
+		u32 reserved22 : 1;
+		u32 reserved23 : 1;
+		u32 reserved24 : 1;
+		u32 reserved25 : 1;
+		u32 bus_lock_detected : 1;
+		u32 enclave_mode : 1;
+		u32 smi_pending_mtf : 1;
+		u32 smi_from_vmx_root : 1;
+		u32 reserved30 : 1;
+		u32 failed_vmentry : 1;
 	};
 	u32 full;
 };
@@ -259,9 +261,9 @@ struct nested_vmx {
 };
 
 struct vcpu_vmx {
-	struct kvm_vcpu       vcpu;
-	u8                    fail;
-	u8		      x2apic_msr_bitmap_mode;
+	struct kvm_vcpu vcpu;
+	u8 fail;
+	u8 x2apic_msr_bitmap_mode;
 
 	/*
 	 * If true, host state has been stored in vmx->loaded_vmcs for
@@ -270,12 +272,12 @@ struct vcpu_vmx {
 	 * values.  If false, host state is loaded in the CPU registers
 	 * and vmx->loaded_vmcs->host_state is invalid.
 	 */
-	bool		      guest_state_loaded;
+	bool guest_state_loaded;
 
-	unsigned long         exit_qualification;
-	u32                   exit_intr_info;
-	u32                   idt_vectoring_info;
-	ulong                 rflags;
+	unsigned long exit_qualification;
+	u32 exit_intr_info;
+	u32 idt_vectoring_info;
+	ulong rflags;
 
 	/*
 	 * User return MSRs are always emulated when enabled in the guest, but
@@ -283,23 +285,23 @@ struct vcpu_vmx {
 	 * of 64-bit mode or if EFER.SCE=1, thus the SYSCALL MSRs don't need to
 	 * be loaded into hardware if those conditions aren't met.
 	 */
-	struct vmx_uret_msr   guest_uret_msrs[MAX_NR_USER_RETURN_MSRS];
-	bool                  guest_uret_msrs_loaded;
+	struct vmx_uret_msr guest_uret_msrs[MAX_NR_USER_RETURN_MSRS];
+	bool guest_uret_msrs_loaded;
 #ifdef CONFIG_X86_64
-	u64		      msr_host_kernel_gs_base;
-	u64		      msr_guest_kernel_gs_base;
+	u64 msr_host_kernel_gs_base;
+	u64 msr_guest_kernel_gs_base;
 #endif
 
-	u64		      spec_ctrl;
-	u32		      msr_ia32_umwait_control;
+	u64 spec_ctrl;
+	u32 msr_ia32_umwait_control;
 
 	/*
 	 * loaded_vmcs points to the VMCS currently used in this vcpu. For a
 	 * non-nested (L1) guest, it always points to vmcs01. For a nested
 	 * guest (L2), it points to a different VMCS.
 	 */
-	struct loaded_vmcs    vmcs01;
-	struct loaded_vmcs   *loaded_vmcs;
+	struct loaded_vmcs vmcs01;
+	struct loaded_vmcs *loaded_vmcs;
 
 	struct msr_autoload {
 		struct vmx_msrs guest;
@@ -345,7 +347,7 @@ struct vcpu_vmx {
 	bool req_immediate_exit;
 
 	/* Support for PML */
-#define PML_ENTITY_NUM		512
+#define PML_ENTITY_NUM 512
 	struct page *pml_pg;
 
 	/* apic deadline value in host tsc */
@@ -369,7 +371,7 @@ struct vcpu_vmx {
 	struct lbr_desc lbr_desc;
 
 	/* Save desired MSR intercept (read: pass-through) state */
-#define MAX_POSSIBLE_PASSTHROUGH_MSRS	15
+#define MAX_POSSIBLE_PASSTHROUGH_MSRS 15
 	struct {
 		DECLARE_BITMAP(read, MAX_POSSIBLE_PASSTHROUGH_MSRS);
 		DECLARE_BITMAP(write, MAX_POSSIBLE_PASSTHROUGH_MSRS);
@@ -384,6 +386,9 @@ struct kvm_vmx {
 	gpa_t ept_identity_map_addr;
 	/* Posted Interrupt Descriptor (PID) table for IPI virtualization */
 	u64 *pid_table;
+
+	/*Tyche specific fields */
+	driver_domain_t *domain;
 };
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
@@ -452,20 +457,21 @@ void vmx_update_cpu_dirty_logging(struct kvm_vcpu *vcpu);
  * 0xc00-0xfff for writes.  MSRs not covered by either of the ranges always
  * VM-Exit.
  */
-#define __BUILD_VMX_MSR_BITMAP_HELPER(rtype, action, bitop, access, base)      \
-static inline rtype vmx_##action##_msr_bitmap_##access(unsigned long *bitmap,  \
-						       u32 msr)		       \
-{									       \
-	int f = sizeof(unsigned long);					       \
-									       \
-	if (msr <= 0x1fff)						       \
-		return bitop##_bit(msr, bitmap + base / f);		       \
-	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))		       \
-		return bitop##_bit(msr & 0x1fff, bitmap + (base + 0x400) / f); \
-	return (rtype)true;						       \
-}
-#define BUILD_VMX_MSR_BITMAP_HELPERS(ret_type, action, bitop)		       \
-	__BUILD_VMX_MSR_BITMAP_HELPER(ret_type, action, bitop, read,  0x0)     \
+#define __BUILD_VMX_MSR_BITMAP_HELPER(rtype, action, bitop, access, base) \
+	static inline rtype vmx_##action##_msr_bitmap_##access(           \
+		unsigned long *bitmap, u32 msr)                           \
+	{                                                                 \
+		int f = sizeof(unsigned long);                            \
+                                                                          \
+		if (msr <= 0x1fff)                                        \
+			return bitop##_bit(msr, bitmap + base / f);       \
+		else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))      \
+			return bitop##_bit(msr & 0x1fff,                  \
+					   bitmap + (base + 0x400) / f);  \
+		return (rtype) true;                                      \
+	}
+#define BUILD_VMX_MSR_BITMAP_HELPERS(ret_type, action, bitop)             \
+	__BUILD_VMX_MSR_BITMAP_HELPER(ret_type, action, bitop, read, 0x0) \
 	__BUILD_VMX_MSR_BITMAP_HELPER(ret_type, action, bitop, write, 0x800)
 
 BUILD_VMX_MSR_BITMAP_HELPERS(bool, test, test)
@@ -477,146 +483,115 @@ static inline u8 vmx_get_rvi(void)
 	return vmcs_read16(GUEST_INTR_STATUS) & 0xff;
 }
 
-#define __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS				\
-	(VM_ENTRY_LOAD_DEBUG_CONTROLS)
+#define __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS (VM_ENTRY_LOAD_DEBUG_CONTROLS)
 #ifdef CONFIG_X86_64
-	#define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS			\
-		(__KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS |			\
-		 VM_ENTRY_IA32E_MODE)
+#define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS \
+	(__KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS | VM_ENTRY_IA32E_MODE)
 #else
-	#define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS			\
-		__KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS
+#define KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS
 #endif
-#define KVM_OPTIONAL_VMX_VM_ENTRY_CONTROLS				\
-	(VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL |				\
-	 VM_ENTRY_LOAD_IA32_PAT |					\
-	 VM_ENTRY_LOAD_IA32_EFER |					\
-	 VM_ENTRY_LOAD_BNDCFGS |					\
-	 VM_ENTRY_PT_CONCEAL_PIP |					\
-	 VM_ENTRY_LOAD_IA32_RTIT_CTL)
+#define KVM_OPTIONAL_VMX_VM_ENTRY_CONTROLS                              \
+	(VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL | VM_ENTRY_LOAD_IA32_PAT | \
+	 VM_ENTRY_LOAD_IA32_EFER | VM_ENTRY_LOAD_BNDCFGS |              \
+	 VM_ENTRY_PT_CONCEAL_PIP | VM_ENTRY_LOAD_IA32_RTIT_CTL)
 
-#define __KVM_REQUIRED_VMX_VM_EXIT_CONTROLS				\
-	(VM_EXIT_SAVE_DEBUG_CONTROLS |					\
-	 VM_EXIT_ACK_INTR_ON_EXIT)
+#define __KVM_REQUIRED_VMX_VM_EXIT_CONTROLS \
+	(VM_EXIT_SAVE_DEBUG_CONTROLS | VM_EXIT_ACK_INTR_ON_EXIT)
 #ifdef CONFIG_X86_64
-	#define KVM_REQUIRED_VMX_VM_EXIT_CONTROLS			\
-		(__KVM_REQUIRED_VMX_VM_EXIT_CONTROLS |			\
-		 VM_EXIT_HOST_ADDR_SPACE_SIZE)
+#define KVM_REQUIRED_VMX_VM_EXIT_CONTROLS \
+	(__KVM_REQUIRED_VMX_VM_EXIT_CONTROLS | VM_EXIT_HOST_ADDR_SPACE_SIZE)
 #else
-	#define KVM_REQUIRED_VMX_VM_EXIT_CONTROLS			\
-		__KVM_REQUIRED_VMX_VM_EXIT_CONTROLS
+#define KVM_REQUIRED_VMX_VM_EXIT_CONTROLS __KVM_REQUIRED_VMX_VM_EXIT_CONTROLS
 #endif
-#define KVM_OPTIONAL_VMX_VM_EXIT_CONTROLS				\
-	      (VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL |			\
-	       VM_EXIT_SAVE_IA32_PAT |					\
-	       VM_EXIT_LOAD_IA32_PAT |					\
-	       VM_EXIT_SAVE_IA32_EFER |					\
-	       VM_EXIT_SAVE_VMX_PREEMPTION_TIMER |			\
-	       VM_EXIT_LOAD_IA32_EFER |					\
-	       VM_EXIT_CLEAR_BNDCFGS |					\
-	       VM_EXIT_PT_CONCEAL_PIP |					\
-	       VM_EXIT_CLEAR_IA32_RTIT_CTL)
+#define KVM_OPTIONAL_VMX_VM_EXIT_CONTROLS                             \
+	(VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL | VM_EXIT_SAVE_IA32_PAT | \
+	 VM_EXIT_LOAD_IA32_PAT | VM_EXIT_SAVE_IA32_EFER |             \
+	 VM_EXIT_SAVE_VMX_PREEMPTION_TIMER | VM_EXIT_LOAD_IA32_EFER | \
+	 VM_EXIT_CLEAR_BNDCFGS | VM_EXIT_PT_CONCEAL_PIP |             \
+	 VM_EXIT_CLEAR_IA32_RTIT_CTL)
 
-#define KVM_REQUIRED_VMX_PIN_BASED_VM_EXEC_CONTROL			\
-	(PIN_BASED_EXT_INTR_MASK |					\
-	 PIN_BASED_NMI_EXITING)
-#define KVM_OPTIONAL_VMX_PIN_BASED_VM_EXEC_CONTROL			\
-	(PIN_BASED_VIRTUAL_NMIS |					\
-	 PIN_BASED_POSTED_INTR |					\
+#define KVM_REQUIRED_VMX_PIN_BASED_VM_EXEC_CONTROL \
+	(PIN_BASED_EXT_INTR_MASK | PIN_BASED_NMI_EXITING)
+#define KVM_OPTIONAL_VMX_PIN_BASED_VM_EXEC_CONTROL        \
+	(PIN_BASED_VIRTUAL_NMIS | PIN_BASED_POSTED_INTR | \
 	 PIN_BASED_VMX_PREEMPTION_TIMER)
 
-#define __KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL			\
-	(CPU_BASED_HLT_EXITING |					\
-	 CPU_BASED_CR3_LOAD_EXITING |					\
-	 CPU_BASED_CR3_STORE_EXITING |					\
-	 CPU_BASED_UNCOND_IO_EXITING |					\
-	 CPU_BASED_MOV_DR_EXITING |					\
-	 CPU_BASED_USE_TSC_OFFSETTING |					\
-	 CPU_BASED_MWAIT_EXITING |					\
-	 CPU_BASED_MONITOR_EXITING |					\
-	 CPU_BASED_INVLPG_EXITING |					\
-	 CPU_BASED_RDPMC_EXITING |					\
+#define __KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL                 \
+	(CPU_BASED_HLT_EXITING | CPU_BASED_CR3_LOAD_EXITING |        \
+	 CPU_BASED_CR3_STORE_EXITING | CPU_BASED_UNCOND_IO_EXITING | \
+	 CPU_BASED_MOV_DR_EXITING | CPU_BASED_USE_TSC_OFFSETTING |   \
+	 CPU_BASED_MWAIT_EXITING | CPU_BASED_MONITOR_EXITING |       \
+	 CPU_BASED_INVLPG_EXITING | CPU_BASED_RDPMC_EXITING |        \
 	 CPU_BASED_INTR_WINDOW_EXITING)
 
 #ifdef CONFIG_X86_64
-	#define KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL		\
-		(__KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL |		\
-		 CPU_BASED_CR8_LOAD_EXITING |				\
-		 CPU_BASED_CR8_STORE_EXITING)
+#define KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL      \
+	(__KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL | \
+	 CPU_BASED_CR8_LOAD_EXITING | CPU_BASED_CR8_STORE_EXITING)
 #else
-	#define KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL		\
-		__KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL
+#define KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL \
+	__KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL
 #endif
 
-#define KVM_OPTIONAL_VMX_CPU_BASED_VM_EXEC_CONTROL			\
-	(CPU_BASED_RDTSC_EXITING |					\
-	 CPU_BASED_TPR_SHADOW |						\
-	 CPU_BASED_USE_IO_BITMAPS |					\
-	 CPU_BASED_MONITOR_TRAP_FLAG |					\
-	 CPU_BASED_USE_MSR_BITMAPS |					\
-	 CPU_BASED_NMI_WINDOW_EXITING |					\
-	 CPU_BASED_PAUSE_EXITING |					\
-	 CPU_BASED_ACTIVATE_SECONDARY_CONTROLS |			\
+#define KVM_OPTIONAL_VMX_CPU_BASED_VM_EXEC_CONTROL                         \
+	(CPU_BASED_RDTSC_EXITING | CPU_BASED_TPR_SHADOW |                  \
+	 CPU_BASED_USE_IO_BITMAPS | CPU_BASED_MONITOR_TRAP_FLAG |          \
+	 CPU_BASED_USE_MSR_BITMAPS | CPU_BASED_NMI_WINDOW_EXITING |        \
+	 CPU_BASED_PAUSE_EXITING | CPU_BASED_ACTIVATE_SECONDARY_CONTROLS | \
 	 CPU_BASED_ACTIVATE_TERTIARY_CONTROLS)
 
 #define KVM_REQUIRED_VMX_SECONDARY_VM_EXEC_CONTROL 0
-#define KVM_OPTIONAL_VMX_SECONDARY_VM_EXEC_CONTROL			\
-	(SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |			\
-	 SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |			\
-	 SECONDARY_EXEC_WBINVD_EXITING |				\
-	 SECONDARY_EXEC_ENABLE_VPID |					\
-	 SECONDARY_EXEC_ENABLE_EPT |					\
-	 SECONDARY_EXEC_UNRESTRICTED_GUEST |				\
-	 SECONDARY_EXEC_PAUSE_LOOP_EXITING |				\
-	 SECONDARY_EXEC_DESC |						\
-	 SECONDARY_EXEC_ENABLE_RDTSCP |					\
-	 SECONDARY_EXEC_ENABLE_INVPCID |				\
-	 SECONDARY_EXEC_APIC_REGISTER_VIRT |				\
-	 SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY |				\
-	 SECONDARY_EXEC_SHADOW_VMCS |					\
-	 SECONDARY_EXEC_XSAVES |					\
-	 SECONDARY_EXEC_RDSEED_EXITING |				\
-	 SECONDARY_EXEC_RDRAND_EXITING |				\
-	 SECONDARY_EXEC_ENABLE_PML |					\
-	 SECONDARY_EXEC_TSC_SCALING |					\
-	 SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE |				\
-	 SECONDARY_EXEC_PT_USE_GPA |					\
-	 SECONDARY_EXEC_PT_CONCEAL_VMX |				\
-	 SECONDARY_EXEC_ENABLE_VMFUNC |					\
-	 SECONDARY_EXEC_BUS_LOCK_DETECTION |				\
-	 SECONDARY_EXEC_NOTIFY_VM_EXITING |				\
-	 SECONDARY_EXEC_ENCLS_EXITING)
+#define KVM_OPTIONAL_VMX_SECONDARY_VM_EXEC_CONTROL                           \
+	(SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |                           \
+	 SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |                             \
+	 SECONDARY_EXEC_WBINVD_EXITING | SECONDARY_EXEC_ENABLE_VPID |        \
+	 SECONDARY_EXEC_ENABLE_EPT | SECONDARY_EXEC_UNRESTRICTED_GUEST |     \
+	 SECONDARY_EXEC_PAUSE_LOOP_EXITING | SECONDARY_EXEC_DESC |           \
+	 SECONDARY_EXEC_ENABLE_RDTSCP | SECONDARY_EXEC_ENABLE_INVPCID |      \
+	 SECONDARY_EXEC_APIC_REGISTER_VIRT |                                 \
+	 SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY | SECONDARY_EXEC_SHADOW_VMCS | \
+	 SECONDARY_EXEC_XSAVES | SECONDARY_EXEC_RDSEED_EXITING |             \
+	 SECONDARY_EXEC_RDRAND_EXITING | SECONDARY_EXEC_ENABLE_PML |         \
+	 SECONDARY_EXEC_TSC_SCALING | SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE | \
+	 SECONDARY_EXEC_PT_USE_GPA | SECONDARY_EXEC_PT_CONCEAL_VMX |         \
+	 SECONDARY_EXEC_ENABLE_VMFUNC | SECONDARY_EXEC_BUS_LOCK_DETECTION |  \
+	 SECONDARY_EXEC_NOTIFY_VM_EXITING | SECONDARY_EXEC_ENCLS_EXITING)
 
 #define KVM_REQUIRED_VMX_TERTIARY_VM_EXEC_CONTROL 0
-#define KVM_OPTIONAL_VMX_TERTIARY_VM_EXEC_CONTROL			\
-	(TERTIARY_EXEC_IPI_VIRT)
+#define KVM_OPTIONAL_VMX_TERTIARY_VM_EXEC_CONTROL (TERTIARY_EXEC_IPI_VIRT)
 
-#define BUILD_CONTROLS_SHADOW(lname, uname, bits)						\
-static inline void lname##_controls_set(struct vcpu_vmx *vmx, u##bits val)			\
-{												\
-	if (vmx->loaded_vmcs->controls_shadow.lname != val) {					\
-		vmcs_write##bits(uname, val);							\
-		vmx->loaded_vmcs->controls_shadow.lname = val;					\
-	}											\
-}												\
-static inline u##bits __##lname##_controls_get(struct loaded_vmcs *vmcs)			\
-{												\
-	return vmcs->controls_shadow.lname;							\
-}												\
-static inline u##bits lname##_controls_get(struct vcpu_vmx *vmx)				\
-{												\
-	return __##lname##_controls_get(vmx->loaded_vmcs);					\
-}												\
-static __always_inline void lname##_controls_setbit(struct vcpu_vmx *vmx, u##bits val)		\
-{												\
-	BUILD_BUG_ON(!(val & (KVM_REQUIRED_VMX_##uname | KVM_OPTIONAL_VMX_##uname)));		\
-	lname##_controls_set(vmx, lname##_controls_get(vmx) | val);				\
-}												\
-static __always_inline void lname##_controls_clearbit(struct vcpu_vmx *vmx, u##bits val)	\
-{												\
-	BUILD_BUG_ON(!(val & (KVM_REQUIRED_VMX_##uname | KVM_OPTIONAL_VMX_##uname)));		\
-	lname##_controls_set(vmx, lname##_controls_get(vmx) & ~val);				\
-}
+#define BUILD_CONTROLS_SHADOW(lname, uname, bits)                            \
+	static inline void lname##_controls_set(struct vcpu_vmx *vmx,        \
+						u##bits val)                 \
+	{                                                                    \
+		if (vmx->loaded_vmcs->controls_shadow.lname != val) {        \
+			vmcs_write##bits(uname, val);                        \
+			vmx->loaded_vmcs->controls_shadow.lname = val;       \
+		}                                                            \
+	}                                                                    \
+	static inline u##bits __##lname##_controls_get(                      \
+		struct loaded_vmcs *vmcs)                                    \
+	{                                                                    \
+		return vmcs->controls_shadow.lname;                          \
+	}                                                                    \
+	static inline u##bits lname##_controls_get(struct vcpu_vmx *vmx)     \
+	{                                                                    \
+		return __##lname##_controls_get(vmx->loaded_vmcs);           \
+	}                                                                    \
+	static __always_inline void lname##_controls_setbit(                 \
+		struct vcpu_vmx *vmx, u##bits val)                           \
+	{                                                                    \
+		BUILD_BUG_ON(!(val & (KVM_REQUIRED_VMX_##uname |             \
+				      KVM_OPTIONAL_VMX_##uname)));           \
+		lname##_controls_set(vmx, lname##_controls_get(vmx) | val);  \
+	}                                                                    \
+	static __always_inline void lname##_controls_clearbit(               \
+		struct vcpu_vmx *vmx, u##bits val)                           \
+	{                                                                    \
+		BUILD_BUG_ON(!(val & (KVM_REQUIRED_VMX_##uname |             \
+				      KVM_OPTIONAL_VMX_##uname)));           \
+		lname##_controls_set(vmx, lname##_controls_get(vmx) & ~val); \
+	}
 BUILD_CONTROLS_SHADOW(vm_entry, VM_ENTRY_CONTROLS, 32)
 BUILD_CONTROLS_SHADOW(vm_exit, VM_EXIT_CONTROLS, 32)
 BUILD_CONTROLS_SHADOW(pin, PIN_BASED_VM_EXEC_CONTROL, 32)
@@ -629,16 +604,12 @@ BUILD_CONTROLS_SHADOW(tertiary_exec, TERTIARY_VM_EXEC_CONTROL, 64)
  * cache on demand.  Other registers not listed here are synced to
  * the cache immediately after VM-Exit.
  */
-#define VMX_REGS_LAZY_LOAD_SET	((1 << VCPU_REGS_RIP) |         \
-				(1 << VCPU_REGS_RSP) |          \
-				(1 << VCPU_EXREG_RFLAGS) |      \
-				(1 << VCPU_EXREG_PDPTR) |       \
-				(1 << VCPU_EXREG_SEGMENTS) |    \
-				(1 << VCPU_EXREG_CR0) |         \
-				(1 << VCPU_EXREG_CR3) |         \
-				(1 << VCPU_EXREG_CR4) |         \
-				(1 << VCPU_EXREG_EXIT_INFO_1) | \
-				(1 << VCPU_EXREG_EXIT_INFO_2))
+#define VMX_REGS_LAZY_LOAD_SET                                \
+	((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP) |        \
+	 (1 << VCPU_EXREG_RFLAGS) | (1 << VCPU_EXREG_PDPTR) | \
+	 (1 << VCPU_EXREG_SEGMENTS) | (1 << VCPU_EXREG_CR0) | \
+	 (1 << VCPU_EXREG_CR3) | (1 << VCPU_EXREG_CR4) |      \
+	 (1 << VCPU_EXREG_EXIT_INFO_1) | (1 << VCPU_EXREG_EXIT_INFO_2))
 
 static inline struct kvm_vmx *to_kvm_vmx(struct kvm *kvm)
 {
@@ -706,7 +677,7 @@ static inline struct vmcs *alloc_vmcs(bool shadow)
 static inline bool vmx_has_waitpkg(struct vcpu_vmx *vmx)
 {
 	return secondary_exec_controls_get(vmx) &
-		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
+	       SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
 }
 
 static inline bool vmx_need_pf_intercept(struct kvm_vcpu *vcpu)
@@ -714,14 +685,16 @@ static inline bool vmx_need_pf_intercept(struct kvm_vcpu *vcpu)
 	if (!enable_ept)
 		return true;
 
-	return allow_smaller_maxphyaddr && cpuid_maxphyaddr(vcpu) < boot_cpu_data.x86_phys_bits;
+	return allow_smaller_maxphyaddr &&
+	       cpuid_maxphyaddr(vcpu) < boot_cpu_data.x86_phys_bits;
 }
 
 static inline bool is_unrestricted_guest(struct kvm_vcpu *vcpu)
 {
-	return enable_unrestricted_guest && (!is_guest_mode(vcpu) ||
-	    (secondary_exec_controls_get(to_vmx(vcpu)) &
-	    SECONDARY_EXEC_UNRESTRICTED_GUEST));
+	return enable_unrestricted_guest &&
+	       (!is_guest_mode(vcpu) ||
+		(secondary_exec_controls_get(to_vmx(vcpu)) &
+		 SECONDARY_EXEC_UNRESTRICTED_GUEST));
 }
 
 bool __vmx_guest_state_valid(struct kvm_vcpu *vcpu);
@@ -739,7 +712,7 @@ static inline int vmx_get_instr_info_reg2(u32 vmx_instr_info)
 
 static inline bool vmx_can_use_ipiv(struct kvm_vcpu *vcpu)
 {
-	return  lapic_in_kernel(vcpu) && enable_ipiv;
+	return lapic_in_kernel(vcpu) && enable_ipiv;
 }
 
 static inline bool guest_cpuid_has_evmcs(struct kvm_vcpu *vcpu)
