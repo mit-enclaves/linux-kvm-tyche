@@ -199,6 +199,28 @@ failure:
   return FAILURE;
 }
 
+int get_domain_core_configuration(domain_id_t id, usize core,
+				  register_group_t group, usize idx,
+				  usize *value)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found.");
+    goto failure;
+  }
+  if (value == NULL) {
+    ERROR("Value provided is null.");
+    goto failure;
+  }
+  if (tyche_get_domain_core_config(child->management->local_id, core, group, idx, value) != SUCCESS) {
+    ERROR("Unable to get core config %lld for dom %lld", idx, id);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
   capability_t *transition = NULL;

@@ -140,10 +140,15 @@ int driver_mprotect_domain(driver_domain_t *domain, usize vstart, usize size,
 int driver_set_domain_configuration(driver_domain_t *domain,
 				    driver_domain_config_t tpe, usize value);
 
-/// Expose the configuration of fields.
+/// Expose the configuration of fields (write).
 int driver_set_domain_core_config(driver_domain_t *dom, usize core,
 				  register_group_t group, usize idx,
 				  usize value);
+
+/// Expose the configuration of fields (read).
+int driver_get_domain_core_config(driver_domain_t *dom, usize core,
+				  register_group_t group, usize idx,
+				  usize *value);
 
 /// Set the entry point on a core.
 int driver_set_entry_on_core(driver_domain_t *domain, usize core, usize cr3,
