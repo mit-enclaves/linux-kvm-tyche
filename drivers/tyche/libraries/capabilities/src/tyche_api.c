@@ -119,6 +119,25 @@ failure:
   return FAILURE;
 }
 
+int tyche_get_domain_core_config(capa_index_t management, usize core,
+    register_group_t group, usize idx, usize *value)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_GET_CONFIG_CORE,
+    .arg_1 = management,
+    .arg_2 = core,
+    .arg_3 = group,
+    .arg_4 = idx,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  *value = frame.value_1; 
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tyche_seal(capa_index_t* transition, capa_index_t management)
 {
   vmcall_frame_t frame = {
