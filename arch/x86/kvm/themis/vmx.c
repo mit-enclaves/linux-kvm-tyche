@@ -452,22 +452,25 @@ void vmread_error(unsigned long field, bool fault)
 noinline void vmwrite_error(unsigned long field, unsigned long value)
 {
   //TODO(@aghosn): need to fix this
-	vmx_insn_failed("kvm: vmwrite failed: field=%lx val=%lx err=%u\n",
-			field, value, vmcs_read32(VM_INSTRUCTION_ERROR));
+  printk(KERN_ERR "Missing vmx to read value\n");
+	vmx_insn_failed("vm: vmwrite failed: field=%lx val=%lx err=%u\n",
+			field, value, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 666);
 }
 
 noinline void vmclear_error(struct vmcs *vmcs, u64 phys_addr)
 {
   //TODO(@aghosn): need to fix this.
+  printk(KERN_ERR "Missing vmx to read value 2\n");
 	vmx_insn_failed("kvm: vmclear failed: %p/%llx err=%u\n",
-			vmcs, phys_addr, vmcs_read32(VM_INSTRUCTION_ERROR));
+			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 777);
 }
 
 noinline void vmptrld_error(struct vmcs *vmcs, u64 phys_addr)
 {
   //TODO(@aghosn): need to fix this.
+  printk(KERN_ERR "Missing vmx to read value 3\n");
 	vmx_insn_failed("kvm: vmptrld failed: %p/%llx err=%u\n",
-			vmcs, phys_addr, vmcs_read32(VM_INSTRUCTION_ERROR));
+			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 888);
 }
 
 noinline void invvpid_error(unsigned long ext, u16 vpid, gva_t gva)
@@ -749,8 +752,11 @@ static u16 vmx_read_guest_seg_selector(struct vcpu_vmx *vmx, unsigned seg)
 {
 	u16 *p = &vmx->segment_cache.seg[seg].selector;
 
-	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_SEL))
-		*p = vmcs_read16(kvm_vmx_segment_fields[seg].selector);
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_SEL)) {
+    //TODO(@aghosn): figure out how to get the segment selectors.
+    printk(KERN_ERR "Missing support to read segment selectors\n");
+		//*p = vmcs_read16(kvm_vmx_segment_fields[seg].selector);
+  }
 	return *p;
 }
 
@@ -758,8 +764,11 @@ static ulong vmx_read_guest_seg_base(struct vcpu_vmx *vmx, unsigned seg)
 {
 	ulong *p = &vmx->segment_cache.seg[seg].base;
 
-	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_BASE))
-		*p = vmcs_readl(kvm_vmx_segment_fields[seg].base);
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_BASE)) {
+    //TODO(@aghosn): figure out how to get segment bases.
+    printk(KERN_ERR "Missing support to read segment bases.\n");
+		//*p = vmcs_readl(kvm_vmx_segment_fields[seg].base);
+  }
 	return *p;
 }
 
@@ -767,8 +776,11 @@ static u32 vmx_read_guest_seg_limit(struct vcpu_vmx *vmx, unsigned seg)
 {
 	u32 *p = &vmx->segment_cache.seg[seg].limit;
 
-	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_LIMIT))
-		*p = vmcs_read32(kvm_vmx_segment_fields[seg].limit);
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_LIMIT)) {
+    //TODO(@aghosn): figure out how to get segment limits.
+    printk(KERN_ERR "Missing support to read segment limits.\n");
+		//*p = vmcs_read32(kvm_vmx_segment_fields[seg].limit);
+  }
 	return *p;
 }
 
@@ -776,8 +788,11 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 {
 	u32 *p = &vmx->segment_cache.seg[seg].ar;
 
-	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_AR))
-		*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_AR)) {
+    //TODO(@aghosn): figure out how to read segment access rights.
+    printk(KERN_ERR "Missing support to read segment access rights.\n");
+		//*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
+  }
 	return *p;
 }
 
@@ -1438,7 +1453,8 @@ unsigned long vmx_get_rflags(struct kvm_vcpu *vcpu)
 
 	if (!kvm_register_is_available(vcpu, VCPU_EXREG_RFLAGS)) {
 		kvm_register_mark_available(vcpu, VCPU_EXREG_RFLAGS);
-		rflags = vmcs_readl(GUEST_RFLAGS);
+		//rflags = vmcs_readl(GUEST_RFLAGS);
+    rflags = (unsigned long) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RFLAGS);
 		if (vmx->rmode.vm86_active) {
 			rflags &= RMODE_GUEST_OWNED_EFLAGS_BITS;
 			save_rflags = vmx->rmode.save_rflags;
@@ -1482,7 +1498,9 @@ static bool vmx_get_if_flag(struct kvm_vcpu *vcpu)
 
 u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 {
-	u32 interruptibility = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
+	//u32 interruptibility = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
+  u32 interruptibility = (u32) read_domain_config(
+      to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO);
 	int ret = 0;
 
 	if (interruptibility & GUEST_INTR_STATE_STI)
@@ -1495,7 +1513,9 @@ u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 
 void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
-	u32 interruptibility_old = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
+	//u32 interruptibility_old = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
+  u32 interruptibility_old = (u32) read_domain_config(
+      to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO);
 	u32 interruptibility = interruptibility_old;
 
 	interruptibility &= ~(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS);
@@ -1616,7 +1636,8 @@ static int skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	 */
 	if (!static_cpu_has(X86_FEATURE_HYPERVISOR) ||
 	    exit_reason.basic != EXIT_REASON_EPT_MISCONFIG) {
-		instr_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+		//instr_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+    instr_len = (u32) read_domain_config(to_vmx(vcpu), TYCHE_CTRL_32, VM_EXIT_INSTRUCTION_LEN); 
 
 		/*
 		 * Emulating an enclave's instructions isn't supported as KVM
@@ -1714,7 +1735,8 @@ static void vmx_clear_hlt(struct kvm_vcpu *vcpu)
 	 * advanced.
 	 */
 	if (kvm_hlt_in_guest(vcpu->kvm) &&
-			vmcs_read32(GUEST_ACTIVITY_STATE) == GUEST_ACTIVITY_HLT) {
+			/*vmcs_read32(GUEST_ACTIVITY_STATE)*/
+      read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_ACTIVITY_STATE) == GUEST_ACTIVITY_HLT) {
 		//vmcs_write32(GUEST_ACTIVITY_STATE, GUEST_ACTIVITY_ACTIVE);
     write_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_ACTIVITY_STATE, GUEST_ACTIVITY_ACTIVE);
   }
@@ -1933,10 +1955,12 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	switch (msr_info->index) {
 #ifdef CONFIG_X86_64
 	case MSR_FS_BASE:
-		msr_info->data = vmcs_readl(GUEST_FS_BASE);
+		//msr_info->data = vmcs_readl(GUEST_FS_BASE);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_FS_BASE);
 		break;
 	case MSR_GS_BASE:
-		msr_info->data = vmcs_readl(GUEST_GS_BASE);
+		//msr_info->data = vmcs_readl(GUEST_GS_BASE);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_GS_BASE);
 		break;
 	case MSR_KERNEL_GS_BASE:
 		msr_info->data = vmx_read_guest_kernel_gs_base(vmx);
@@ -1963,20 +1987,24 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = to_vmx(vcpu)->spec_ctrl;
 		break;
 	case MSR_IA32_SYSENTER_CS:
-		msr_info->data = vmcs_read32(GUEST_SYSENTER_CS);
+		//msr_info->data = vmcs_read32(GUEST_SYSENTER_CS);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_32, GUEST_SYSENTER_CS);
 		break;
 	case MSR_IA32_SYSENTER_EIP:
-		msr_info->data = vmcs_readl(GUEST_SYSENTER_EIP);
+		//msr_info->data = vmcs_readl(GUEST_SYSENTER_EIP);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_SYSENTER_EIP);
 		break;
 	case MSR_IA32_SYSENTER_ESP:
-		msr_info->data = vmcs_readl(GUEST_SYSENTER_ESP);
+		//msr_info->data = vmcs_readl(GUEST_SYSENTER_ESP);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_SYSENTER_ESP);
 		break;
 	case MSR_IA32_BNDCFGS:
 		if (!kvm_mpx_supported() ||
 		    (!msr_info->host_initiated &&
 		     !guest_cpuid_has(vcpu, X86_FEATURE_MPX)))
 			return 1;
-		msr_info->data = vmcs_read64(GUEST_BNDCFGS);
+		//msr_info->data = vmcs_read64(GUEST_BNDCFGS);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_64, GUEST_BNDCFGS);
 		break;
 	case MSR_IA32_MCG_EXT_CTL:
 		if (!msr_info->host_initiated &&
@@ -2058,7 +2086,8 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 			msr_info->data = vmx->pt_desc.guest.addr_a[index / 2];
 		break;
 	case MSR_IA32_DEBUGCTLMSR:
-		msr_info->data = vmcs_read64(GUEST_IA32_DEBUGCTL);
+		//msr_info->data = vmcs_read64(GUEST_IA32_DEBUGCTL);
+    msr_info->data = read_domain_config(vmx, TYCHE_REG_64, GUEST_IA32_DEBUGCTL); 
 		break;
 	default:
 	find_uret_msr:
@@ -2450,15 +2479,18 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 static void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 {
 	unsigned long guest_owned_bits;
+  struct vcpu_vmx *vmx = to_vmx(vcpu);
 
 	kvm_register_mark_available(vcpu, reg);
 
 	switch (reg) {
 	case VCPU_REGS_RSP:
-		vcpu->arch.regs[VCPU_REGS_RSP] = vmcs_readl(GUEST_RSP);
+		//vcpu->arch.regs[VCPU_REGS_RSP] = vmcs_readl(GUEST_RSP);
+    vcpu->arch.regs[VCPU_REGS_RSP] = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RSP);  
 		break;
 	case VCPU_REGS_RIP:
-		vcpu->arch.regs[VCPU_REGS_RIP] = vmcs_readl(GUEST_RIP);
+		//vcpu->arch.regs[VCPU_REGS_RIP] = vmcs_readl(GUEST_RIP);
+    vcpu->arch.regs[VCPU_REGS_RIP] = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RIP); 
 		break;
 	case VCPU_EXREG_PDPTR:
 		if (enable_ept)
@@ -2468,21 +2500,25 @@ static void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 		guest_owned_bits = vcpu->arch.cr0_guest_owned_bits;
 
 		vcpu->arch.cr0 &= ~guest_owned_bits;
-		vcpu->arch.cr0 |= vmcs_readl(GUEST_CR0) & guest_owned_bits;
+		//vcpu->arch.cr0 |= vmcs_readl(GUEST_CR0) & guest_owned_bits;
+    vcpu->arch.cr0 |= read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR0) & guest_owned_bits;
 		break;
 	case VCPU_EXREG_CR3:
 		/*
 		 * When intercepting CR3 loads, e.g. for shadowing paging, KVM's
 		 * CR3 is loaded into hardware, not the guest's CR3.
 		 */
-		if (!(exec_controls_get(to_vmx(vcpu)) & CPU_BASED_CR3_LOAD_EXITING))
-			vcpu->arch.cr3 = vmcs_readl(GUEST_CR3);
+		if (!(exec_controls_get(to_vmx(vcpu)) & CPU_BASED_CR3_LOAD_EXITING)) {
+			//vcpu->arch.cr3 = vmcs_readl(GUEST_CR3);
+      vcpu->arch.cr3 = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR3);
+    }
 		break;
 	case VCPU_EXREG_CR4:
 		guest_owned_bits = vcpu->arch.cr4_guest_owned_bits;
 
 		vcpu->arch.cr4 &= ~guest_owned_bits;
-		vcpu->arch.cr4 |= vmcs_readl(GUEST_CR4) & guest_owned_bits;
+		//vcpu->arch.cr4 |= vmcs_readl(GUEST_CR4) & guest_owned_bits;
+    vcpu->arch.cr4 |= read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4) & guest_owned_bits;
 		break;
 	default:
 		KVM_BUG_ON(1, vcpu->kvm);
@@ -2952,7 +2988,8 @@ static void enter_pmode(struct kvm_vcpu *vcpu)
 
 	__vmx_set_segment(vcpu, &vmx->rmode.segs[VCPU_SREG_TR], VCPU_SREG_TR);
 
-	flags = vmcs_readl(GUEST_RFLAGS);
+	//flags = vmcs_readl(GUEST_RFLAGS);
+  flags = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RFLAGS);
 	flags &= RMODE_GUEST_OWNED_EFLAGS_BITS;
 	flags |= vmx->rmode.save_rflags & ~RMODE_GUEST_OWNED_EFLAGS_BITS;
 	//vmcs_writel(GUEST_RFLAGS, flags);
@@ -2961,8 +2998,8 @@ static void enter_pmode(struct kvm_vcpu *vcpu)
 	//vmcs_writel(GUEST_CR4, (vmcs_readl(GUEST_CR4) & ~X86_CR4_VME) |
 	//		(vmcs_readl(CR4_READ_SHADOW) & X86_CR4_VME));
   write_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4,
-      (vmcs_readl(GUEST_CR4) & ~X86_CR4_VME) | 
-      (vmcs_readl(CR4_READ_SHADOW) & X86_CR4_VME));
+      (read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4) & ~X86_CR4_VME) |
+      (read_domain_config(vmx, TYCHE_CTRL_NAT, CR4_READ_SHADOW) & X86_CR4_VME));
 
 	vmx_update_exception_bitmap(vcpu);
 
@@ -3043,7 +3080,8 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
   write_domain_config(vmx, TYCHE_REG_32, GUEST_TR_AR_BYTES, 0x008b);
 
 
-	flags = vmcs_readl(GUEST_RFLAGS);
+	//flags = vmcs_readl(GUEST_RFLAGS);
+  flags = read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RFLAGS);
 	vmx->rmode.save_rflags = flags;
 
 	flags |= X86_EFLAGS_IOPL | X86_EFLAGS_VM;
@@ -3051,7 +3089,8 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
 	//vmcs_writel(GUEST_RFLAGS, flags);
 	//vmcs_writel(GUEST_CR4, vmcs_readl(GUEST_CR4) | X86_CR4_VME);
   write_domain_config(vmx, TYCHE_REG_NAT, GUEST_RFLAGS, flags); 
-  write_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4, vmcs_readl(GUEST_CR4) | X86_CR4_VME);
+  write_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4,
+      read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4) | X86_CR4_VME);
 	vmx_update_exception_bitmap(vcpu);
 
 	fix_rmode_seg(VCPU_SREG_SS, &vmx->rmode.segs[VCPU_SREG_SS]);
@@ -3093,7 +3132,8 @@ static void enter_lmode(struct kvm_vcpu *vcpu)
 
 	vmx_segment_cache_clear(to_vmx(vcpu));
 
-	guest_tr_ar = vmcs_read32(GUEST_TR_AR_BYTES);
+	//guest_tr_ar = vmcs_read32(GUEST_TR_AR_BYTES);
+  guest_tr_ar = read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_TR_AR_BYTES);
 	if ((guest_tr_ar & VMX_AR_TYPE_MASK) != VMX_AR_TYPE_BUSY_64_TSS) {
 		pr_debug_ratelimited("%s: tss fixup for long mode. \n",
 				     __func__);
@@ -3207,10 +3247,14 @@ void ept_save_pdptrs(struct kvm_vcpu *vcpu)
 	if (WARN_ON_ONCE(!is_pae_paging(vcpu)))
 		return;
 
-	mmu->pdptrs[0] = vmcs_read64(GUEST_PDPTR0);
-	mmu->pdptrs[1] = vmcs_read64(GUEST_PDPTR1);
-	mmu->pdptrs[2] = vmcs_read64(GUEST_PDPTR2);
-	mmu->pdptrs[3] = vmcs_read64(GUEST_PDPTR3);
+	//mmu->pdptrs[0] = vmcs_read64(GUEST_PDPTR0);
+	//mmu->pdptrs[1] = vmcs_read64(GUEST_PDPTR1);
+	//mmu->pdptrs[2] = vmcs_read64(GUEST_PDPTR2);
+	//mmu->pdptrs[3] = vmcs_read64(GUEST_PDPTR3);
+  mmu->pdptrs[0] = read_domain_config(to_vmx(vcpu), TYCHE_REG_64, GUEST_PDPTR0);
+	mmu->pdptrs[1] = read_domain_config(to_vmx(vcpu), TYCHE_REG_64, GUEST_PDPTR1);
+	mmu->pdptrs[2] = read_domain_config(to_vmx(vcpu), TYCHE_REG_64, GUEST_PDPTR2);
+	mmu->pdptrs[3] = read_domain_config(to_vmx(vcpu), TYCHE_REG_64, GUEST_PDPTR3);
 
 	kvm_register_mark_available(vcpu, VCPU_EXREG_PDPTR);
 }
@@ -3580,8 +3624,10 @@ static void vmx_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
 
 static void vmx_get_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 {
-	dt->size = vmcs_read32(GUEST_IDTR_LIMIT);
-	dt->address = vmcs_readl(GUEST_IDTR_BASE);
+	//dt->size = vmcs_read32(GUEST_IDTR_LIMIT);
+	//dt->address = vmcs_readl(GUEST_IDTR_BASE);
+  dt->size = read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_IDTR_LIMIT);
+  dt->address = read_domain_config(to_vmx(vcpu), TYCHE_REG_NAT, GUEST_IDTR_BASE);
 }
 
 static void vmx_set_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
@@ -3594,8 +3640,10 @@ static void vmx_set_idt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 
 static void vmx_get_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
 {
-	dt->size = vmcs_read32(GUEST_GDTR_LIMIT);
-	dt->address = vmcs_readl(GUEST_GDTR_BASE);
+	//dt->size = vmcs_read32(GUEST_GDTR_LIMIT);
+	//dt->address = vmcs_readl(GUEST_GDTR_BASE);
+  dt->size = read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_GDTR_LIMIT);
+  dt->address = read_domain_config(to_vmx(vcpu), TYCHE_REG_NAT, GUEST_GDTR_BASE);
 }
 
 static void vmx_set_gdt(struct kvm_vcpu *vcpu, struct desc_ptr *dt)
@@ -4983,7 +5031,10 @@ static void vmx_enable_irq_window(struct kvm_vcpu *vcpu)
 static void vmx_enable_nmi_window(struct kvm_vcpu *vcpu)
 {
 	if (!enable_vnmi ||
-	    vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) & GUEST_INTR_STATE_STI) {
+	    /*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/ 
+      read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO) &
+      GUEST_INTR_STATE_STI) {
+
 		vmx_enable_irq_window(vcpu);
 		return;
 	}
@@ -5062,7 +5113,8 @@ bool vmx_get_nmi_mask(struct kvm_vcpu *vcpu)
 		return vmx->loaded_vmcs->soft_vnmi_blocked;
 	if (vmx->loaded_vmcs->nmi_known_unmasked)
 		return false;
-	masked = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) & GUEST_INTR_STATE_NMI;
+	//masked = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) & GUEST_INTR_STATE_NMI;
+  masked = read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO) & GUEST_INTR_STATE_NMI;
 	vmx->loaded_vmcs->nmi_known_unmasked = !masked;
 	return masked;
 }
@@ -5095,7 +5147,8 @@ bool vmx_nmi_blocked(struct kvm_vcpu *vcpu)
 	if (!enable_vnmi && to_vmx(vcpu)->loaded_vmcs->soft_vnmi_blocked)
 		return true;
 
-	return (vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
+	return (/*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO) &
 		(GUEST_INTR_STATE_MOV_SS | GUEST_INTR_STATE_STI |
 		 GUEST_INTR_STATE_NMI));
 }
@@ -5118,7 +5171,8 @@ bool vmx_interrupt_blocked(struct kvm_vcpu *vcpu)
 		return false;
 
 	return !(vmx_get_rflags(vcpu) & X86_EFLAGS_IF) ||
-	       (vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
+	  (/*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO) &
 		(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS));
 }
 
@@ -5172,7 +5226,8 @@ static bool rmode_exception(struct kvm_vcpu *vcpu, int vec)
 		 * from user space while in guest debugging mode.
 		 */
 		to_vmx(vcpu)->vcpu.arch.event_exit_inst_len =
-			vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+			/*vmcs_read32(VM_EXIT_INSTRUCTION_LEN)*/
+      read_domain_config(to_vmx(vcpu), TYCHE_CTRL_32, VM_EXIT_INSTRUCTION_LEN);
 		if (vcpu->guest_debug & KVM_GUESTDBG_USE_SW_BP)
 			return false;
 		fallthrough;
@@ -5274,8 +5329,10 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		return handle_ud(vcpu);
 
 	error_code = 0;
-	if (intr_info & INTR_INFO_DELIVER_CODE_MASK)
-		error_code = vmcs_read32(VM_EXIT_INTR_ERROR_CODE);
+	if (intr_info & INTR_INFO_DELIVER_CODE_MASK) {
+		//error_code = vmcs_read32(VM_EXIT_INTR_ERROR_CODE);
+    error_code = read_domain_config(vmx, TYCHE_REG_32_RO, VM_EXIT_INTR_ERROR_CODE);
+  }
 
 	if (!vmx->rmode.vm86_active && is_gp_fault(intr_info)) {
 		WARN_ON_ONCE(!enable_vmware_backdoor);
@@ -5358,19 +5415,20 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 			if (is_icebp(intr_info))
 				WARN_ON(!skip_emulated_instruction(vcpu));
 			else if ((vmx_get_rflags(vcpu) & X86_EFLAGS_TF) &&
-				 (vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
+				 (/*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
+          read_domain_config(vmx, TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO)  &
 				  (GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS))) {
 				//vmcs_writel(GUEST_PENDING_DBG_EXCEPTIONS,
 				//	    vmcs_readl(GUEST_PENDING_DBG_EXCEPTIONS) | DR6_BS);
         write_domain_config(vmx, TYCHE_REG_NAT, GUEST_PENDING_DBG_EXCEPTIONS,
-            vmcs_readl(GUEST_PENDING_DBG_EXCEPTIONS) | DR6_BS);
+            read_domain_config(vmx, TYCHE_REG_NAT, GUEST_PENDING_DBG_EXCEPTIONS) | DR6_BS);
       }
 
 			kvm_queue_exception_p(vcpu, DB_VECTOR, dr6);
 			return 1;
 		}
 		kvm_run->debug.arch.dr6 = dr6 | DR6_ACTIVE_LOW;
-		kvm_run->debug.arch.dr7 = vmcs_readl(GUEST_DR7);
+		kvm_run->debug.arch.dr7 = /*vmcs_readl(GUEST_DR7)*/ read_domain_config(vmx, TYCHE_REG_NAT, GUEST_DR7);
 		fallthrough;
 	case BP_VECTOR:
 		/*
@@ -5379,7 +5437,8 @@ static int handle_exception_nmi(struct kvm_vcpu *vcpu)
 		 * #DB as well causes no harm, it is not used in that case.
 		 */
 		vmx->vcpu.arch.event_exit_inst_len =
-			vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+			/*vmcs_read32(VM_EXIT_INSTRUCTION_LEN)*/
+      read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_INSTRUCTION_LEN);
 		kvm_run->exit_reason = KVM_EXIT_DEBUG;
 		kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
 		kvm_run->debug.arch.exception = ex_no;
@@ -5607,7 +5666,8 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 	if (vmx_get_cpl(vcpu) > 0)
 		goto out;
 
-	dr7 = vmcs_readl(GUEST_DR7);
+	dr7 = /*vmcs_readl(GUEST_DR7)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_NAT, GUEST_DR7);
 	if (dr7 & DR7_GD) {
 		/*
 		 * As the vm-exit takes precedence over the debug trap, we
@@ -5661,7 +5721,8 @@ static void vmx_sync_dirty_debug_regs(struct kvm_vcpu *vcpu)
 	get_debugreg(vcpu->arch.db[2], 2);
 	get_debugreg(vcpu->arch.db[3], 3);
 	get_debugreg(vcpu->arch.dr6, 6);
-	vcpu->arch.dr7 = vmcs_readl(GUEST_DR7);
+	vcpu->arch.dr7 = /*vmcs_readl(GUEST_DR7)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_NAT, GUEST_DR7);
 
 	vcpu->arch.switch_db_regs &= ~KVM_DEBUGREG_WONT_EXIT;
 	exec_controls_setbit(to_vmx(vcpu), CPU_BASED_MOV_DR_EXITING);
@@ -5783,7 +5844,8 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 			    VECTORING_INFO_DELIVER_CODE_MASK) {
 				has_error_code = true;
 				error_code =
-					vmcs_read32(IDT_VECTORING_ERROR_CODE);
+					/*vmcs_read32(IDT_VECTORING_ERROR_CODE)*/
+          read_domain_config(vmx, TYCHE_REG_32_RO, IDT_VECTORING_ERROR_CODE);
 			}
 			fallthrough;
 		case INTR_TYPE_SOFT_EXCEPTION:
@@ -5828,7 +5890,8 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 			(exit_qualification & INTR_INFO_UNBLOCK_NMI))
 		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);
 
-	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+	gpa = /*vmcs_read64(GUEST_PHYSICAL_ADDRESS)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_64_RO, GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(vcpu, gpa, exit_qualification);
 
 	/* Is it a read fault? */
@@ -5874,7 +5937,9 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 	 * A nested guest cannot optimize MMIO vmexits, because we have an
 	 * nGPA here instead of the required GPA.
 	 */
-	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+	gpa = /*vmcs_read64(GUEST_PHYSICAL_ADDRESS)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_64_RO, GUEST_PHYSICAL_ADDRESS);
+
 	if (!is_guest_mode(vcpu) &&
 	    !kvm_io_bus_write(vcpu, KVM_FAST_MMIO_BUS, gpa, 0, NULL)) {
 		trace_kvm_fast_mmio(gpa);
@@ -6027,7 +6092,8 @@ static int handle_invpcid(struct kvm_vcpu *vcpu)
 		return 1;
 	}
 
-	vmx_instruction_info = vmcs_read32(VMX_INSTRUCTION_INFO);
+	vmx_instruction_info = /*vmcs_read32(VMX_INSTRUCTION_INFO)*/
+    read_domain_config(to_vmx(vcpu), TYCHE_REG_32_RO, VMX_INSTRUCTION_INFO);
 	gpr_index = vmx_get_instr_info_reg2(vmx_instruction_info);
 	type = kvm_register_read(vcpu, gpr_index);
 
@@ -6220,9 +6286,10 @@ static void vmx_get_exit_info(struct kvm_vcpu *vcpu, u32 *reason,
 	if (!(vmx->exit_reason.failed_vmentry)) {
 		*info2 = vmx->idt_vectoring_info;
 		*intr_info = vmx_get_intr_info(vcpu);
-		if (is_exception_with_error_code(*intr_info))
-			*error_code = vmcs_read32(VM_EXIT_INTR_ERROR_CODE);
-		else
+		if (is_exception_with_error_code(*intr_info)) {
+			*error_code = /*vmcs_read32(VM_EXIT_INTR_ERROR_CODE)*/
+        read_domain_config(vmx, TYCHE_REG_32_RO, VM_EXIT_INTR_ERROR_CODE);
+    } else
 			*error_code = 0;
 	} else {
 		*info2 = 0;
@@ -6245,7 +6312,8 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu *vcpu)
 	u64 *pml_buf;
 	u16 pml_idx;
 
-	pml_idx = vmcs_read16(GUEST_PML_INDEX);
+	pml_idx = /*vmcs_read16(GUEST_PML_INDEX)*/
+    read_domain_config(vmx, TYCHE_REG_16, GUEST_PML_INDEX);
 
 	/* Do nothing if PML buffer is empty */
 	if (pml_idx == (PML_ENTITY_NUM - 1))
@@ -6273,18 +6341,22 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu *vcpu)
 
 static void vmx_dump_sel(char *name, uint32_t sel)
 {
-	pr_err("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
+  printk(KERN_ERR "TODO: handle the segments.\n");
+  //TODO(@aghosn): need to figure out how to handle these.
+	/*pr_err("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
 	       name, vmcs_read16(sel),
 	       vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
 	       vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
-	       vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));
+	       vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));*/
 }
 
 static void vmx_dump_dtsel(char *name, uint32_t limit)
 {
-	pr_err("%s                           limit=0x%08x, base=0x%016lx\n",
+  printk(KERN_ERR "TODO: handle the segments.\n");
+  //TODO(@aghosn): need to figure out how to handle these.
+	/*pr_err("%s                           limit=0x%08x, base=0x%016lx\n",
 	       name, vmcs_read32(limit),
-	       vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
+	       vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));*/
 }
 
 static void vmx_dump_msrs(char *name, struct vmx_msrs *m)
@@ -6311,44 +6383,75 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 		return;
 	}
 
-	vmentry_ctl = vmcs_read32(VM_ENTRY_CONTROLS);
-	vmexit_ctl = vmcs_read32(VM_EXIT_CONTROLS);
-	cpu_based_exec_ctrl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
-	pin_based_exec_ctrl = vmcs_read32(PIN_BASED_VM_EXEC_CONTROL);
-	cr4 = vmcs_readl(GUEST_CR4);
+	vmentry_ctl = /*vmcs_read32(VM_ENTRY_CONTROLS)*/
+    read_domain_config(vmx, TYCHE_CTRL_32, VM_ENTRY_CONTROLS);
+	vmexit_ctl = /*vmcs_read32(VM_EXIT_CONTROLS)*/
+    read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_CONTROLS);
+	cpu_based_exec_ctrl = /*vmcs_read32(CPU_BASED_VM_EXEC_CONTROL)*/
+    read_domain_config(vmx, TYCHE_CTRL_32, CPU_BASED_VM_EXEC_CONTROL);
+	pin_based_exec_ctrl = /*vmcs_read32(PIN_BASED_VM_EXEC_CONTROL)*/
+    read_domain_config(vmx, TYCHE_CTRL_32, PIN_BASED_VM_EXEC_CONTROL);
+	cr4 = /*vmcs_readl(GUEST_CR4)*/
+    read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR4);
 
-	if (cpu_has_secondary_exec_ctrls())
-		secondary_exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
-	else
+	if (cpu_has_secondary_exec_ctrls()) {
+		secondary_exec_control = /*vmcs_read32(SECONDARY_VM_EXEC_CONTROL)*/
+      read_domain_config(vmx, TYCHE_CTRL_32, SECONDARY_VM_EXEC_CONTROL);
+  } else
 		secondary_exec_control = 0;
 
-	if (cpu_has_tertiary_exec_ctrls())
-		tertiary_exec_control = vmcs_read64(TERTIARY_VM_EXEC_CONTROL);
-	else
+	if (cpu_has_tertiary_exec_ctrls()) {
+    //TODO(@aghosn): implement support for tertiary controls in tyche.
+    printk(KERN_ERR "TODO: aghosn add support for tertiary.\n");
+		//tertiary_exec_control = vmcs_read64(TERTIARY_VM_EXEC_CONTROL);
+  } else
 		tertiary_exec_control = 0;
 
 	pr_err("VMCS %p, last attempted VM-entry on CPU %d\n",
 	       vmx->loaded_vmcs->vmcs, vcpu->arch.last_vmentry_cpu);
 	pr_err("*** Guest State ***\n");
 	pr_err("CR0: actual=0x%016lx, shadow=0x%016lx, gh_mask=%016lx\n",
-	       vmcs_readl(GUEST_CR0), vmcs_readl(CR0_READ_SHADOW),
-	       vmcs_readl(CR0_GUEST_HOST_MASK));
+	       /*vmcs_readl(GUEST_CR0)*/ (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR0),
+         /*vmcs_readl(CR0_READ_SHADOW)*/ (long unsigned int) read_domain_config(vmx, TYCHE_CTRL_NAT, CR0_READ_SHADOW),
+	       /*vmcs_readl(CR0_GUEST_HOST_MASK)*/ (long unsigned int) 0);
 	pr_err("CR4: actual=0x%016lx, shadow=0x%016lx, gh_mask=%016lx\n",
-	       cr4, vmcs_readl(CR4_READ_SHADOW), vmcs_readl(CR4_GUEST_HOST_MASK));
-	pr_err("CR3 = 0x%016lx\n", vmcs_readl(GUEST_CR3));
+	       cr4, 
+         /*vmcs_readl(CR4_READ_SHADOW)*/
+         (long unsigned int) read_domain_config(vmx, TYCHE_CTRL_NAT, CR4_READ_SHADOW),
+         /*vmcs_readl(CR4_GUEST_HOST_MASK)*/
+         (long unsigned int) read_domain_config(vmx, TYCHE_CTRL_NAT, CR4_READ_SHADOW));
+	pr_err("CR3 = 0x%016lx\n", 
+      /*vmcs_readl(GUEST_CR3)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_CR3));
 	if (cpu_has_vmx_ept()) {
 		pr_err("PDPTR0 = 0x%016llx  PDPTR1 = 0x%016llx\n",
-		       vmcs_read64(GUEST_PDPTR0), vmcs_read64(GUEST_PDPTR1));
+		      /*vmcs_read64(GUEST_PDPTR0)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_PDPTR0),
+        /*vmcs_read64(GUEST_PDPTR1)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_PDPTR1));
 		pr_err("PDPTR2 = 0x%016llx  PDPTR3 = 0x%016llx\n",
-		       vmcs_read64(GUEST_PDPTR2), vmcs_read64(GUEST_PDPTR3));
+		       /*vmcs_read64(GUEST_PDPTR2)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_PDPTR2),
+        /*vmcs_read64(GUEST_PDPTR3)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_PDPTR3));
 	}
 	pr_err("RSP = 0x%016lx  RIP = 0x%016lx\n",
-	       vmcs_readl(GUEST_RSP), vmcs_readl(GUEST_RIP));
+	       /*vmcs_readl(GUEST_RSP)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RSP),
+      /*vmcs_readl(GUEST_RIP)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RIP));
 	pr_err("RFLAGS=0x%08lx         DR7 = 0x%016lx\n",
-	       vmcs_readl(GUEST_RFLAGS), vmcs_readl(GUEST_DR7));
+	       /*vmcs_readl(GUEST_RFLAGS)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_RFLAGS),
+      /*vmcs_readl(GUEST_DR7)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_DR7));
 	pr_err("Sysenter RSP=%016lx CS:RIP=%04x:%016lx\n",
-	       vmcs_readl(GUEST_SYSENTER_ESP),
-	       vmcs_read32(GUEST_SYSENTER_CS), vmcs_readl(GUEST_SYSENTER_EIP));
+	       /*vmcs_readl(GUEST_SYSENTER_ESP)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_SYSENTER_ESP),
+	       /*vmcs_read32(GUEST_SYSENTER_CS*)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_REG_32, GUEST_SYSENTER_CS),
+      /*vmcs_readl(GUEST_SYSENTER_EIP)*/
+      (unsigned long int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_SYSENTER_EIP));
 	vmx_dump_sel("CS:  ", GUEST_CS_SELECTOR);
 	vmx_dump_sel("DS:  ", GUEST_DS_SELECTOR);
 	vmx_dump_sel("SS:  ", GUEST_SS_SELECTOR);
@@ -6361,7 +6464,9 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 	vmx_dump_sel("TR:  ", GUEST_TR_SELECTOR);
 	efer_slot = vmx_find_loadstore_msr_slot(&vmx->msr_autoload.guest, MSR_EFER);
 	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_EFER)
-		pr_err("EFER= 0x%016llx\n", vmcs_read64(GUEST_IA32_EFER));
+		pr_err("EFER= 0x%016llx\n", 
+        /*vmcs_read64(GUEST_IA32_EFER)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_IA32_EFER));
 	else if (efer_slot >= 0)
 		pr_err("EFER= 0x%016llx (autoload)\n",
 		       vmx->msr_autoload.guest.val[efer_slot].value);
@@ -6372,28 +6477,40 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 		pr_err("EFER= 0x%016llx (effective)\n",
 		       vcpu->arch.efer & ~(EFER_LMA | EFER_LME));
 	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_PAT)
-		pr_err("PAT = 0x%016llx\n", vmcs_read64(GUEST_IA32_PAT));
+		pr_err("PAT = 0x%016llx\n",
+        /*vmcs_read64(GUEST_IA32_PAT)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_IA32_PAT));
 	pr_err("DebugCtl = 0x%016llx  DebugExceptions = 0x%016lx\n",
-	       vmcs_read64(GUEST_IA32_DEBUGCTL),
-	       vmcs_readl(GUEST_PENDING_DBG_EXCEPTIONS));
+	       /*vmcs_read64(GUEST_IA32_DEBUGCTL)*/
+      read_domain_config(vmx, TYCHE_REG_64, GUEST_IA32_DEBUGCTL),
+	       /*vmcs_readl(GUEST_PENDING_DBG_EXCEPTIONS)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT, GUEST_PENDING_DBG_EXCEPTIONS));
 	if (cpu_has_load_perf_global_ctrl() &&
 	    vmentry_ctl & VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL)
 		pr_err("PerfGlobCtl = 0x%016llx\n",
-		       vmcs_read64(GUEST_IA32_PERF_GLOBAL_CTRL));
+		       /*vmcs_read64(GUEST_IA32_PERF_GLOBAL_CTRL)*/
+        read_domain_config(vmx, TYCHE_REG_64, GUEST_IA32_PERF_GLOBAL_CTRL));
 	if (vmentry_ctl & VM_ENTRY_LOAD_BNDCFGS)
 		pr_err("BndCfgS = 0x%016llx\n", vmcs_read64(GUEST_BNDCFGS));
 	pr_err("Interruptibility = %08x  ActivityState = %08x\n",
-	       vmcs_read32(GUEST_INTERRUPTIBILITY_INFO),
-	       vmcs_read32(GUEST_ACTIVITY_STATE));
+	       /*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO),
+	    /*vmcs_read32(GUEST_ACTIVITY_STATE)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_REG_32, GUEST_ACTIVITY_STATE));
 	if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY)
 		pr_err("InterruptStatus = %04x\n",
-		       vmcs_read16(GUEST_INTR_STATUS));
-	if (vmcs_read32(VM_ENTRY_MSR_LOAD_COUNT) > 0)
+		       /*vmcs_read16(GUEST_INTR_STATUS)*/
+        (unsigned int) read_domain_config(vmx, TYCHE_REG_16, GUEST_INTR_STATUS));
+	if (/*vmcs_read32(VM_ENTRY_MSR_LOAD_COUNT)*/
+      read_domain_config(vmx, TYCHE_CTRL_32, VM_ENTRY_MSR_LOAD_COUNT) > 0)
 		vmx_dump_msrs("guest autoload", &vmx->msr_autoload.guest);
-	if (vmcs_read32(VM_EXIT_MSR_STORE_COUNT) > 0)
+	if (/*vmcs_read32(VM_EXIT_MSR_STORE_COUNT)*/
+      read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_MSR_STORE_COUNT) > 0)
 		vmx_dump_msrs("guest autostore", &vmx->msr_autostore.guest);
 
 	pr_err("*** Host State ***\n");
+  pr_err("TODO aghosn: we do not expose host state sooooo...");
+  /*
 	pr_err("RIP = 0x%016lx  RSP = 0x%016lx\n",
 	       vmcs_readl(HOST_RIP), vmcs_readl(HOST_RSP));
 	pr_err("CS=%04x SS=%04x DS=%04x ES=%04x FS=%04x GS=%04x TR=%04x\n",
@@ -6423,6 +6540,7 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 		       vmcs_read64(HOST_IA32_PERF_GLOBAL_CTRL));
 	if (vmcs_read32(VM_EXIT_MSR_LOAD_COUNT) > 0)
 		vmx_dump_msrs("host autoload", &vmx->msr_autoload.host);
+    */
 
 	pr_err("*** Control State ***\n");
 	pr_err("CPUBased=0x%08x SecondaryExec=0x%08x TertiaryExec=0x%016llx\n",
@@ -6430,46 +6548,78 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 	pr_err("PinBased=0x%08x EntryControls=%08x ExitControls=%08x\n",
 	       pin_based_exec_ctrl, vmentry_ctl, vmexit_ctl);
 	pr_err("ExceptionBitmap=%08x PFECmask=%08x PFECmatch=%08x\n",
-	       vmcs_read32(EXCEPTION_BITMAP),
-	       vmcs_read32(PAGE_FAULT_ERROR_CODE_MASK),
-	       vmcs_read32(PAGE_FAULT_ERROR_CODE_MATCH));
+	       /*vmcs_read32(EXCEPTION_BITMAP)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, EXCEPTION_BITMAP),
+	       /*vmcs_read32(PAGE_FAULT_ERROR_CODE_MASK)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, PAGE_FAULT_ERROR_CODE_MASK),
+	       /*vmcs_read32(PAGE_FAULT_ERROR_CODE_MATCH)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, PAGE_FAULT_ERROR_CODE_MATCH));
 	pr_err("VMEntry: intr_info=%08x errcode=%08x ilen=%08x\n",
-	       vmcs_read32(VM_ENTRY_INTR_INFO_FIELD),
-	       vmcs_read32(VM_ENTRY_EXCEPTION_ERROR_CODE),
-	       vmcs_read32(VM_ENTRY_INSTRUCTION_LEN));
+	       /*vmcs_read32(VM_ENTRY_INTR_INFO_FIELD)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_ENTRY_INTR_INFO_FIELD),
+	       /*vmcs_read32(VM_ENTRY_EXCEPTION_ERROR_CODE)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_ENTRY_EXCEPTION_ERROR_CODE),
+	       /*vmcs_read32(VM_ENTRY_INSTRUCTION_LEN)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_ENTRY_INSTRUCTION_LEN));
 	pr_err("VMExit: intr_info=%08x errcode=%08x ilen=%08x\n",
-	       vmcs_read32(VM_EXIT_INTR_INFO),
-	       vmcs_read32(VM_EXIT_INTR_ERROR_CODE),
-	       vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
+	       /*vmcs_read32(VM_EXIT_INTR_INFO)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_INTR_INFO),
+	       /*vmcs_read32(VM_EXIT_INTR_ERROR_CODE)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_INTR_ERROR_CODE),
+	       /*vmcs_read32(VM_EXIT_INSTRUCTION_LEN)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_INSTRUCTION_LEN));
 	pr_err("        reason=%08x qualification=%016lx\n",
-	       vmcs_read32(VM_EXIT_REASON), vmcs_readl(EXIT_QUALIFICATION));
+	       /*vmcs_read32(VM_EXIT_REASON)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, VM_EXIT_REASON),
+      /*vmcs_readl(EXIT_QUALIFICATION)*/
+      (long unsigned int) read_domain_config(vmx, TYCHE_REG_NAT_RO, EXIT_QUALIFICATION));
 	pr_err("IDTVectoring: info=%08x errcode=%08x\n",
-	       vmcs_read32(IDT_VECTORING_INFO_FIELD),
-	       vmcs_read32(IDT_VECTORING_ERROR_CODE));
+	       /*vmcs_read32(IDT_VECTORING_INFO_FIELD)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_REG_32_RO, IDT_VECTORING_INFO_FIELD),
+	       /*vmcs_read32(IDT_VECTORING_ERROR_CODE)*/
+      (unsigned int) read_domain_config(vmx, TYCHE_REG_32_RO, IDT_VECTORING_ERROR_CODE));
 	pr_err("TSC Offset = 0x%016llx\n", vmcs_read64(TSC_OFFSET));
 	if (secondary_exec_control & SECONDARY_EXEC_TSC_SCALING)
 		pr_err("TSC Multiplier = 0x%016llx\n",
-		       vmcs_read64(TSC_MULTIPLIER));
+		       /*vmcs_read64(TSC_MULTIPLIER)*/
+        read_domain_config(vmx, TYCHE_CTRL_64, TSC_MULTIPLIER));
 	if (cpu_based_exec_ctrl & CPU_BASED_TPR_SHADOW) {
 		if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY) {
-			u16 status = vmcs_read16(GUEST_INTR_STATUS);
+			u16 status = /*vmcs_read16(GUEST_INTR_STATUS)*/
+        read_domain_config(vmx, TYCHE_REG_16, GUEST_INTR_STATUS);
 			pr_err("SVI|RVI = %02x|%02x ", status >> 8, status & 0xff);
 		}
-		pr_cont("TPR Threshold = 0x%02x\n", vmcs_read32(TPR_THRESHOLD));
+		pr_cont("TPR Threshold = 0x%02x\n", /*vmcs_read32(TPR_THRESHOLD)*/
+        (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, TPR_THRESHOLD));
 		if (secondary_exec_control & SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES)
-			pr_err("APIC-access addr = 0x%016llx ", vmcs_read64(APIC_ACCESS_ADDR));
-		pr_cont("virt-APIC addr = 0x%016llx\n", vmcs_read64(VIRTUAL_APIC_PAGE_ADDR));
+			pr_err("APIC-access addr = 0x%016llx ", /*vmcs_read64(APIC_ACCESS_ADDR)*/
+          read_domain_config(vmx, TYCHE_CTRL_64, APIC_ACCESS_ADDR));
+		pr_cont("virt-APIC addr = 0x%016llx\n", /*vmcs_read64(VIRTUAL_APIC_PAGE_ADDR)*/
+        read_domain_config(vmx, TYCHE_CTRL_64, VIRTUAL_APIC_PAGE_ADDR));
 	}
-	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR)
-		pr_err("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
-	if ((secondary_exec_control & SECONDARY_EXEC_ENABLE_EPT))
-		pr_err("EPT pointer = 0x%016llx\n", vmcs_read64(EPT_POINTER));
-	if (secondary_exec_control & SECONDARY_EXEC_PAUSE_LOOP_EXITING)
+	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR) {
+    // TODO(@aghosn): Implement missing field in tyche vmx.
+		//pr_err("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
+    pr_err("TODO aghosn add support for missing posted intr nv");
+  }
+	if ((secondary_exec_control & SECONDARY_EXEC_ENABLE_EPT)) {
+    //TODO(@aghosn): check that out and fix.
+		//pr_err("EPT pointer = 0x%016llx\n", vmcs_read64(EPT_POINTER));
+    pr_err("TODO aghosn: we do not expose the ept pointer. Print domain?\n");
+  }
+	if (secondary_exec_control & SECONDARY_EXEC_PAUSE_LOOP_EXITING) {
 		pr_err("PLE Gap=%08x Window=%08x\n",
-		       vmcs_read32(PLE_GAP), vmcs_read32(PLE_WINDOW));
-	if (secondary_exec_control & SECONDARY_EXEC_ENABLE_VPID)
-		pr_err("Virtual processor ID = 0x%04x\n",
-		       vmcs_read16(VIRTUAL_PROCESSOR_ID));
+		       /*vmcs_read32(PLE_GAP)*/
+        (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, PLE_GAP), 
+        /*vmcs_read32(PLE_WINDOW)*/
+        (unsigned int) read_domain_config(vmx, TYCHE_CTRL_32, PLE_WINDOW));
+  }
+	if (secondary_exec_control & SECONDARY_EXEC_ENABLE_VPID) {
+    //TODO(@aghosn): fix this add support for the proc id.
+		/*pr_err("Virtual processor ID = 0x%04x\n",
+		       vmcs_read16(VIRTUAL_PROCESSOR_ID));*/
+    pr_err("TODO aghosn: we do not support virtual proc id yet.\n");
+  }
 }
 
 /*
@@ -6561,7 +6711,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		dump_vmcs(vcpu);
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
-			= vmcs_read32(VM_INSTRUCTION_ERROR);
+			= /*vmcs_read32(VM_INSTRUCTION_ERROR)*/
+      read_domain_config(vmx, TYCHE_CTRL_32, VM_INSTRUCTION_ERROR);
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
 		return 0;
 	}
@@ -6589,7 +6740,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		vcpu->run->internal.data[2] = vcpu->arch.exit_qualification;
 		if (exit_reason.basic == EXIT_REASON_EPT_MISCONFIG) {
 			vcpu->run->internal.data[ndata++] =
-				vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+				/*vmcs_read64(GUEST_PHYSICAL_ADDRESS)*/
+        read_domain_config(vmx, TYCHE_REG_64_RO, GUEST_PHYSICAL_ADDRESS);
 		}
 		vcpu->run->internal.data[ndata++] = vcpu->arch.last_vmentry_cpu;
 		vcpu->run->internal.ndata = ndata;
@@ -6852,18 +7004,19 @@ static void vmx_hwapic_isr_update(int max_isr)
 	if (max_isr == -1)
 		max_isr = 0;
 
-	status = vmcs_read16(GUEST_INTR_STATUS);
+	status = 0 /*vmcs_read16(GUEST_INTR_STATUS)*/;
+  printk(KERN_ERR "TODO aghosn: we do not have a vmcs here hwapic.\n");
 	old = status >> 8;
 	if (max_isr != old) {
 		status &= 0xff;
 		status |= max_isr << 8;
-    printk(KERN_ERR "We do not have a vmcs here!\n");
+    printk(KERN_ERR "TODO aghosn: We do not have a vmcs here hwapic 2!\n");
     //TODO(@aghosn) ERROR!!!!!! TODO
 		//vmcs_write16(GUEST_INTR_STATUS, status);
 	}
 }
 
-static void vmx_set_rvi(int vector)
+static void vmx_set_rvi(struct vcpu_vmx *vmx,  int vector)
 {
 	u16 status;
 	u8 old;
@@ -6871,15 +7024,14 @@ static void vmx_set_rvi(int vector)
 	if (vector == -1)
 		vector = 0;
 
-	status = vmcs_read16(GUEST_INTR_STATUS);
+	status = /*vmcs_read16(GUEST_INTR_STATUS)*/
+    read_domain_config(vmx, TYCHE_REG_16, GUEST_INTR_STATUS);
 	old = (u8)status & 0xff;
 	if ((u8)vector != old) {
 		status &= ~0xff;
 		status |= (u8)vector;
-    printk(KERN_ERR "We do not have a vmcs here 2!\n");
-    //TODO(@aghosn) ERROR!!!!!! TODO
 		//vmcs_write16(GUEST_INTR_STATUS, status);
-		//vmcs_write16(GUEST_INTR_STATUS, status);
+    write_domain_config(vmx, TYCHE_REG_16, GUEST_INTR_STATUS, status);
 	}
 }
 
@@ -6894,7 +7046,7 @@ static void vmx_hwapic_irr_update(struct kvm_vcpu *vcpu, int max_irr)
 	 * interrupt. Therefore, do nothing when running L2.
 	 */
 	if (!is_guest_mode(vcpu))
-		vmx_set_rvi(max_irr);
+		vmx_set_rvi(to_vmx(vcpu), max_irr);
 }
 
 static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
@@ -6936,7 +7088,7 @@ static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 	 * a VM-Exit and the subsequent entry will call sync_pir_to_irr.
 	 */
 	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu))
-		vmx_set_rvi(max_irr);
+		vmx_set_rvi(to_vmx(vcpu), max_irr);
 	else if (got_posted_interrupt)
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 
@@ -7102,7 +7254,8 @@ static void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx)
 				      GUEST_INTR_STATE_NMI);
 		else
 			vmx->loaded_vmcs->nmi_known_unmasked =
-				!(vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)
+				!(/*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
+            read_domain_config(vmx, TYCHE_REG_32, GUEST_INTERRUPTIBILITY_INFO)
 				  & GUEST_INTR_STATE_NMI);
 	} else if (unlikely(vmx->loaded_vmcs->soft_vnmi_blocked))
 		vmx->loaded_vmcs->vnmi_blocked_time +=
@@ -7144,17 +7297,20 @@ static void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
 		vmx_set_nmi_mask(vcpu, false);
 		break;
 	case INTR_TYPE_SOFT_EXCEPTION:
-		vcpu->arch.event_exit_inst_len = vmcs_read32(instr_len_field);
+		vcpu->arch.event_exit_inst_len = /*vmcs_read32(instr_len_field)*/
+      read_domain_config(to_vmx(vcpu), TYCHE_REG_32_RO, instr_len_field);
 		fallthrough;
 	case INTR_TYPE_HARD_EXCEPTION:
 		if (idt_vectoring_info & VECTORING_INFO_DELIVER_CODE_MASK) {
-			u32 err = vmcs_read32(error_code_field);
+			u32 err = /*vmcs_read32(error_code_field)*/
+        read_domain_config(to_vmx(vcpu), TYCHE_REG_32_RO, error_code_field);
 			kvm_requeue_exception_e(vcpu, vector, err);
 		} else
 			kvm_requeue_exception(vcpu, vector);
 		break;
 	case INTR_TYPE_SOFT_INTR:
-		vcpu->arch.event_exit_inst_len = vmcs_read32(instr_len_field);
+		vcpu->arch.event_exit_inst_len = /*vmcs_read32(instr_len_field)*/
+      read_domain_config(to_vmx(vcpu), TYCHE_REG_32_RO, instr_len_field);
 		fallthrough;
 	case INTR_TYPE_EXT_INTR:
 		kvm_queue_interrupt(vcpu, vector, type == INTR_TYPE_SOFT_INTR);
@@ -7174,7 +7330,8 @@ static void vmx_complete_interrupts(struct vcpu_vmx *vmx)
 static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 {
 	__vmx_complete_interrupts(vcpu,
-				  vmcs_read32(VM_ENTRY_INTR_INFO_FIELD),
+				  /*vmcs_read32(VM_ENTRY_INTR_INFO_FIELD)*/
+      read_domain_config(to_vmx(vcpu), TYCHE_CTRL_32, VM_ENTRY_INTR_INFO_FIELD),
 				  VM_ENTRY_INSTRUCTION_LEN,
 				  VM_ENTRY_EXCEPTION_ERROR_CODE);
 
@@ -7461,12 +7618,14 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		return EXIT_FASTPATH_NONE;
 	}
 
-	vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
+	vmx->exit_reason.full = /*vmcs_read32(VM_EXIT_REASON)*/
+    read_domain_config(vmx, TYCHE_REG_32_RO, VM_EXIT_REASON);
 	if (unlikely((u16)vmx->exit_reason.basic == EXIT_REASON_MCE_DURING_VMENTRY))
 		kvm_machine_check();
 
 	if (likely(!vmx->exit_reason.failed_vmentry))
-		vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
+		vmx->idt_vectoring_info = /*vmcs_read32(IDT_VECTORING_INFO_FIELD)*/
+      read_domain_config(vmx, TYCHE_REG_32_RO, IDT_VECTORING_INFO_FIELD);
 
 	trace_kvm_exit(vcpu, KVM_ISA_VMX);
 
