@@ -1,6 +1,6 @@
 #include "tyche.h"
 
-int write_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx, usize value)
+int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value)
 {
   struct kvm *kvm = vmx->vcpu.kvm;
   struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
@@ -11,7 +11,7 @@ int write_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx,
     goto failure;
   }
 
-  if (driver_set_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id, group, idx, value) != SUCCESS) {
+  if (driver_set_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id, idx, value) != SUCCESS) {
     ERROR("Unable to set the domain core config");
     goto failure;
   }
@@ -21,7 +21,7 @@ failure:
   return FAILURE;
 }
 
-usize read_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx)
+usize read_domain_config(struct vcpu_vmx *vmx, usize idx)
 {
   usize value = 0;
   struct kvm *kvm = vmx->vcpu.kvm;
@@ -33,7 +33,7 @@ usize read_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx
     goto failure;
   }
   if (driver_get_domain_core_config(
-        kvm_vmx->domain, vmx->vcpu.vcpu_id, group, idx, &value) != SUCCESS) {
+        kvm_vmx->domain, vmx->vcpu.vcpu_id, idx, &value) != SUCCESS) {
     ERROR("Unable to get the domain core config.");
     goto failure;
   }
