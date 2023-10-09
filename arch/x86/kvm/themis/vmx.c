@@ -449,28 +449,28 @@ void vmread_error(unsigned long field, bool fault)
 		vmx_insn_failed("kvm: vmread failed: field=%lx\n", field);
 }
 
-noinline void vmwrite_error(unsigned long field, unsigned long value)
+noinline void vmwrite_error(void *vmx_ptr, unsigned long field, unsigned long value)
 {
-  //TODO(@aghosn): need to fix this
-  printk(KERN_ERR "Missing vmx to read value\n");
+  struct vcpu_vmx *vmx = (struct vcpu_vmx*) vmx_ptr;
 	vmx_insn_failed("vm: vmwrite failed: field=%lx val=%lx err=%u\n",
-			field, value, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 666);
+			field, value, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/
+      (unsigned int) read_domain_config(vmx, VM_INSTRUCTION_ERROR));
 }
 
-noinline void vmclear_error(struct vmcs *vmcs, u64 phys_addr)
+noinline void vmclear_error(void *vmx_ptr, struct vmcs *vmcs, u64 phys_addr)
 {
-  //TODO(@aghosn): need to fix this.
-  printk(KERN_ERR "Missing vmx to read value 2\n");
+  struct vcpu_vmx *vmx = (struct vcpu_vmx*) vmx_ptr;
 	vmx_insn_failed("kvm: vmclear failed: %p/%llx err=%u\n",
-			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 777);
+			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/
+      (unsigned int) read_domain_config(vmx, VM_INSTRUCTION_ERROR));
 }
 
-noinline void vmptrld_error(struct vmcs *vmcs, u64 phys_addr)
+noinline void vmptrld_error(void* vmx_ptr, struct vmcs *vmcs, u64 phys_addr)
 {
-  //TODO(@aghosn): need to fix this.
-  printk(KERN_ERR "Missing vmx to read value 3\n");
+  struct vcpu_vmx *vmx = (struct vcpu_vmx*) vmx_ptr;
 	vmx_insn_failed("kvm: vmptrld failed: %p/%llx err=%u\n",
-			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/ 888);
+			vmcs, phys_addr, /*vmcs_read32(VM_INSTRUCTION_ERROR)*/
+      (unsigned int) read_domain_config(vmx, VM_INSTRUCTION_ERROR));
 }
 
 noinline void invvpid_error(unsigned long ext, u16 vpid, gva_t gva)
@@ -753,9 +753,8 @@ static u16 vmx_read_guest_seg_selector(struct vcpu_vmx *vmx, unsigned seg)
 	u16 *p = &vmx->segment_cache.seg[seg].selector;
 
 	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_SEL)) {
-    //TODO(@aghosn): figure out how to get the segment selectors.
-    printk(KERN_ERR "Missing support to read segment selectors\n");
-		//*p = vmcs_read16(kvm_vmx_segment_fields[seg].selector);
+		*p = /*vmcs_read16(kvm_vmx_segment_fields[seg].selector)*/
+      read_domain_config(vmx, kvm_vmx_segment_fields[seg].selector);
   }
 	return *p;
 }
@@ -765,9 +764,8 @@ static ulong vmx_read_guest_seg_base(struct vcpu_vmx *vmx, unsigned seg)
 	ulong *p = &vmx->segment_cache.seg[seg].base;
 
 	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_BASE)) {
-    //TODO(@aghosn): figure out how to get segment bases.
-    printk(KERN_ERR "Missing support to read segment bases.\n");
-		//*p = vmcs_readl(kvm_vmx_segment_fields[seg].base);
+		*p = /*vmcs_readl(kvm_vmx_segment_fields[seg].base)*/
+      read_domain_config(vmx, kvm_vmx_segment_fields[seg].base);
   }
 	return *p;
 }
@@ -777,9 +775,8 @@ static u32 vmx_read_guest_seg_limit(struct vcpu_vmx *vmx, unsigned seg)
 	u32 *p = &vmx->segment_cache.seg[seg].limit;
 
 	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_LIMIT)) {
-    //TODO(@aghosn): figure out how to get segment limits.
-    printk(KERN_ERR "Missing support to read segment limits.\n");
-		//*p = vmcs_read32(kvm_vmx_segment_fields[seg].limit);
+		*p = /*vmcs_read32(kvm_vmx_segment_fields[seg].limit)*/
+      read_domain_config(vmx, kvm_vmx_segment_fields[seg].limit);
   }
 	return *p;
 }
@@ -789,9 +786,8 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 	u32 *p = &vmx->segment_cache.seg[seg].ar;
 
 	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_AR)) {
-    //TODO(@aghosn): figure out how to read segment access rights.
-    printk(KERN_ERR "Missing support to read segment access rights.\n");
-		//*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
+	  *p = /*vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes)*/
+      read_domain_config(vmx, kvm_vmx_segment_fields[seg].ar_bytes);
   }
 	return *p;
 }
@@ -952,11 +948,12 @@ static __always_inline void add_atomic_switch_msr_special(struct vcpu_vmx *vmx,
 		unsigned long guest_val_vmcs, unsigned long host_val_vmcs,
 		u64 guest_val, u64 host_val)
 {
-  //TODO(@aghosn) not sure what to do yet.
-  printk(KERN_ERR "TODO aghosn in add_atomic_Switch_msr_special\n");
 	//vmcs_write64(guest_val_vmcs, guest_val);
+  write_domain_config(vmx, guest_val_vmcs, guest_val);
 	if (host_val_vmcs != HOST_IA32_EFER) {
-		//vmcs_write64(host_val_vmcs, host_val);
+		//TODO(@aghosn): do we need to write host ia32 efer?
+    //vmcs_write64(host_val_vmcs, host_val);
+    //write_domain_config(vmx, host_val_vmcs, host_val);
   }
 	vm_entry_controls_setbit(vmx, entry);
 	vm_exit_controls_setbit(vmx, exit);
@@ -3011,7 +3008,7 @@ static void enter_pmode(struct kvm_vcpu *vcpu)
 	fix_pmode_seg(vcpu, VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
 }
 
-static void fix_rmode_seg(int seg, struct kvm_segment *save)
+static void fix_rmode_seg(struct vcpu_vmx *vmx, int seg, struct kvm_segment *save)
 {
 	const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
 	struct kvm_segment var = *save;
@@ -3038,12 +3035,14 @@ static void fix_rmode_seg(int seg, struct kvm_segment *save)
 					"protected mode (seg=%d)", seg);
 	}
 
-  //TODO(@aghosn): need to figure this out.
 	//vmcs_write16(sf->selector, var.selector);
 	//vmcs_writel(sf->base, var.base);
 	//vmcs_write32(sf->limit, var.limit);
 	//vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(&var));
-  printk(KERN_ERR "TODO aghosn, need to setup the rmode seg\n");
+  write_domain_config(vmx, sf->selector, var.selector);
+  write_domain_config(vmx, sf->base, var.base);
+  write_domain_config(vmx, sf->limit, var.limit);
+  write_domain_config(vmx, sf->ar_bytes, vmx_segment_access_rights(&var));
 }
 
 static void enter_rmode(struct kvm_vcpu *vcpu)
@@ -3093,12 +3092,12 @@ static void enter_rmode(struct kvm_vcpu *vcpu)
       read_domain_config(vmx, GUEST_CR4) | X86_CR4_VME);
 	vmx_update_exception_bitmap(vcpu);
 
-	fix_rmode_seg(VCPU_SREG_SS, &vmx->rmode.segs[VCPU_SREG_SS]);
-	fix_rmode_seg(VCPU_SREG_CS, &vmx->rmode.segs[VCPU_SREG_CS]);
-	fix_rmode_seg(VCPU_SREG_ES, &vmx->rmode.segs[VCPU_SREG_ES]);
-	fix_rmode_seg(VCPU_SREG_DS, &vmx->rmode.segs[VCPU_SREG_DS]);
-	fix_rmode_seg(VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
-	fix_rmode_seg(VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
+	fix_rmode_seg(vmx, VCPU_SREG_SS, &vmx->rmode.segs[VCPU_SREG_SS]);
+	fix_rmode_seg(vmx, VCPU_SREG_CS, &vmx->rmode.segs[VCPU_SREG_CS]);
+	fix_rmode_seg(vmx, VCPU_SREG_ES, &vmx->rmode.segs[VCPU_SREG_ES]);
+	fix_rmode_seg(vmx, VCPU_SREG_DS, &vmx->rmode.segs[VCPU_SREG_DS]);
+	fix_rmode_seg(vmx, VCPU_SREG_GS, &vmx->rmode.segs[VCPU_SREG_GS]);
+	fix_rmode_seg(vmx, VCPU_SREG_FS, &vmx->rmode.segs[VCPU_SREG_FS]);
 }
 
 int vmx_set_efer(struct kvm_vcpu *vcpu, u64 efer)
@@ -3577,16 +3576,17 @@ void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 		vmx->rmode.segs[seg] = *var;
 		if (seg == VCPU_SREG_TR) {
 			//vmcs_write16(sf->selector, var->selector);
-      printk(KERN_ERR "TODO aghosn need to do __vmx_get_segment\n");
+      write_domain_config(vmx, sf->selector, var->selector);
     } else if (var->s)
-			fix_rmode_seg(seg, &vmx->rmode.segs[seg]);
+			fix_rmode_seg(vmx, seg, &vmx->rmode.segs[seg]);
 		return;
 	}
-  //TODO(@aghosn): Handle the segment writes.
 	//vmcs_writel(sf->base, var->base);
 	//vmcs_write32(sf->limit, var->limit);
 	//vmcs_write16(sf->selector, var->selector);
-  printk(KERN_ERR "TODO aghosn figure out how to set segments\n");
+  write_domain_config(vmx, sf->base, var->base);
+  write_domain_config(vmx, sf->limit, var->limit);
+  write_domain_config(vmx, sf->selector, var->selector);
 
 	/*
 	 *   Fix the "Accessed" bit in AR field of segment registers for older
@@ -3602,9 +3602,8 @@ void __vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
 	if (is_unrestricted_guest(vcpu) && (seg != VCPU_SREG_LDTR))
 		var->type |= 0x1; /* Accessed */
 
-  //TODO(aghosn) figure out the ar bytes.
 	//vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
-  printk(KERN_ERR "Still in __vmx_set_segment\n");
+  write_domain_config(vmx, sf->ar_bytes, vmx_segment_access_rights(var));
 }
 
 static void vmx_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg)
@@ -3910,22 +3909,24 @@ out:
 	return r;
 }
 
-static void seg_setup(int seg)
+static void seg_setup(struct vcpu_vmx *vmx, int seg)
 {
 	const struct kvm_vmx_segment_field *sf = &kvm_vmx_segment_fields[seg];
 	unsigned int ar;
 
-  //TODO(@aghosn) figure that out.
 	//vmcs_write16(sf->selector, 0);
 	//vmcs_writel(sf->base, 0);
 	//vmcs_write32(sf->limit, 0xffff);
-  printk(KERN_ERR "TODO aghosn implement seg_setup\n");
+  write_domain_config(vmx, sf->selector, 0);
+  write_domain_config(vmx, sf->base, 0);
+  write_domain_config(vmx, sf->limit, 0xffff);
+
 	ar = 0x93;
 	if (seg == VCPU_SREG_CS)
 		ar |= 0x08; /* code segment */
 
 	//vmcs_write32(sf->ar_bytes, ar);
-  printk(KERN_ERR "TODO aghosn implement seg_setup 2\n");
+  write_domain_config(vmx, sf->ar_bytes, ar);
 }
 
 static int alloc_apic_access_page(struct kvm *kvm)
@@ -4339,7 +4340,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 
 	cr0 = read_cr0();
 	WARN_ON(cr0 & X86_CR0_TS);
-  //TODO(@aghosn): we skip the cr0 writes.
+  //TODO(@aghosn): we skip the host cr0 writes.
 	//vmcs_writel(HOST_CR0, cr0);  /* 22.2.3 */
 
 	/*
@@ -4754,7 +4755,7 @@ static int vmx_vcpu_precreate(struct kvm *kvm)
 static void init_vmcs(struct vcpu_vmx *vmx)
 {
 	struct kvm *kvm = vmx->vcpu.kvm;
-	//struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
+	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
 
 	if (nested)
 		nested_vmx_set_vmcs_shadowing_bitmap();
@@ -4764,7 +4765,6 @@ static void init_vmcs(struct vcpu_vmx *vmx)
     write_domain_config(vmx, MSR_BITMAP, __pa(vmx->vmcs01.msr_bitmap));
   }
 
-  //TODO(@aghosn) Not sure this is needed.
 	//vmcs_write64(VMCS_LINK_POINTER, INVALID_GPA); /* 22.3.1.5 */
   write_domain_config(vmx, VMCS_LINK_POINTER, INVALID_GPA); 
 
@@ -4801,8 +4801,8 @@ static void init_vmcs(struct vcpu_vmx *vmx)
 	if (vmx_can_use_ipiv(&vmx->vcpu)) {
 		//vmcs_write64(PID_POINTER_TABLE, __pa(kvm_vmx->pid_table));
 		//vmcs_write16(LAST_PID_POINTER_INDEX, kvm->arch.max_vcpu_ids - 1);
-    //TODO(@aghosn) -> we don't have that yet in tyche so let's skip it.
-    printk(KERN_ERR "vmx_can_use_ipiv returned true but we skipped setup.\n");
+    write_domain_config(vmx, PID_POINTER_TABLE, __pa(kvm_vmx->pid_table));
+    write_domain_config(vmx, LAST_PID_POINTER_INDEX, kvm->arch.max_vcpu_ids - 1);
 	}
 
 	if (!kvm_pause_in_guest(kvm)) {
@@ -4838,7 +4838,6 @@ static void init_vmcs(struct vcpu_vmx *vmx)
     write_domain_config(vmx, VM_FUNCTION_CONTROL, 0);
   }
 
-  //TODO(@aghosn): maybe we should look into msr management in tyche?
 	//vmcs_write32(VM_EXIT_MSR_STORE_COUNT, 0);
 	//vmcs_write32(VM_EXIT_MSR_LOAD_COUNT, 0);
 	//vmcs_write64(VM_EXIT_MSR_LOAD_ADDR, __pa(vmx->msr_autoload.host.val));
@@ -4867,9 +4866,8 @@ static void init_vmcs(struct vcpu_vmx *vmx)
 	set_cr4_guest_host_mask(vmx);
 
 	if (vmx->vpid != 0) {
-    //TODO(aghosn) should probably handle that at some point. 
 		//vmcs_write16(VIRTUAL_PROCESSOR_ID, vmx->vpid);
-    printk(KERN_ERR "Fix the vpid in tyche before fixing it here.\n");
+    write_domain_config(vmx, VIRTUAL_PROCESSOR_ID, vmx->vpid);
   }
 
 	if (cpu_has_vmx_xsaves()) {
@@ -4962,17 +4960,17 @@ static void vmx_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	vmx_segment_cache_clear(vmx);
 	kvm_register_mark_available(vcpu, VCPU_EXREG_SEGMENTS);
 
-	seg_setup(VCPU_SREG_CS);
+	seg_setup(vmx, VCPU_SREG_CS);
 	//vmcs_write16(GUEST_CS_SELECTOR, 0xf000);
 	//vmcs_writel(GUEST_CS_BASE, 0xffff0000ul);
   write_domain_config(vmx, GUEST_CS_SELECTOR, 0xf000); 
   write_domain_config(vmx, GUEST_CS_BASE, 0xffff0000ul); 
 
-	seg_setup(VCPU_SREG_DS);
-	seg_setup(VCPU_SREG_ES);
-	seg_setup(VCPU_SREG_FS);
-	seg_setup(VCPU_SREG_GS);
-	seg_setup(VCPU_SREG_SS);
+	seg_setup(vmx, VCPU_SREG_DS);
+	seg_setup(vmx, VCPU_SREG_ES);
+	seg_setup(vmx, VCPU_SREG_FS);
+	seg_setup(vmx, VCPU_SREG_GS);
+	seg_setup(vmx, VCPU_SREG_SS);
 
 	//vmcs_write16(GUEST_TR_SELECTOR, 0);
 	//vmcs_writel(GUEST_TR_BASE, 0);
@@ -6339,24 +6337,26 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu *vcpu)
   write_domain_config(vmx, GUEST_PML_INDEX, PML_ENTITY_NUM - 1);
 }
 
-static void vmx_dump_sel(char *name, uint32_t sel)
+static void vmx_dump_sel(struct vcpu_vmx *vmx, char *name, uint32_t sel)
 {
-  printk(KERN_ERR "TODO: handle the segments.\n");
-  //TODO(@aghosn): need to figure out how to handle these.
-	/*pr_err("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
-	       name, vmcs_read16(sel),
-	       vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
-	       vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
-	       vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));*/
+	pr_err("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
+	       name, /*vmcs_read16(sel)*/ 
+         (unsigned int) read_domain_config(vmx, sel),
+	       /*vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR)*/
+         (unsigned int) read_domain_config(vmx, sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
+	       /*vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR)*/
+         (unsigned int) read_domain_config(vmx, sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
+	       /*vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR)*/
+         (long unsigned int) read_domain_config(vmx, sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));
 }
 
-static void vmx_dump_dtsel(char *name, uint32_t limit)
+static void vmx_dump_dtsel(struct vcpu_vmx *vmx, char *name, uint32_t limit)
 {
-  printk(KERN_ERR "TODO: handle the segments.\n");
-  //TODO(@aghosn): need to figure out how to handle these.
-	/*pr_err("%s                           limit=0x%08x, base=0x%016lx\n",
-	       name, vmcs_read32(limit),
-	       vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));*/
+	pr_err("%s                           limit=0x%08x, base=0x%016lx\n",
+	       name, /*vmcs_read32(limit)*/
+         (unsigned int) read_domain_config(vmx, limit),
+	       /*vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT)*/
+         (long unsigned int) read_domain_config(vmx, limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
 }
 
 static void vmx_dump_msrs(char *name, struct vmx_msrs *m)
@@ -6401,9 +6401,8 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 		secondary_exec_control = 0;
 
 	if (cpu_has_tertiary_exec_ctrls()) {
-    //TODO(@aghosn): implement support for tertiary controls in tyche.
-    printk(KERN_ERR "TODO: aghosn add support for tertiary.\n");
-		//tertiary_exec_control = vmcs_read64(TERTIARY_VM_EXEC_CONTROL);
+		tertiary_exec_control = /*vmcs_read64(TERTIARY_VM_EXEC_CONTROL)*/
+      read_domain_config(vmx, TERTIARY_VM_EXEC_CONTROL);
   } else
 		tertiary_exec_control = 0;
 
@@ -6452,16 +6451,16 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
       (unsigned int) read_domain_config(vmx, GUEST_SYSENTER_CS),
       /*vmcs_readl(GUEST_SYSENTER_EIP)*/
       (unsigned long int) read_domain_config(vmx, GUEST_SYSENTER_EIP));
-	vmx_dump_sel("CS:  ", GUEST_CS_SELECTOR);
-	vmx_dump_sel("DS:  ", GUEST_DS_SELECTOR);
-	vmx_dump_sel("SS:  ", GUEST_SS_SELECTOR);
-	vmx_dump_sel("ES:  ", GUEST_ES_SELECTOR);
-	vmx_dump_sel("FS:  ", GUEST_FS_SELECTOR);
-	vmx_dump_sel("GS:  ", GUEST_GS_SELECTOR);
-	vmx_dump_dtsel("GDTR:", GUEST_GDTR_LIMIT);
-	vmx_dump_sel("LDTR:", GUEST_LDTR_SELECTOR);
-	vmx_dump_dtsel("IDTR:", GUEST_IDTR_LIMIT);
-	vmx_dump_sel("TR:  ", GUEST_TR_SELECTOR);
+	vmx_dump_sel(vmx, "CS:  ", GUEST_CS_SELECTOR);
+	vmx_dump_sel(vmx, "DS:  ", GUEST_DS_SELECTOR);
+	vmx_dump_sel(vmx, "SS:  ", GUEST_SS_SELECTOR);
+	vmx_dump_sel(vmx, "ES:  ", GUEST_ES_SELECTOR);
+	vmx_dump_sel(vmx, "FS:  ", GUEST_FS_SELECTOR);
+	vmx_dump_sel(vmx, "GS:  ", GUEST_GS_SELECTOR);
+	vmx_dump_dtsel(vmx, "GDTR:", GUEST_GDTR_LIMIT);
+	vmx_dump_sel(vmx, "LDTR:", GUEST_LDTR_SELECTOR);
+	vmx_dump_dtsel(vmx, "IDTR:", GUEST_IDTR_LIMIT);
+	vmx_dump_sel(vmx, "TR:  ", GUEST_TR_SELECTOR);
 	efer_slot = vmx_find_loadstore_msr_slot(&vmx->msr_autoload.guest, MSR_EFER);
 	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_EFER)
 		pr_err("EFER= 0x%016llx\n", 
@@ -6598,12 +6597,11 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
         read_domain_config(vmx, VIRTUAL_APIC_PAGE_ADDR));
 	}
 	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR) {
-    // TODO(@aghosn): Implement missing field in tyche vmx.
-		//pr_err("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
-    pr_err("TODO aghosn add support for missing posted intr nv");
+		pr_err("PostedIntrVec = 0x%02x\n", /*vmcs_read16(POSTED_INTR_NV)*/
+        (unsigned int) read_domain_config(vmx, POSTED_INTR_NV));
   }
 	if ((secondary_exec_control & SECONDARY_EXEC_ENABLE_EPT)) {
-    //TODO(@aghosn): check that out and fix.
+    //TODO(@aghosn): we do not expose ept ptr.
 		//pr_err("EPT pointer = 0x%016llx\n", vmcs_read64(EPT_POINTER));
     pr_err("TODO aghosn: we do not expose the ept pointer. Print domain?\n");
   }
@@ -6615,10 +6613,8 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
         (unsigned int) read_domain_config(vmx, PLE_WINDOW));
   }
 	if (secondary_exec_control & SECONDARY_EXEC_ENABLE_VPID) {
-    //TODO(@aghosn): fix this add support for the proc id.
-		/*pr_err("Virtual processor ID = 0x%04x\n",
-		       vmcs_read16(VIRTUAL_PROCESSOR_ID));*/
-    pr_err("TODO aghosn: we do not support virtual proc id yet.\n");
+		pr_err("Virtual processor ID = 0x%04x\n", /*vmcs_read16(VIRTUAL_PROCESSOR_ID)*/
+        (unsigned int) read_domain_config(vmx, VIRTUAL_PROCESSOR_ID));
   }
 }
 
@@ -6996,7 +6992,7 @@ static void vmx_set_apic_access_page_addr(struct kvm_vcpu *vcpu)
 	put_page(page);
 }
 
-static void vmx_hwapic_isr_update(int max_isr)
+static void vmx_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 {
 	u16 status;
 	u8 old;
@@ -7004,15 +7000,14 @@ static void vmx_hwapic_isr_update(int max_isr)
 	if (max_isr == -1)
 		max_isr = 0;
 
-	status = 0 /*vmcs_read16(GUEST_INTR_STATUS)*/;
-  printk(KERN_ERR "TODO aghosn: we do not have a vmcs here hwapic.\n");
+	status = /*vmcs_read16(GUEST_INTR_STATUS)*/
+    read_domain_config(to_vmx(vcpu), GUEST_INTR_STATUS);
 	old = status >> 8;
 	if (max_isr != old) {
 		status &= 0xff;
 		status |= max_isr << 8;
-    printk(KERN_ERR "TODO aghosn: We do not have a vmcs here hwapic 2!\n");
-    //TODO(@aghosn) ERROR!!!!!! TODO
 		//vmcs_write16(GUEST_INTR_STATUS, status);
+    write_domain_config(to_vmx(vcpu), GUEST_INTR_STATUS, status);
 	}
 }
 
@@ -8741,7 +8736,7 @@ static __init int hardware_setup(void)
 	 */
 	vmx_setup_me_spte_mask();
 
-  // TODO @aghosn: removing this.
+  // TODO @aghosn: removing this as we do not use epts.
 	/*kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
 		 ept_caps_to_lpage_level(vmx_capability.ept));*/
   kvm_enable_tyche_mmu();
