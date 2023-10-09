@@ -7,10 +7,8 @@
 #include "vmx.h"
 
 /// Write the domain's core configuration field.
-int write_domain_config(struct vcpu_vmx *vmx, register_group_t group, usize idx,
-			usize value);
+int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value);
 
 /// Read the domain's core configuration field.
-usize read_domain_config(struct vcpu_vmx *vmx, register_group_t group,
-			 usize idx);
+usize read_domain_config(struct vcpu_vmx *vmx, usize idx);
 #endif

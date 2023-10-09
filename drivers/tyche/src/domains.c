@@ -309,8 +309,7 @@ failure:
 }
 
 /// Expose the configuration of fields (write).
-int driver_set_domain_core_config (driver_domain_t *dom, usize core,
-                                   register_group_t group, usize idx,
+int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
                                    usize value) {
   if (dom == NULL) {
     ERROR("The domain is null");
@@ -332,7 +331,7 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core,
     ERROR("The domain is not initialized with tyche");
     goto failure;
   } 
-  if (set_domain_core_configuration(dom->domain_id, core, group, idx, value)
+  if (set_domain_core_configuration(dom->domain_id, core, idx, value)
       != SUCCESS) {
     ERROR("Unable to set core configuration");
     goto failure;
@@ -346,8 +345,7 @@ EXPORT_SYMBOL(driver_set_domain_core_config);
 
 
 /// Expose the configuration of fields (read).
-int driver_get_domain_core_config(driver_domain_t *dom, usize core,
-    register_group_t group, usize idx, usize *value) {
+int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, usize *value) {
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
@@ -372,7 +370,7 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core,
     ERROR("The domain is not initialized with tyche");
     goto failure;
   }
-  if (get_domain_core_configuration(dom->domain_id, core, group, idx, value)
+  if (get_domain_core_configuration(dom->domain_id, core, idx, value)
       != SUCCESS) {
     ERROR("Unable to get core configuration");
     goto failure;
@@ -448,19 +446,19 @@ int driver_commit_entry_on_core(driver_domain_t *dom, usize core)
 
   // Set the domain's registers.
   if (set_domain_core_configuration(
-        dom->domain_id, core, TYCHE_REG_GP, REG_GP_RSP, 
+        dom->domain_id, core, REG_GP_RSP, 
         dom->entries.entries[core].rsp) != SUCCESS) {
     ERROR("Unable to set RSP on core %llx", core);
     goto failure;
   } 
   if (set_domain_core_configuration(
-        dom->domain_id, core, TYCHE_REG_GP, REG_GP_RIP,
+        dom->domain_id, core, REG_GP_RIP,
         dom->entries.entries[core].rip) != SUCCESS) {
     ERROR("Unable to set RIP on core %llx", core);
     goto failure;
   }
   if (set_domain_core_configuration(
-        dom->domain_id, core, TYCHE_REG_GP, REG_GP_CR3,
+        dom->domain_id, core, REG_GP_CR3,
         dom->entries.entries[core].cr3) != SUCCESS) {
     ERROR("Unable to set CR3 on core %llx", core);
     goto failure;

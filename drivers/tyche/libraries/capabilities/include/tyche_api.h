@@ -66,12 +66,10 @@ int tyche_create_domain(capa_index_t *management);
 int tyche_set_domain_config(capa_index_t management, tyche_configurations_t idx,
 			    usize value);
 
-int tyche_set_domain_core_config(capa_index_t management, usize core,
-				 register_group_t group, usize idx,
+int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx,
 				 usize value);
 
-int tyche_get_domain_core_config(capa_index_t management, usize core,
-				 register_group_t group, usize idx,
+int tyche_get_domain_core_config(capa_index_t management, usize core, usize idx,
 				 usize *value);
 
 int tyche_seal(capa_index_t *transition, capa_index_t management);
