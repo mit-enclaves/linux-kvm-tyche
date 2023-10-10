@@ -42,6 +42,7 @@
 #include <asm/sev.h>
 #include <asm/tdx.h>
 #include <asm/init.h>
+#include <asm/tyche.h>
 
 /*
  * Manage page tables very early on.
@@ -522,6 +523,7 @@ asmlinkage __visible void __init __noreturn x86_64_start_kernel(char * real_mode
 
 	/* Needed before cc_platform_has() can be used for TDX */
 	tdx_early_init();
+	tyche_early_init();
 
 	copy_bootdata(__va(real_mode_data));
 
