@@ -16,6 +16,24 @@
 enum cc_vendor cc_vendor __ro_after_init = CC_VENDOR_NONE;
 static u64 cc_mask __ro_after_init;
 
+static bool noinstr tyche_cc_platform_has(enum cc_attr attr)
+{
+	switch (attr) {
+	case CC_ATTR_GUEST_MEM_ENCRYPT:
+		/* Tyche doesn't encrypt the guest memory, but we want the dma
+		 * memory to be a shared memory region. Retrn true on this one
+		 * will force the pci_swiotlb_detect() to use swiotlb (bounce
+		 * buffer) on x86 */
+	case CC_ATTR_MEM_ENCRYPT:
+		/* Following the comment on CC_ATTR_GUEST_MEM_ENCRYPT: This
+		 * option will force the mem_encrypt_init() to mark swiotlb as
+		 * decrypted */
+		return true;
+	default:
+		return false;
+	}
+}
+
 static bool noinstr intel_cc_platform_has(enum cc_attr attr)
 {
 	switch (attr) {
@@ -104,6 +122,8 @@ bool noinstr cc_platform_has(enum cc_attr attr)
 		return amd_cc_platform_has(attr);
 	case CC_VENDOR_INTEL:
 		return intel_cc_platform_has(attr);
+	case CC_VENDOR_TYCHE:
+		return tyche_cc_platform_has(attr);
 	default:
 		return false;
 	}
@@ -118,6 +138,7 @@ u64 cc_mkenc(u64 val)
 	 *
 	 * - for AMD, bit *set* means the page is encrypted
 	 * - for AMD with vTOM and for Intel, *clear* means encrypted
+	 * - for Tyche, no encryption is needed
 	 */
 	switch (cc_vendor) {
 	case CC_VENDOR_AMD:
