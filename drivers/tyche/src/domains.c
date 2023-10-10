@@ -307,6 +307,7 @@ int driver_set_domain_configuration(driver_domain_t *dom, driver_domain_config_t
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_set_domain_configuration);
 
 /// Expose the configuration of fields (write).
 int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
@@ -316,7 +317,7 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
     goto failure;
   }
   if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to commit entry point on unallowed core");
+    ERROR("Trying to set config on unallowed core: %u", (unsigned int) core);
     goto failure;
   }
   if (core >= ENTRIES_PER_DOMAIN) {
@@ -399,6 +400,7 @@ int driver_commit_domain_configuration(driver_domain_t *dom, driver_domain_confi
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_commit_domain_configuration);
 
 int driver_set_entry_on_core(
     driver_domain_t *dom,
