@@ -389,6 +389,7 @@ struct kvm_vmx {
 
 	/*Tyche specific fields */
 	driver_domain_t *domain;
+	usize coremap;
 };
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);

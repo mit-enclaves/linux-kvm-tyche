@@ -7653,6 +7653,7 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 {
 	struct vmx_uret_msr *tsx_ctrl;
 	struct vcpu_vmx *vmx;
+  struct kvm_vmx * vmx_kvm = to_kvm_vmx(vcpu->kvm);
 	int i, err;
 
 	BUILD_BUG_ON(offsetof(struct vcpu_vmx, vcpu) != 0);
@@ -7663,8 +7664,25 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 	err = -ENOMEM;
 
 	vmx->vpid = allocate_vpid();
+  vmx_kvm->coremap |= (1 << vmx->vpid);
 
-	/*
+  //@aghosn: setup cores here.
+  //TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
+  //For now, let's just hack it this way.
+  //
+  //TODO NEED TO COMMIT THAT CONFIG!
+  if (driver_set_domain_configuration(vmx_kvm->domain, TYCHE_CONFIG_CORES,
+        vmx_kvm->coremap) != SUCCESS) {
+    ERROR("Unable to set default core for the newly created domain.");
+    return FAILURE;
+  } 
+  /// Propagate the config to the monitor.
+  if (driver_commit_domain_configuration(
+        vmx_kvm->domain, TYCHE_CONFIG_CORES) != SUCCESS) {
+    ERROR("Unable to commit the core configuration");
+    return FAILURE;
+  }
+  /*
 	 * If PML is turned on, failure on enabling PML just results in failure
 	 * of creating the vcpu, therefore we can simplify PML logic (by
 	 * avoiding dealing with cases, such as enabling PML partially on vcpus
@@ -7760,6 +7778,8 @@ free_vpid:
 
 static int vmx_vm_init(struct kvm *kvm)
 {
+  struct kvm_vmx *vmx = to_kvm_vmx(kvm);
+  printk(KERN_ERR "\n\nIN VM INIT\n\n");
 	if (!ple_gap)
 		kvm->arch.pause_in_guest = true;
 
@@ -7786,6 +7806,21 @@ static int vmx_vm_init(struct kvm *kvm)
 			break;
 		}
 	}
+  //@aghosn: create a domain.
+  if (driver_create_domain(NULL, &(vmx->domain)) != SUCCESS) {
+    ERROR("Unable to create a domain VM.\n");
+    return FAILURE;
+  }
+  //@aghosn: setup the vcpu type and commit it.
+  if (driver_set_domain_configuration(vmx->domain, TYCHE_CONFIG_SWITCH, FreshVCPU) != SUCCESS){
+    ERROR("Unable to set the switch type for the domain.\n");
+    return FAILURE;
+  }
+  if (driver_commit_domain_configuration(vmx->domain, TYCHE_CONFIG_SWITCH) != SUCCESS) {
+    ERROR("Unable to commit the switch type for the domain.\n");
+    return FAILURE;
+  }
+
 	return 0;
 }
 
