@@ -8,6 +8,7 @@ enum cc_vendor {
 	CC_VENDOR_NONE,
 	CC_VENDOR_AMD,
 	CC_VENDOR_INTEL,
+	CC_VENDOR_TYCHE,
 };
 
 extern enum cc_vendor cc_vendor;

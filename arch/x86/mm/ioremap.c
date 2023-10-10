@@ -257,6 +257,8 @@ __ioremap_caller(resource_size_t phys_addr, unsigned long size,
 	 * In TDX guests, memory is marked private by default. If encryption
 	 * is not requested (using encrypted), explicitly set decrypt
 	 * attribute in all IOREMAPPED memory.
+	 * For Tyche guests, we are not going to encrypt the page and we skip
+	 * the case inside cc_mkenc and cc_mkdec
 	 */
 	prot = PAGE_KERNEL_IO;
 	if ((io_desc.flags & IORES_MAP_ENCRYPTED) || encrypted)
