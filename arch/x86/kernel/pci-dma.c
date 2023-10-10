@@ -63,6 +63,11 @@ static void __init pci_swiotlb_detect(void)
 		x86_swiotlb_enable = true;
 		x86_swiotlb_flags |= SWIOTLB_FORCE;
 	}
+
+#ifdef CONFIG_TYCHE_TD0
+	x86_swiotlb_enable = true;
+	x86_swiotlb_flags |= SWIOTLB_FORCE;
+#endif
 }
 #else
 static inline void __init pci_swiotlb_detect(void)

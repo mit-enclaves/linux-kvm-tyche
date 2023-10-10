@@ -16,7 +16,17 @@
 enum cc_vendor cc_vendor __ro_after_init;
 static u64 cc_mask __ro_after_init;
 
-static bool intel_cc_platform_has(enum cc_attr attr)
+static bool noinstr tyche_cc_platform_has(enum cc_attr attr)
+{
+	switch (attr) {
+	case CC_ATTR_HOTPLUG_DISABLED:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool noinstr intel_cc_platform_has(enum cc_attr attr)
 {
 	switch (attr) {
 	case CC_ATTR_GUEST_UNROLL_STRING_IO:
@@ -104,6 +114,8 @@ bool cc_platform_has(enum cc_attr attr)
 		return amd_cc_platform_has(attr);
 	case CC_VENDOR_INTEL:
 		return intel_cc_platform_has(attr);
+	case CC_VENDOR_TYCHE:
+		return tyche_cc_platform_has(attr);
 	default:
 		return false;
 	}
@@ -118,6 +130,7 @@ u64 cc_mkenc(u64 val)
 	 *
 	 * - for AMD, bit *set* means the page is encrypted
 	 * - for AMD with vTOM and for Intel, *clear* means encrypted
+	 * - for Tyche, no encryption is needed
 	 */
 	switch (cc_vendor) {
 	case CC_VENDOR_AMD:
