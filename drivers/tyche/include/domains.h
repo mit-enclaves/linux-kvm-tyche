@@ -144,6 +144,9 @@ int driver_set_domain_configuration(driver_domain_t *domain,
 int driver_set_domain_core_config(driver_domain_t *dom, usize core, usize idx,
 				  usize value);
 
+/// Allocate a core context for the specified core.
+int driver_alloc_core_context(driver_domain_t *dom, usize core);
+
 /// Expose the configuration of fields (read).
 int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx,
 				  usize *value);

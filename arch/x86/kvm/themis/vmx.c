@@ -7666,11 +7666,8 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 	vmx->vpid = allocate_vpid();
   vmx_kvm->coremap |= (1 << vmx->vpid);
 
-  //@aghosn: setup cores here.
-  //TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
-  //For now, let's just hack it this way.
-  //
-  //TODO NEED TO COMMIT THAT CONFIG!
+  ///@aghosn: setup cores here.
+  ///TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
   if (driver_set_domain_configuration(vmx_kvm->domain, TYCHE_CONFIG_CORES,
         vmx_kvm->coremap) != SUCCESS) {
     ERROR("Unable to set default core for the newly created domain.");
@@ -7680,6 +7677,11 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
   if (driver_commit_domain_configuration(
         vmx_kvm->domain, TYCHE_CONFIG_CORES) != SUCCESS) {
     ERROR("Unable to commit the core configuration");
+    return FAILURE;
+  }
+  /// Create a context for this core.
+  if (driver_alloc_core_context(vmx_kvm->domain, vmx->vpid) != SUCCESS) {
+    ERROR("Unable to allocated core context on %d", vmx->vpid);
     return FAILURE;
   }
   /*
@@ -7779,7 +7781,6 @@ free_vpid:
 static int vmx_vm_init(struct kvm *kvm)
 {
   struct kvm_vmx *vmx = to_kvm_vmx(kvm);
-  printk(KERN_ERR "\n\nIN VM INIT\n\n");
 	if (!ple_gap)
 		kvm->arch.pause_in_guest = true;
 

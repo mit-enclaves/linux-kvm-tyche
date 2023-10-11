@@ -402,6 +402,29 @@ failure:
 }
 EXPORT_SYMBOL(driver_commit_domain_configuration);
 
+int driver_alloc_core_context(driver_domain_t *dom, usize core) {
+  if (dom == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
+    ERROR("Trying to commit entry point on unallowed core");
+    goto failure;
+  }
+  if (core >= ENTRIES_PER_DOMAIN) {
+    ERROR("The supplied core is greater than supported cores.");
+    goto failure;
+  }
+  if (alloc_core_context(dom->domain_id, core) != SUCCESS) {
+    ERROR("Unable to allocate context on core");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_alloc_core_context);
+
 int driver_set_entry_on_core(
     driver_domain_t *dom,
     usize core,
@@ -594,7 +617,16 @@ int driver_commit_domain(driver_domain_t *dom, int full)
 
     // Set the entries.
     for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
-      if (((1 << i) & core_map) != 0 && driver_commit_entry_on_core(dom, i) != SUCCESS) {
+      if (((1 << i) & core_map) == 0) {
+        continue;
+      }
+      // Allocate the context for the core.
+      if (driver_alloc_core_context(dom, i) != SUCCESS) {
+        ERROR("Unable to allocate context for core %d", i);
+        goto failure;
+      }
+      // Set the entry.
+      if (driver_commit_entry_on_core(dom, i) != SUCCESS) {
         ERROR("Unable to set entry capability for core %d", i); 
         goto failure;
       }

@@ -22,60 +22,60 @@
 typedef struct file *domain_handle_t;
 
 typedef enum segment_type_t {
-  SHARED = 0,
-  CONFIDENTIAL = 1,
+	SHARED = 0,
+	CONFIDENTIAL = 1,
 } segment_type_t;
 
 // ———————————————————————————————— Messages ———————————————————————————————— //
 
 /// Default message used to communicate with the driver.
 typedef struct {
-  usize virtaddr;
-  usize physoffset;
+	usize virtaddr;
+	usize physoffset;
 } msg_info_t;
 
 /// Message type to add a new region.
 typedef struct {
-  /// Start virtual address. Must be page aligned and within the mmaped region.
-  usize start;
+	/// Start virtual address. Must be page aligned and within the mmaped region.
+	usize start;
 
-  /// Must be page aligned, greater than start, and within the mmaped region.
-  usize size;
+	/// Must be page aligned, greater than start, and within the mmaped region.
+	usize size;
 
-  /// Access right (RWXU) for this region.
-  memory_access_right_t flags;
+	/// Access right (RWXU) for this region.
+	memory_access_right_t flags;
 
-  /// Type of mapping: Confidential or Shared.
-  segment_type_t tpe;
+	/// Type of mapping: Confidential or Shared.
+	segment_type_t tpe;
 } msg_mprotect_t;
 
 /// Structure of the commit message.
 typedef struct {
-  /// The core
-  usize core;
+	/// The core
+	usize core;
 
-  /// The pointer to the stack.
-  usize stack;
+	/// The pointer to the stack.
+	usize stack;
 
-  /// The entry point.
-  usize entry;
+	/// The entry point.
+	usize entry;
 
-  /// The page tables.
-  usize page_tables;
+	/// The page tables.
+	usize page_tables;
 } msg_entry_on_core_t;
 
 /// Structure to perform a transition.
 typedef struct {
-  /// The args, will end up in r11 on x86.
-  void *args;
+	/// The args, will end up in r11 on x86.
+	void *args;
 } msg_switch_t;
 
 /// Structure to set permissions, i.e., traps or cores.
 typedef struct {
-  // Configuration type.
-  usize idx;
-  // Configuration values.
-  usize value;
+	// Configuration type.
+	usize idx;
+	// Configuration values.
+	usize value;
 } msg_set_perm_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
@@ -87,5 +87,6 @@ typedef struct {
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_info_t *)
 #define TYCHE_SET_DOMAIN_CONFIGURATION _IOWR('a', 'i', msg_set_perm_t)
 #define TYCHE_SET_ENTRY_POINT _IOWR('a', 'm', msg_entry_on_core_t *)
+#define TYCHE_ALLOC_CONTEXT _IOW('a', 'n', usize)
 
 #endif

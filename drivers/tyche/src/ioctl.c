@@ -167,6 +167,13 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       break;
+   case TYCHE_ALLOC_CONTEXT:
+      usize core = (usize) arg;
+      if (driver_alloc_core_context(domain, core) != SUCCESS) {
+        ERROR("Unable to allocate core context!");
+        goto failure;
+      }
+      break;
    case TYCHE_SET_ENTRY_POINT:
         if (copy_from_user(
             &commit,
