@@ -64,6 +64,9 @@ int set_domain_configuration(domain_id_t id, tyche_configurations_t idx,
 int set_domain_core_configuration(domain_id_t id, usize core, usize idx,
 				  usize value);
 
+/// Allocate a core context for the domain.
+int alloc_core_context(domain_id_t id, usize core);
+
 /// Get values inside the target domain.
 int get_domain_core_configuration(domain_id_t id, usize core, usize idx,
 				  usize *value);

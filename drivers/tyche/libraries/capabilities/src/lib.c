@@ -199,6 +199,22 @@ failure:
   return FAILURE;
 }
 
+int alloc_core_context(domain_id_t id, usize core) {
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+
+  if (tyche_alloc_core_context(child->management->local_id, core) != SUCCESS) {
+    ERROR("Unable to allocate the core context.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int get_domain_core_configuration(domain_id_t id, usize core, usize idx, usize *value) {
   child_domain_t *child = find_child(id);
   if (child == NULL) {

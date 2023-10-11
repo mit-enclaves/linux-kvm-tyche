@@ -135,6 +135,21 @@ failure:
   return FAILURE;
 }
 
+int tyche_alloc_core_context(capa_index_t management, usize core) {
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_ALLOC_CORE_CONTEXT,
+    .arg_1 = management,
+    .arg_2 = core,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+
 int tyche_seal(capa_index_t* transition, capa_index_t management)
 {
   vmcall_frame_t frame = {
