@@ -34,6 +34,8 @@ int tyche_call(vmcall_frame_t* frame)
   return (int)result;
 } 
 
+EXPORT_SYMBOL(tyche_call);
+
 /// Simple generic vmcall implementation with cli.
 int tyche_call_cli(vmcall_frame_t* frame)
 {

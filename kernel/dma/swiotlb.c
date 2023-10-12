@@ -343,6 +343,142 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 	return tlb;
 }
 
+typedef struct vmcall_frame_t {
+	// Vmcall id.
+	uint64_t vmcall;
+
+	// Arguments.
+	uint64_t arg_1;
+	uint64_t arg_2;
+	uint64_t arg_3;
+	uint64_t arg_4;
+	uint64_t arg_5;
+	uint64_t arg_6;
+
+	// Results.
+	uint64_t value_1;
+	uint64_t value_2;
+	uint64_t value_3;
+	uint64_t value_4;
+	uint64_t value_5;
+	uint64_t value_6;
+} vmcall_frame_t;
+
+extern int tyche_call(vmcall_frame_t *frame);
+
+int tyche_enum(unsigned long *next, unsigned long *start, unsigned long *size)
+{
+	uint8_t capa_type = 0;
+	uint8_t flags = 0;
+	bool active = 0;
+	bool confidential = 0;
+
+	pr_info("%s: next=%lu", __func__, *next);
+	vmcall_frame_t frame = {
+		.vmcall = 8,
+		.arg_1 = *next,
+	};
+
+	if (tyche_call(&frame)) {
+		pr_warn("tyche enumerate hypercall failed");
+		return 1;
+	}
+
+	pr_info("enum returns: start=0x%llx, end=0x%llx, cap_type=0x%llx, alias=0x%llx, next=0x%llx",
+		frame.value_1, frame.value_2, frame.value_3, frame.value_4,
+		frame.value_5);
+
+	capa_type = frame.value_3 & 0xff;
+	flags = frame.value_3 >> 8;
+	active = flags & 0b01;
+	confidential = flags & 0b10;
+	*next = frame.value_5;
+
+	// Check if the cap returned is a region
+	if (capa_type != 0) {
+		pr_info("cap is not region");
+		return 1;
+	}
+
+	// Check if the region is active
+	if (!active) {
+		pr_info("region is not active");
+		return 1;
+	}
+
+	// Check if the region is shared
+	if (confidential) {
+		pr_info("region is not shared");
+		return 1;
+	}
+
+	// Check if the region is aliased
+	if (frame.value_4 != 0) {
+		pr_info("shared region is aliased: 0x%llx -> 0x%llx",
+			frame.value_1, frame.value_4);
+		*start = frame.value_4;
+	} else {
+		*start = frame.value_1;
+	}
+
+	*size = frame.value_2 - frame.value_1 + 1;
+
+	return 0;
+}
+
+static void __init *tyche_memblock_alloc(unsigned long start,
+					 unsigned long size)
+{
+	void *tlb = NULL;
+
+	if (!size) {
+		pr_warn("Tyche: cannot allocate a swiotlb for size 0");
+		return NULL;
+	}
+
+	pr_warn("allocating a swiotlb buffer on start=0x%llx, size=%lu", start,
+		size);
+
+	// Call the memblock functions to allocate this range for DMA
+	tlb = memblock_alloc_try_nid(size, PAGE_SIZE, start, start + size,
+				     NUMA_NO_NODE);
+
+	if (!tlb) {
+		pr_warn("%s: Failed to allocate %zu bytes tlb structure\n",
+			__func__, size);
+		return NULL;
+	}
+
+	return tlb;
+}
+
+static void __init *tyche_alloc(unsigned long nslabs,
+				int (*remap)(void *tlb, unsigned long nslabs))
+{
+	size_t bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
+	void *tlb = NULL;
+	unsigned long next = 0;
+	unsigned long start = 0;
+	unsigned long size = 0;
+
+	do {
+		if (tyche_enum(&next, &start, &size) == 0) {
+			// Found an active and shared region
+			if (bytes >= size) {
+				pr_warn("Tyche: adjust swiotlb to shared region size = %lu, original size=%lu",
+					size, bytes);
+				bytes = size;
+			}
+			if ((tlb = tyche_memblock_alloc(start, bytes)) !=
+			    NULL) {
+				break;
+			}
+		}
+	} while (next != 0);
+
+	return tlb;
+}
+
 /*
  * Statically reserve bounce buffer space and initialize bounce buffer data
  * structures for the software IO TLB used to implement the DMA API.
@@ -378,6 +514,16 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 
 	nslabs = default_nslabs;
 	nareas = limit_nareas(default_nareas, nslabs);
+
+#ifdef CONFIG_TYCHE_TD0
+	pr_info("swiotlb allocation with tyche guest");
+	// On a tyche guest, we get the swiotlb region directly from
+	// enumerating the capabilities of that region
+	if ((tlb = tyche_alloc(nslabs, remap)) == NULL) {
+		pr_info("Unable to reuqest a shared region from Tyche for SWIOTLB");
+		return;
+	}
+#else
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
 			return;
@@ -390,6 +536,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 			default_nslabs, nslabs);
 		default_nslabs = nslabs;
 	}
+#endif
 
 	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
 	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
