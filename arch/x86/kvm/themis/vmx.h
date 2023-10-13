@@ -392,6 +392,10 @@ struct kvm_vmx {
 	usize coremap;
 };
 
+// aghosn: forward declartion to avoid circular includes.
+extern int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value);
+extern usize read_domain_config(struct vcpu_vmx *vmx, usize idx);
+
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
 void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
 			struct loaded_vmcs *buddy);
@@ -566,7 +570,7 @@ static inline u8 vmx_get_rvi(void)
 						u##bits val)                 \
 	{                                                                    \
 		if (vmx->loaded_vmcs->controls_shadow.lname != val) {        \
-			vmcs_write##bits(uname, val);                        \
+			write_domain_config(vmx, uname, val);                \
 			vmx->loaded_vmcs->controls_shadow.lname = val;       \
 		}                                                            \
 	}                                                                    \
