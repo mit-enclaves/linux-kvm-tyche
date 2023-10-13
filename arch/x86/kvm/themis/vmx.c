@@ -4857,6 +4857,7 @@ static void init_vmcs(struct vcpu_vmx *vmx)
 	vm_exit_controls_set(vmx, vmx_vmexit_ctrl());
 
 	/* 22.2.1, 20.8.1 */
+  //TODO(aghosn): This function is built via macros in vmx.h.
 	vm_entry_controls_set(vmx, vmx_vmentry_ctrl());
 
 	vmx->vcpu.arch.cr0_guest_owned_bits = KVM_POSSIBLE_CR0_GUEST_BITS;
