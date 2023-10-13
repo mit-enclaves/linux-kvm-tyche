@@ -324,10 +324,10 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
     ERROR("The supplied core is greater than supported cores.");
     goto failure;
   }
-  if (dom->state != DRIVER_NOT_COMMITED) {
-    ERROR("The domain is already committed or dead");
+  /*if (dom->state != DRIVER_NOT_COMMITED) {
+    ERROR("The domain is already committed or dead: %d", dom->state);
     goto failure;
-  }
+  }*/
   if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
     goto failure;
@@ -363,10 +363,10 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, u
     ERROR("The supplied core is greater than supported cores.");
     goto failure;
   }
-  if (dom->state != DRIVER_NOT_COMMITED) {
+  /*if (dom->state != DRIVER_NOT_COMMITED) {
     ERROR("The domain is already committed or dead");
     goto failure;
-  }
+  }*/
   if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
     goto failure;
@@ -585,8 +585,8 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
-    ERROR("Missing segments for domain %p", dom);
-    goto failure;
+    ERROR("WARNING: the domain %p has no segment.", dom);
+    //goto failure;
   }
 
   if (dom->domain_id == UNINIT_DOM_ID) {
@@ -647,6 +647,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_commit_domain);
 
 int driver_switch_domain(driver_domain_t * dom, void* args)
 {
@@ -664,6 +665,7 @@ int driver_switch_domain(driver_domain_t * dom, void* args)
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_switch_domain);
 
 int driver_delete_domain(driver_domain_t *dom)
 {

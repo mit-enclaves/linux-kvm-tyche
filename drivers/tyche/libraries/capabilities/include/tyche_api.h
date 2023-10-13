@@ -31,6 +31,12 @@ typedef enum tyche_configurations_t {
 	TYCHE_NR_CONFIGS = 4,
 } tyche_configurations_t;
 
+typedef enum tyche_perm_value_t {
+	TYCHE_PERM_SPAWN = (1 << 0),
+	TYCHE_PERM_SEND = (1 << 1),
+	TYCHE_PERM_DUPLICATE = (1 << 2),
+} tyche_perm_value_t;
+
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
 
 /// Defined in capabilities/src/domain.rs

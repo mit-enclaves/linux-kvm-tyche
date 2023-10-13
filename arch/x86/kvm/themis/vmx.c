@@ -868,7 +868,6 @@ static bool msr_write_intercepted(struct vcpu_vmx *vmx, u32 msr)
 unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx *vmx)
 {
 	unsigned int flags = 0;
-
 	if (vmx->loaded_vmcs->launched)
 		flags |= VMX_RUN_VMRESUME;
 
@@ -2599,8 +2598,9 @@ static void vmx_hardware_disable(void)
 {
 	vmclear_local_loaded_vmcss();
 
-	if (cpu_vmxoff())
-		kvm_spurious_fault();
+  //TODO(@aghosn): remove this call to vmxoff.
+	/*if (cpu_vmxoff())
+		kvm_spurious_fault();*/
 
 	intel_pt_handle_vmx(0);
 }
@@ -6010,11 +6010,18 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 
 static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
+  struct kvm_vmx *kvm = to_kvm_vmx(vcpu->kvm);
 	if (vmx_emulation_required_with_pending_exception(vcpu)) {
 		kvm_prepare_emulation_failure_exit(vcpu);
 		return 0;
 	}
-
+  
+  //@aghosn: commit the domain if it is not commited yet.
+  if (kvm->domain->state != DRIVER_COMMITED &&
+      (driver_commit_domain(kvm->domain, 0) != SUCCESS)) {
+    ERROR("Unable to commit the domain!\n");
+    return FAILURE;
+  } 
 	return 1;
 }
 
@@ -7437,6 +7444,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 					struct vcpu_vmx *vmx,
 					unsigned long flags)
 {
+  struct kvm_vmx *vmx_kvm = to_kvm_vmx(vcpu->kvm);
 	guest_state_enter_irqoff();
 
 	/* L1D Flush includes CPU buffer clear to mitigate MDS */
@@ -7453,9 +7461,13 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
+  //TODO(@aghosn) run the switch!.
+  /*
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
-				   flags);
-
+				   flags);*/
+  //TODO(@aghosn) how do we relate a vcpu to a core for tyche?
+  //This mapping has to be re-designed I think.
+  vmx->fail = driver_switch_domain(vmx_kvm->domain, NULL);
 	vcpu->arch.cr2 = native_read_cr2();
 
 	vmx_enable_fb_clear(vmx);
@@ -7664,7 +7676,7 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 	err = -ENOMEM;
 
 	vmx->vpid = allocate_vpid();
-  vmx_kvm->coremap |= (1 << vmx->vpid);
+  vmx_kvm->coremap |= (1 << vmx->vcpu.vcpu_id);
 
   ///@aghosn: setup cores here.
   ///TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
@@ -7680,8 +7692,8 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
     return FAILURE;
   }
   /// Create a context for this core.
-  if (driver_alloc_core_context(vmx_kvm->domain, vmx->vpid) != SUCCESS) {
-    ERROR("Unable to allocated core context on %d", vmx->vpid);
+  if (driver_alloc_core_context(vmx_kvm->domain, vmx->vcpu.vcpu_id) != SUCCESS) {
+    ERROR("Unable to allocated core context on %d", vmx->vcpu.vcpu_id);
     return FAILURE;
   }
   /*
@@ -7819,6 +7831,16 @@ static int vmx_vm_init(struct kvm *kvm)
   }
   if (driver_commit_domain_configuration(vmx->domain, TYCHE_CONFIG_SWITCH) != SUCCESS) {
     ERROR("Unable to commit the switch type for the domain.\n");
+    return FAILURE;
+  }
+  //@aghosn: setup the domain's permissions.
+  if (driver_set_domain_configuration(vmx->domain, TYCHE_CONFIG_PERMISSIONS,
+        TYCHE_PERM_SPAWN|TYCHE_PERM_SEND|TYCHE_PERM_DUPLICATE) != SUCCESS) {
+    ERROR("Unable to set the permission type for the domain.");
+    return FAILURE;
+  }
+  if (driver_commit_domain_configuration(vmx->domain, TYCHE_CONFIG_PERMISSIONS) != SUCCESS) {
+    ERROR("Unable to commit the domain's permissions.");
     return FAILURE;
   }
 
@@ -8762,6 +8784,7 @@ static __init int hardware_setup(void)
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 
   // TODO @aghosn: removing this 
+  // Doesn't seem to make a big difference if it's called or not.
 	/*if (enable_ept)
 		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
 				      cpu_has_vmx_ept_execute_only());*/
@@ -8773,8 +8796,8 @@ static __init int hardware_setup(void)
 	vmx_setup_me_spte_mask();
 
   // TODO @aghosn: removing this as we do not use epts.
-	/*kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
-		 ept_caps_to_lpage_level(vmx_capability.ept));*/
+	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
+		 ept_caps_to_lpage_level(vmx_capability.ept));
   kvm_enable_tyche_mmu();
 
 	/*
