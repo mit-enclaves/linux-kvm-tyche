@@ -318,7 +318,7 @@ failure:
 /// Creates a domain vm.
 static int tyche_vm_init(struct kvm *kvm) {
   struct kvm_tyche *tyche = to_kvm_tyche(kvm);
-  if (driver_create_domain(NULL, &(tyche->domain)) != SUCCESS) {
+  if (driver_create_domain(NULL, &(tyche->domain), 1) != SUCCESS) {
     ERROR("Unable to create a new domain.");
     return -1;
   } else {

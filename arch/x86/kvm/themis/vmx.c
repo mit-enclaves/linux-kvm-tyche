@@ -7820,7 +7820,7 @@ static int vmx_vm_init(struct kvm *kvm)
 		}
 	}
   //@aghosn: create a domain.
-  if (driver_create_domain(NULL, &(vmx->domain)) != SUCCESS) {
+  if (driver_create_domain(NULL, &(vmx->domain), 1) != SUCCESS) {
     ERROR("Unable to create a domain VM.\n");
     return FAILURE;
   }
