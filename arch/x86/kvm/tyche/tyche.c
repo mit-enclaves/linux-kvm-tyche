@@ -182,7 +182,7 @@ static __init int tyche_hardware_setup(void) {
 
 
   // Enable tyche mmu (which is basically no mmu).
-  kvm_enable_tyche_mmu();
+  kvm_enable_tyche_mmu(NULL);
   //TODO figure that out.
 	//kvm_configure_mmu(1, 0, 4, 0);
   printk(KERN_ERR "In hardware setup\n");
@@ -210,7 +210,7 @@ static __init unsigned int tyche_handle_intel_pt_intr(void)
 static int setup_memory_capabilities(struct kvm* kvm)
 {
   int i = 0, bkt = 0;
-  struct kvm_tyche* tyche = NULL; to_kvm_tyche(kvm);
+  struct kvm_tyche* tyche = NULL;
   if (kvm == NULL) {
     ERROR("The provided kvm structure is null.");
     goto failure;

@@ -510,10 +510,11 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("The domain %p is not registered with the monitor", dom);
     goto failure;
   }
-  if (dom->state != DRIVER_NOT_COMMITED) {
+  //TODO(aghosn) we need to figure this out.
+  /*if (dom->state != DRIVER_NOT_COMMITED) {
     ERROR("The domain %p is already committed.", dom);
     goto failure;
-  }
+  }*/
   if (!dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p's memory is not correctly initialized.", dom);
     goto failure;
@@ -568,6 +569,7 @@ delete_fail:
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_commit_regions);
 
 int driver_commit_domain(driver_domain_t *dom, int full)
 {

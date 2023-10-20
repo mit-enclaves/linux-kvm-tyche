@@ -7462,7 +7462,6 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
-  //TODO(@aghosn) run the switch!.
   /*
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				   flags);*/
@@ -8799,7 +8798,7 @@ static __init int hardware_setup(void)
   // TODO @aghosn: removing this as we do not use epts.
 	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
 		 ept_caps_to_lpage_level(vmx_capability.ept));
-  kvm_enable_tyche_mmu();
+  kvm_enable_tyche_mmu(tyche_mmu_map);
 
 	/*
 	 * Only enable PML when hardware supports PML feature, and both EPT
