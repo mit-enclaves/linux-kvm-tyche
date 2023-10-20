@@ -106,6 +106,7 @@ bool tdp_enabled = false;
  * of second-level page tables and the mmu is mostly entirely ignored.
  */
 bool tyche_enabled = false;
+int (*__tyche_map)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault) = NULL;
 
 static int max_huge_page_level __read_mostly;
 static int tdp_root_level __read_mostly;
@@ -3216,8 +3217,9 @@ static int kvm_handle_error_pfn(struct kvm_vcpu *vcpu, gfn_t gfn, kvm_pfn_t pfn)
 	 * into the spte otherwise read access on readonly gfn also can
 	 * caused mmio page fault and treat it as mmio access.
 	 */
-	if (pfn == KVM_PFN_ERR_RO_FAULT)
+	if (pfn == KVM_PFN_ERR_RO_FAULT) {
 		return RET_PF_EMULATE;
+	}
 
 	if (pfn == KVM_PFN_ERR_HWPOISON) {
 		kvm_send_hwpoison_signal(kvm_vcpu_gfn_to_hva(vcpu, gfn),
@@ -4344,7 +4346,11 @@ static int direct_page_fault(struct kvm_vcpu *vcpu,
 		goto out_unlock;
 
 	if (is_tdp_mmu_fault) {
-		r = kvm_tdp_mmu_map(vcpu, fault);
+		if (tyche_enabled && __tyche_map != NULL) {
+			r = __tyche_map(vcpu, fault);
+		} else {
+			r = kvm_tdp_mmu_map(vcpu, fault);
+		}
 	} else {
 		r = make_mmu_pages_available(vcpu);
 		if (r)
@@ -5796,12 +5802,14 @@ void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 /*
  * Turn on tyche mmu.
  */
-void kvm_enable_tyche_mmu(void)
+void kvm_enable_tyche_mmu(int (*pf)(struct kvm_vcpu *, struct kvm_page_fault *))
 {
+	pr_err("Tyche enabled");
 	if (tdp_enabled) {
 		printk(KERN_ERR "tdp was enabled before tyche.\n");
-		tdp_enabled = 0;
+		//tdp_enabled = 0;
 	}
+	__tyche_map = pf;
 	tyche_enabled = true;
 }
 EXPORT_SYMBOL_GPL(kvm_enable_tyche_mmu);
