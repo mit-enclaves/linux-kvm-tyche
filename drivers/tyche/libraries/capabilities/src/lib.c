@@ -92,7 +92,7 @@ fail:
   return FAILURE;
 }
 
-int create_domain(domain_id_t *id) {
+int create_domain(domain_id_t *id, int aliased) {
   capa_index_t child_idx = -1;
   capability_t *child_capa = NULL;
   child_domain_t *child = NULL;
@@ -117,7 +117,7 @@ int create_domain(domain_id_t *id) {
   }
 
   // Create the domain.
-  if (tyche_create_domain(&child_idx) != SUCCESS) {
+  if (tyche_create_domain(&child_idx, aliased) != SUCCESS) {
     ERROR("Failed to create domain.");
     goto fail_child_capa;
   }

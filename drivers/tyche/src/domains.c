@@ -50,7 +50,7 @@ void driver_init_domains(void)
 }
 
 
-int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
+int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int aliased)
 {
   driver_domain_t* dom = NULL;
   // This function can be called from the kvm backend as well.
@@ -76,7 +76,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr)
   dll_init_elem(dom, list);
 
   // Call tyche to create the domain.
-   if (create_domain(&(dom->domain_id)) != SUCCESS) {
+   if (create_domain(&(dom->domain_id), aliased) != SUCCESS) {
     ERROR("Monitor rejected the creation of a domain for domain %p", dom);
     goto failure_free;
   }

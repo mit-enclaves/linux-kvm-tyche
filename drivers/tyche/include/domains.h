@@ -117,7 +117,8 @@ int driver_init_capabilities(void);
 
 /// Create a new domain with handle.
 /// If ptr is not null, it points to the newly created driver domain.
-int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr);
+int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr,
+			 int aliased);
 /// Handles an mmap call to the driver.
 /// This reserves a contiguous region and registers it until a domain claims
 /// it.

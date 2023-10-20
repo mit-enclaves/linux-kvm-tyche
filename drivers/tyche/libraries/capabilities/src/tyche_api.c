@@ -69,12 +69,13 @@ int tyche_call_cli(vmcall_frame_t* frame)
   return (int)result;
 } 
 
-int tyche_create_domain(capa_index_t* management) {
+int tyche_create_domain(capa_index_t* management, int aliased) {
   vmcall_frame_t frame;
   if (management == NULL) {
     goto fail;
   }
   frame.vmcall = TYCHE_CREATE_DOMAIN;
+  frame.arg_1 = aliased;
   if (tyche_call(&frame) != SUCCESS) {
     goto fail;
   }
