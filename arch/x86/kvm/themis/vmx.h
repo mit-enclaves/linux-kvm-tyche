@@ -662,7 +662,8 @@ static inline u32 vmx_get_intr_info(struct kvm_vcpu *vcpu)
 
 	if (!kvm_register_is_available(vcpu, VCPU_EXREG_EXIT_INFO_2)) {
 		kvm_register_mark_available(vcpu, VCPU_EXREG_EXIT_INFO_2);
-		vmx->exit_intr_info = vmcs_read32(VM_EXIT_INTR_INFO);
+		vmx->exit_intr_info = /*vmcs_read32(VM_EXIT_INTR_INFO)*/
+			read_domain_config(vmx, VM_EXIT_INTR_INFO);
 	}
 	return vmx->exit_intr_info;
 }
