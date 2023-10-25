@@ -395,6 +395,8 @@ struct kvm_vmx {
 // aghosn: forward declartion to avoid circular includes.
 extern int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value);
 extern usize read_domain_config(struct vcpu_vmx *vmx, usize idx);
+extern void clear_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask);
+extern void set_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask);
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
 void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
@@ -483,9 +485,10 @@ BUILD_VMX_MSR_BITMAP_HELPERS(bool, test, test)
 BUILD_VMX_MSR_BITMAP_HELPERS(void, clear, __clear)
 BUILD_VMX_MSR_BITMAP_HELPERS(void, set, __set)
 
-static inline u8 vmx_get_rvi(void)
+static inline u8 vmx_get_rvi(struct vcpu_vmx *vcpu)
 {
-	return vmcs_read16(GUEST_INTR_STATUS) & 0xff;
+  return (read_domain_config(vcpu, GUEST_INTR_STATUS) & 0xff);
+	//return vmcs_read16(GUEST_INTR_STATUS) & 0xff;
 }
 
 #define __KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS (VM_ENTRY_LOAD_DEBUG_CONTROLS)
@@ -651,7 +654,8 @@ static inline unsigned long vmx_get_exit_qual(struct kvm_vcpu *vcpu)
 
 	if (!kvm_register_is_available(vcpu, VCPU_EXREG_EXIT_INFO_1)) {
 		kvm_register_mark_available(vcpu, VCPU_EXREG_EXIT_INFO_1);
-		vmx->exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
+		vmx->exit_qualification = /*vmcs_readl(EXIT_QUALIFICATION)*/
+      read_domain_config(vmx, EXIT_QUALIFICATION);
 	}
 	return vmx->exit_qualification;
 }

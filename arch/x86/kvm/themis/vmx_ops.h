@@ -141,6 +141,8 @@ static __always_inline unsigned long __vmcs_readl(unsigned long field)
 //	return value;
 //
 //#endif /* CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+  pr_err("Unattended vmread.\n");
+  BUG_ON(1);
   return 0;
 }
 
@@ -218,6 +220,8 @@ fault:									\
 static __always_inline void __vmcs_writel(unsigned long field, unsigned long value)
 {
 //	vmx_asm2(vmwrite, "r"(field), "rm"(value), field, value);
+  pr_err("Unattended vmcs_write\n");
+  BUG_ON(1);
 }
 
 static __always_inline void vmcs_write16(unsigned long field, u16 value)
@@ -261,16 +265,20 @@ static __always_inline void vmcs_writel(unsigned long field, unsigned long value
 
 static __always_inline void vmcs_clear_bits(unsigned long field, u32 mask)
 {
+  //TODO(aghosn): check it doesn't get called.
+  BUG_ON(1);
 	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6000) == 0x2000,
 			 "vmcs_clear_bits does not support 64-bit fields");
 	if (static_branch_unlikely(&enable_evmcs))
 		return evmcs_write32(field, evmcs_read32(field) & ~mask);
 
-	__vmcs_writel(field, __vmcs_readl(field) & ~mask);
+  __vmcs_writel(field, __vmcs_readl(field) & ~mask);
 }
 
 static __always_inline void vmcs_set_bits(unsigned long field, u32 mask)
 {
+  //TODO(aghosn): check it doesn't get called.
+  BUG_ON(1);
 	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6000) == 0x2000,
 			 "vmcs_set_bits does not support 64-bit fields");
 	if (static_branch_unlikely(&enable_evmcs))

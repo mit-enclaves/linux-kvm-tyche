@@ -45,6 +45,16 @@ failure:
   return 0;
 }
 
+void clear_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask)
+{
+  write_domain_config(vmx, field, read_domain_config(vmx, field) & ~mask);
+}
+
+void set_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask)
+{
+	write_domain_config(vmx, field, read_domain_config(vmx, field) | mask);
+}
+
 // ————————————————————————— MMU-related Functions —————————————————————————— //
 
 static int mmu_pages_are_contiguous(struct kvm_memory_slot *slot, bool write) {
