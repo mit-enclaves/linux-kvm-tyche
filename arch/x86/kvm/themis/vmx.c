@@ -115,7 +115,8 @@ module_param(enable_ipiv, bool, 0444);
  * VMX and be a hypervisor for its own guests. If nested=0, guests may not
  * use VMX instructions.
  */
-static bool __read_mostly nested = 1;
+// TODO(aghosn): I disabled this, let's see how it goes.
+static bool __read_mostly nested = 0;
 module_param(nested, bool, S_IRUGO);
 
 bool __read_mostly enable_pml = 1;
@@ -4162,7 +4163,7 @@ static bool vmx_guest_apic_has_interrupt(struct kvm_vcpu *vcpu)
 		WARN_ON_ONCE(!vmx->nested.virtual_apic_map.gfn))
 		return false;
 
-	rvi = vmx_get_rvi();
+	rvi = vmx_get_rvi(vmx);
 
 	vapic_page = vmx->nested.virtual_apic_map.hva;
 	vppr = *((u32 *)(vapic_page + APIC_PROCPRI));
@@ -5129,12 +5130,17 @@ void vmx_set_nmi_mask(struct kvm_vcpu *vcpu, bool masked)
 		}
 	} else {
 		vmx->loaded_vmcs->nmi_known_unmasked = !masked;
-		if (masked)
-			vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+		if (masked) {
+			/*vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+				      GUEST_INTR_STATE_NMI);*/
+      set_bits_domain_config(vmx, GUEST_INTERRUPTIBILITY_INFO,
 				      GUEST_INTR_STATE_NMI);
-		else
-			vmcs_clear_bits(GUEST_INTERRUPTIBILITY_INFO,
+    } else {
+			/*vmcs_clear_bits(GUEST_INTERRUPTIBILITY_INFO,
+					GUEST_INTR_STATE_NMI);*/
+      clear_bits_domain_config(vmx, GUEST_INTERRUPTIBILITY_INFO,
 					GUEST_INTR_STATE_NMI);
+    }
 	}
 }
 
@@ -5886,8 +5892,10 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	 */
 	if (!(to_vmx(vcpu)->idt_vectoring_info & VECTORING_INFO_VALID_MASK) &&
 			enable_vnmi &&
-			(exit_qualification & INTR_INFO_UNBLOCK_NMI))
-		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);
+			(exit_qualification & INTR_INFO_UNBLOCK_NMI)) {
+		/*vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);*/
+    set_bits_domain_config(to_vmx(vcpu), GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);
+  }
 
 	gpa = /*vmcs_read64(GUEST_PHYSICAL_ADDRESS)*/
     read_domain_config(to_vmx(vcpu) , GUEST_PHYSICAL_ADDRESS);
@@ -6128,9 +6136,12 @@ static int handle_pml_full(struct kvm_vcpu *vcpu)
 	 */
 	if (!(to_vmx(vcpu)->idt_vectoring_info & VECTORING_INFO_VALID_MASK) &&
 			enable_vnmi &&
-			(exit_qualification & INTR_INFO_UNBLOCK_NMI))
-		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+			(exit_qualification & INTR_INFO_UNBLOCK_NMI)) {
+		/*vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+				GUEST_INTR_STATE_NMI);*/
+    set_bits_domain_config(to_vmx(vcpu), GUEST_INTERRUPTIBILITY_INFO,
 				GUEST_INTR_STATE_NMI);
+  }
 
 	/*
 	 * PML buffer already flushed at beginning of VMEXIT. Nothing to do
@@ -6203,9 +6214,12 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 	 * Notify VM exit happened while executing iret from NMI,
 	 * "blocked by NMI" bit has to be set before next VM entry.
 	 */
-	if (enable_vnmi && (exit_qual & INTR_INFO_UNBLOCK_NMI))
-		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+	if (enable_vnmi && (exit_qual & INTR_INFO_UNBLOCK_NMI)) {
+		/*vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+			      GUEST_INTR_STATE_NMI);*/
+    set_bits_domain_config(to_vmx(vcpu), GUEST_INTERRUPTIBILITY_INFO,
 			      GUEST_INTR_STATE_NMI);
+  }
 
 	if (vcpu->kvm->arch.notify_vmexit_flags & KVM_X86_NOTIFY_VMEXIT_USER ||
 	    context_invalid) {
@@ -7252,10 +7266,12 @@ static void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx)
 		 *  If the VM exit is due to a double fault.
 		 */
 		if ((exit_intr_info & INTR_INFO_VALID_MASK) && unblock_nmi &&
-		    vector != DF_VECTOR && !idtv_info_valid)
-			vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+		    vector != DF_VECTOR && !idtv_info_valid) {
+			/*vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO,
+				      GUEST_INTR_STATE_NMI);*/
+      set_bits_domain_config(vmx, GUEST_INTERRUPTIBILITY_INFO,
 				      GUEST_INTR_STATE_NMI);
-		else
+    } else
 			vmx->loaded_vmcs->nmi_known_unmasked =
 				!(/*vmcs_read32(GUEST_INTERRUPTIBILITY_INFO)*/
             read_domain_config(vmx, GUEST_INTERRUPTIBILITY_INFO)

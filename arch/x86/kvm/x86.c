@@ -771,6 +771,10 @@ static int complete_emulated_insn_gp(struct kvm_vcpu *vcpu, int err)
 void kvm_inject_page_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
 {
 	++vcpu->stat.pf_guest;
+  if (tyche_enabled) {
+    pr_err("kvm_inject_page_fault called by tyche\n");
+    BUG_ON(1);
+  }
 
 	/*
 	 * Async #PF in L2 is always forwarded to L1 as a VM-Exit regardless of

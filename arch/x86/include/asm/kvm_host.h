@@ -1831,6 +1831,9 @@ void kvm_fire_mask_notifiers(struct kvm *kvm, unsigned irqchip, unsigned pin,
 
 extern bool tdp_enabled;
 
+//@aghosn: added this.
+extern bool tyche_enabled;
+
 u64 vcpu_tsc_khz(struct kvm_vcpu *vcpu);
 
 /*

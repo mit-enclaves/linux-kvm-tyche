@@ -3159,6 +3159,10 @@ static int __direct_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	struct kvm_mmu_page *sp;
 	int ret;
 	gfn_t base_gfn = fault->gfn;
+  if (tyche_enabled) {
+    pr_err("Why is __direct_map called?\n");
+    BUG_ON(1);
+  }
 
 	kvm_mmu_hugepage_adjust(vcpu, fault);
 
@@ -5117,6 +5121,15 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
 	return role;
 }
 
+/**
+ * Tyche placeholder definition.
+ */
+static inline u64 tyche_pdptr_read(struct kvm_vcpu *vcpu, int index) {
+  pr_err("Tyche pdptr read\n");
+  BUG_ON(1);
+  return 0;
+}
+
 /*
  * @Tyche must implement.
  * We might need to reconfigure this thing.
@@ -5139,7 +5152,7 @@ static void init_kvm_tyche_mmu(struct kvm_vcpu *vcpu,
 	context->sync_page = nonpaging_sync_page;
 	context->invlpg = NULL;
 	context->get_guest_pgd = get_cr3;
-	context->get_pdptr = kvm_pdptr_read;
+	context->get_pdptr = tyche_pdptr_read;
 	context->inject_page_fault = kvm_inject_page_fault;
 
 	if (!is_cr0_pg(context))
