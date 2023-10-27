@@ -5588,7 +5588,7 @@ static int handle_cr(struct kvm_vcpu *vcpu)
 	reg = (exit_qualification >> 8) & 15;
 	switch ((exit_qualification >> 4) & 3) {
 	case 0: /* mov to cr */
-		val = kvm_register_read(vcpu, reg);
+		val = /*kvm_register_read(vcpu, reg)*/ read_domain_register(to_vmx(vcpu), reg);
 		trace_kvm_cr_write(cr, val);
 		switch (cr) {
 		case 0:
@@ -5712,7 +5712,8 @@ static int handle_dr(struct kvm_vcpu *vcpu)
 		kvm_register_write(vcpu, reg, val);
 		err = 0;
 	} else {
-		err = kvm_set_dr(vcpu, dr, kvm_register_read(vcpu, reg));
+		err = kvm_set_dr(vcpu, dr, /*kvm_register_read(vcpu, reg)*/
+				read_domain_register(to_vmx(vcpu), reg));
 	}
 
 out:
@@ -6109,7 +6110,7 @@ static int handle_invpcid(struct kvm_vcpu *vcpu)
 	vmx_instruction_info = /*vmcs_read32(VMX_INSTRUCTION_INFO)*/
     read_domain_config(to_vmx(vcpu), VMX_INSTRUCTION_INFO);
 	gpr_index = vmx_get_instr_info_reg2(vmx_instruction_info);
-	type = kvm_register_read(vcpu, gpr_index);
+	type = /*kvm_register_read(vcpu, gpr_index)*/ read_domain_register(to_vmx(vcpu), gpr_index);
 
 	/* According to the Intel instruction reference, the memory operand
 	 * is read even if it isn't needed (e.g., for type==all)

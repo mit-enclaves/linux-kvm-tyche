@@ -18,6 +18,9 @@ void clear_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask);
 /// Set the bits.
 void set_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask);
 
+/// Read a domain's general purpose register.
+usize read_domain_register(struct vcpu_vmx *vmx, int reg);
+
 /// Install the mapping following a page fault.
 int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault);
 #endif
