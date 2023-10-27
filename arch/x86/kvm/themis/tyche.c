@@ -2,6 +2,74 @@
 #include "vmx.h"
 #include "../mmu/mmu_internal.h"
 
+// ———————————————————————— Static helper functions ————————————————————————— //
+
+static int translate_reg(int reg, usize *res) {
+	if (res == NULL) {
+		goto failure;
+	}
+	switch (reg) {
+		case VCPU_REGS_RAX:
+			*res = REG_GP_RAX;
+			break;
+		case VCPU_REGS_RCX:
+			*res = REG_GP_RCX;
+			break;
+		case VCPU_REGS_RDX:
+			*res = REG_GP_RDX;
+			break;
+		case VCPU_REGS_RBX:
+			*res = REG_GP_RBX;
+			break;
+		case VCPU_REGS_RSP:
+			*res = GUEST_RSP;
+			break;
+		case VCPU_REGS_RBP:
+			*res = REG_GP_RBP;
+			break;
+		case VCPU_REGS_RSI:
+			*res = REG_GP_RSI;
+			break;
+		case VCPU_REGS_RDI:
+			*res = REG_GP_RDI;
+			break;
+		case VCPU_REGS_R8:
+			*res = REG_GP_R8;
+			break;
+		case VCPU_REGS_R9:
+			*res = REG_GP_R9;
+			break;
+		case VCPU_REGS_R10:
+			*res = REG_GP_R10;
+			break;
+		case VCPU_REGS_R11:
+			*res = REG_GP_R11;
+			break;
+		case VCPU_REGS_R12:
+			*res = REG_GP_R12;
+			break;
+		case VCPU_REGS_R13:
+			*res = REG_GP_R13;
+			break;
+		case VCPU_REGS_R14:
+			*res = REG_GP_R14;
+			break;
+		case VCPU_REGS_R15:
+			*res = REG_GP_R15;
+			break;
+		case VCPU_REGS_RIP:
+			*res = GUEST_RIP;
+			break;
+		default:
+			goto failure;
+	}
+	return SUCCESS;
+failure:
+	return FAILURE;
+}
+
+// —————————————————————————————— API to tyche —————————————————————————————— //
+
 int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value)
 {
   struct kvm *kvm = vmx->vcpu.kvm;
@@ -53,6 +121,20 @@ void clear_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask)
 void set_bits_domain_config(struct vcpu_vmx *vmx, usize field, usize mask)
 {
 	write_domain_config(vmx, field, read_domain_config(vmx, field) | mask);
+}
+
+usize read_domain_register(struct vcpu_vmx *vmx, int reg)
+{
+	usize tyche_reg = 0, value = 0;
+	if (WARN_ON_ONCE((unsigned int)reg >= NR_VCPU_REGS))
+		return 0;
+	if (translate_reg(reg, &tyche_reg) != SUCCESS) {
+		ERROR("Invalid register value %d", reg);
+		return 0;
+	}
+	value = read_domain_config(vmx, tyche_reg);
+	vmx->vcpu.arch.regs[reg] = (unsigned long) value;
+	return value;
 }
 
 // ————————————————————————— MMU-related Functions —————————————————————————— //
