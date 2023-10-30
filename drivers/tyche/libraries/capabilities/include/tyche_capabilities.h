@@ -34,13 +34,18 @@ int segment_region_capa(capability_t *capa, capability_t **left,
 
 /// Grant a memory region.
 /// Finds the correct capability and grants the region to the target domain.
-int grant_region(domain_id_t id, paddr_t start, paddr_t end,
+int grant_region(domain_id_t id, paddr_t start, usize size,
 		 memory_access_right_t access, usize alias);
 
 /// Share a memory region.
 /// Finds the correct capability and shares the region with the target domain.
-int share_region(domain_id_t id, paddr_t start, paddr_t end,
+int share_region(domain_id_t id, paddr_t start, usize size,
 		 memory_access_right_t access, usize alias);
+
+/// Share a memory region that is aliased and repeats.
+/// This leads to one physical page starting at start, mapped from alias to alias + size.
+int share_repeat_region(domain_id_t id, paddr_t start, usize size,
+			memory_access_right_t access, usize alias);
 
 /// Revoke the memory region.
 /// Start and end must match existing bounds on a capability.

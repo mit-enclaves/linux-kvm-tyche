@@ -89,7 +89,8 @@ int tyche_segment_region(capa_index_t capa, capa_index_t *left,
 
 int tyche_send(capa_index_t dest, capa_index_t capa);
 
-int tyche_send_aliased(capa_index_t dest, capa_index_t capa, usize alias);
+int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
+		       usize alias, usize size);
 
 int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 		usize a1, usize a2, usize a3);

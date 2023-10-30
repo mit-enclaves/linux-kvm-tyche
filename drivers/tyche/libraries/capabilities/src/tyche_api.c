@@ -221,12 +221,15 @@ failure:
   return FAILURE;
 }
 
-int tyche_send_aliased(capa_index_t dest, capa_index_t capa, usize alias) {
+int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
+		usize alias, usize size) {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEND_ALIASED,
     .arg_1 = capa,
     .arg_2 = dest,
     .arg_3 = alias,
+    .arg_4 = is_repeat,
+    .arg_5 = size,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
