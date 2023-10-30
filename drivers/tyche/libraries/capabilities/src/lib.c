@@ -450,10 +450,12 @@ failure:
 
 // TODO: for the moment only handle the case where the region is fully contained
 // within one capability.
-int carve_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access, int is_shared, usize alias) {
+int carve_region(domain_id_t id, paddr_t start, usize size, 
+		memory_access_right_t access, int is_shared, int is_repeat,
+		 usize alias) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
+  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
   DEBUG("[carve_region] start");
   // Quick checks.
@@ -489,7 +491,8 @@ int carve_region(domain_id_t id, paddr_t start, paddr_t end,
   // We were not able to find the capability.
   if (capa == NULL) {
     LOG("The access rights we want: %x", access);
-    ERROR("Unable to find the containing capa.");
+    ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
+		    start, end, is_repeat);
     goto failure;
   }
 
@@ -599,7 +602,8 @@ int carve_region(domain_id_t id, paddr_t start, paddr_t end,
     } 
     // Send it aliased if it is.
     if (alias != NO_ALIAS
-        && (tyche_send_aliased(child->management->local_id, to_send->local_id, alias) != SUCCESS)) {
+        && (tyche_send_aliased(child->management->local_id, to_send->local_id,
+			is_repeat, alias, size) != SUCCESS)) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
     }
@@ -619,16 +623,26 @@ failure:
   return FAILURE;
 }
 
-int grant_region(domain_id_t id, paddr_t start, paddr_t end,
+int grant_region(domain_id_t id, paddr_t start, usize size,
                  memory_access_right_t access, usize alias)
 {
-  return carve_region(id, start, end, access, 0, alias);
+  return carve_region(id, start, size, access, 0, 0, alias);
 } 
 
-int share_region(domain_id_t id, paddr_t start, paddr_t end,
+int share_region(domain_id_t id, paddr_t start, usize size,
                  memory_access_right_t access, usize alias) {
-  return carve_region(id, start, end, access, 1, alias); 
+  return carve_region(id, start, size, access, 1, 0, alias); 
 } 
+
+int share_repeat_region(domain_id_t id, paddr_t start, usize size,
+		memory_access_right_t access, usize alias)
+{
+	if(alias == NO_ALIAS) {
+		ERROR("Called share_repeat_region with no alias");
+		return FAILURE;
+	}
+	return carve_region(id, start, size, access, 1, 1, alias);
+}
 
 // TODO for now we only handle exact matches.
 int internal_revoke(child_domain_t *child, capability_t *capa) {

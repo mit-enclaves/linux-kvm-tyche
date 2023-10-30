@@ -534,7 +534,7 @@ int driver_commit_regions(driver_domain_t *dom)
         if (share_region(
               dom->domain_id, 
               segment->pa,
-              segment->pa + segment->size,
+              segment->size,
               segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
@@ -545,13 +545,24 @@ int driver_commit_regions(driver_domain_t *dom)
         if (grant_region(
               dom->domain_id,
               segment->pa,
-              segment->pa + segment->size,
+              segment->size,
               segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto delete_fail;
         }
         break;
+	case SHARED_REPEAT:
+		if (share_repeat_region(dom->domain_id,
+					segment->pa,
+					segment->size,
+					segment->flags,
+					segment->alias) != SUCCESS) {
+			ERROR("Unable to share repeat segment %llx -- %llx {%x}",
+					segment->va, segment->size, segment->flags);
+			goto delete_fail;
+		}
+		break;
       default:
         ERROR("Invalid tpe for segment!");
         goto delete_fail;
