@@ -34,6 +34,7 @@
 #include <linux/init.h>
 #include <linux/memblock.h>
 #include <linux/mm.h>
+#include <linux/panic.h>
 #include <linux/pfn.h>
 #include <linux/rculist.h>
 #include <linux/scatterlist.h>
@@ -550,8 +551,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	// On a tyche guest, we get the swiotlb region directly from
 	// enumerating the capabilities of that region
 	if ((tlb = tyche_alloc(nslabs, remap)) == NULL) {
-		pr_info("Unable to reuqest a shared region from Tyche for SWIOTLB");
-		return;
+		panic("Unable to reuqest a shared region from Tyche for SWIOTLB");
 	}
 #else
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
