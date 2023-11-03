@@ -397,6 +397,43 @@ int tyche_call(vmcall_frame_t *frame)
 	return (int)result;
 }
 
+int tyche_create_domain(bool io, int *management)
+{
+	vmcall_frame_t frame = {
+		.vmcall = 1,
+		.arg_1 = io,
+	};
+
+	if (tyche_call(&frame)) {
+		pr_warn("tyche create_domain hypercall failed");
+		return 1;
+	}
+	*management = frame.value_1;
+	
+	return 0;
+}
+
+int tyche_send(unsigned long long capa, unsigned long long to)
+{
+	vmcall_frame_t frame = {
+		.vmcall = 4,
+		.arg_1 = capa,
+		.arg_2 = to,
+	};
+
+	if (tyche_call(&frame)) {
+		pr_warn("tyche send hypercall failed");
+		return 1;
+	}
+
+	if (frame.value_1 != capa) {
+		pr_warn("revocation handle is not the original one");
+		return 1;
+	}
+
+	return 0;
+}
+
 int tyche_enum(unsigned long *next, unsigned long *start, unsigned long *size)
 {
 	uint8_t capa_type = 0;
@@ -484,7 +521,7 @@ static void __init *tyche_memblock_alloc(unsigned long start,
 }
 
 static void __init *tyche_alloc(unsigned long nslabs,
-				int (*remap)(void *tlb, unsigned long nslabs))
+				int (*remap)(void *tlb, unsigned long nslabs), int *capa_index)
 {
 	size_t bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
 	void *tlb = NULL;
@@ -493,6 +530,7 @@ static void __init *tyche_alloc(unsigned long nslabs,
 	unsigned long size = 0;
 
 	do {
+		*capa_index = next;
 		if (tyche_enum(&next, &start, &size) == 0) {
 			// Found an active and shared region
 			if (bytes >= size) {
@@ -522,6 +560,8 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	unsigned int nareas;
 	size_t alloc_size;
 	void *tlb;
+	int capa_index;
+	int io_domain_handle;
 
 	if (!addressing_limit && !swiotlb_force_bounce)
 		return;
@@ -550,8 +590,22 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	pr_info("swiotlb allocation with tyche guest");
 	// On a tyche guest, we get the swiotlb region directly from
 	// enumerating the capabilities of that region
-	if ((tlb = tyche_alloc(nslabs, remap)) == NULL) {
+	if ((tlb = tyche_alloc(nslabs, remap, &capa_index)) == NULL) {
 		panic("Unable to reuqest a shared region from Tyche for SWIOTLB");
+	}
+
+	pr_info("create I/O domain");
+	// TODO(yuchen): move this part to the capa engine later as we only
+	// need one global I/O domain for now
+	if (tyche_create_domain(1, &io_domain_handle)) {
+		panic("Unable to create an I/O domain");
+	}
+
+	pr_info("send over capa_index=%d to the I/O domain %d", capa_index, io_domain_handle);
+	// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
+	// so that all DMA goes to the shared region of the memory
+	if (tyche_send(capa_index, io_domain_handle)) {
+		panic("Unable to inform I/O domain to configure IOMMU");
 	}
 #else
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
