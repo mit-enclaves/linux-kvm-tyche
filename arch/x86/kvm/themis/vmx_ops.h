@@ -141,7 +141,7 @@ static __always_inline unsigned long __vmcs_readl(unsigned long field)
 //	return value;
 //
 //#endif /* CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
-  pr_err("Unattended vmread.\n");
+  pr_err("Unattended vmread %lx\n", field);
   BUG_ON(1);
   return 0;
 }
