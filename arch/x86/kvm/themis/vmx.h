@@ -613,7 +613,15 @@ BUILD_CONTROLS_SHADOW(tertiary_exec, TERTIARY_VM_EXEC_CONTROL, 64)
  * the cache immediately after VM-Exit.
  */
 #define VMX_REGS_LAZY_LOAD_SET                                \
-	((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP) |        \
+	((1 << VCPU_REGS_RAX) | (1 << VCPU_REGS_RCX) |	      \
+	 (1 << VCPU_REGS_RDX) | (1 << VCPU_REGS_RBX) | 	      \
+	 (1 << VCPU_REGS_RBP) | (1 << VCPU_REGS_RSI) |        \
+	 (1 << VCPU_REGS_RDI) | 			      \
+	 (1 << VCPU_REGS_R8) | (1 << VCPU_REGS_R9) |	      \
+	 (1 << VCPU_REGS_R10) | (1 << VCPU_REGS_R11) |	      \
+	 (1 << VCPU_REGS_R12) | (1 << VCPU_REGS_R13) |	      \
+	 (1 << VCPU_REGS_R14) | (1 << VCPU_REGS_R15) |	      \
+	 (1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP) |        \
 	 (1 << VCPU_EXREG_RFLAGS) | (1 << VCPU_EXREG_PDPTR) | \
 	 (1 << VCPU_EXREG_SEGMENTS) | (1 << VCPU_EXREG_CR0) | \
 	 (1 << VCPU_EXREG_CR3) | (1 << VCPU_EXREG_CR4) |      \
