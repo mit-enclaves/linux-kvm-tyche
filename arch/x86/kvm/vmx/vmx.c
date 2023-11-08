@@ -6166,6 +6166,18 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 	pr_err("VMCS %p, last attempted VM-entry on CPU %d\n",
 	       vmx->loaded_vmcs->vmcs, vcpu->arch.last_vmentry_cpu);
 	pr_err("*** Guest State ***\n");
+	//@aghosn: added this.
+	pr_err("RAX=0x%016lx	RBX=0x%016lx	RCX=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RAX),
+			kvm_register_read(vcpu, VCPU_REGS_RBX), kvm_register_read(vcpu, VCPU_REGS_RCX));
+	pr_err("RDX=0x%016lx	RBP=0x%016lx	RSI=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RDX),
+			kvm_register_read(vcpu, VCPU_REGS_RBP), kvm_register_read(vcpu, VCPU_REGS_RSI));
+	pr_err("RDI=0x%016lx	R8=0x%016lx	R9-0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RDI),
+			kvm_register_read(vcpu, VCPU_REGS_R8), kvm_register_read(vcpu, VCPU_REGS_R9));
+	pr_err("R10=%016lx	R11=0x%016lx	R12=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_R10),
+			kvm_register_read(vcpu, VCPU_REGS_R11), kvm_register_read(vcpu, VCPU_REGS_R12));
+	pr_err("R13=0x%016lx	R14=0x%016lx	R15=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_R13),
+			kvm_register_read(vcpu, VCPU_REGS_R14), kvm_register_read(vcpu, VCPU_REGS_R15));
+
 	pr_err("CR0: actual=0x%016lx, shadow=0x%016lx, gh_mask=%016lx\n",
 	       vmcs_readl(GUEST_CR0), vmcs_readl(CR0_READ_SHADOW),
 	       vmcs_readl(CR0_GUEST_HOST_MASK));
