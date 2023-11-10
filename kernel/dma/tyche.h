@@ -3,6 +3,13 @@
 
 #include <linux/ctype.h>
 
+extern unsigned long shared_region_capa;
+extern unsigned long swiotlb_region_capa;
+extern int io_domain;
+extern unsigned long shared_region;
+extern unsigned long shared_region_sz;
+extern unsigned long shared_region_prot;
+
 int tyche_create_domain(bool io, int *management);
 int tyche_send(unsigned long long capa, unsigned long long to);
 int tyche_segment_region(unsigned long long capa, unsigned long long *left,
