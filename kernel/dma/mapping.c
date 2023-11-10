@@ -16,6 +16,7 @@
 #include <linux/vmalloc.h>
 #include "debug.h"
 #include "direct.h"
+#include "tyche.h"
 
 #if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE) || \
 	defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
@@ -499,7 +500,9 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 {
 	const struct dma_map_ops *ops = get_dma_ops(dev);
 	void *cpu_addr;
+	unsigned long long capa1 = 0, capa2 = 0;
 
+	pr_info("dma_alloc_attrs\n");
 	WARN_ON_ONCE(!dev->coherent_dma_mask);
 
 	/*
@@ -510,8 +513,9 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 	if (WARN_ON_ONCE(flag & __GFP_COMP))
 		return NULL;
 
-	if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr))
-		return cpu_addr;
+	if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr)) {
+		goto success;
+	}
 
 	/* let the implementation decide on the zone to allocate from: */
 	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
@@ -522,6 +526,21 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 		cpu_addr = ops->alloc(dev, size, dma_handle, flag, attrs);
 	else
 		return NULL;
+
+success:
+	// segment the region
+	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x) -> [%.4x, %.4x] (prot=%.4x)", shared_region_capa, shared_region, shared_region + shared_region_sz - 1, shared_region_prot, dma_handle, dma_handle + size, shared_region_prot);
+	if (tyche_segment_region(shared_region_capa, &capa1, &capa2, shared_region, shared_region + shared_region_sz - 1, shared_region_prot, *dma_handle, *dma_handle + size, shared_region_prot)) {
+		panic("Unable to segment the guest DMA region");
+	}
+
+	shared_region_capa = capa1;
+
+	// send the region over to tyche
+	pr_info("send over capa_index=%d to the I/O domain %d", capa2, io_domain);
+	if (tyche_send(capa2, io_domain)) {
+		panic("Unable to inform I/O domain to configure IOMMU");
+	}
 
 	debug_dma_alloc_coherent(dev, size, *dma_handle, cpu_addr, attrs);
 	return cpu_addr;

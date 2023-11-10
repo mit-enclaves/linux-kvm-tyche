@@ -66,6 +66,13 @@
 
 #define INVALID_PHYS_ADDR (~(phys_addr_t)0)
 
+unsigned long shared_region_capa = 0;
+unsigned long swiotlb_region_capa = 0;
+int io_domain = 0;
+unsigned long shared_region = 0;
+unsigned long shared_region_sz = 0;
+unsigned long shared_region_prot = 0;
+
 /**
  * struct io_tlb_slot - IO TLB slot descriptor
  * @orig_addr:	The original address corresponding to a mapped entry.
@@ -389,6 +396,16 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 #ifdef CONFIG_TYCHE_GUEST
 	bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
 
+	// TODO(yuchen): move this part to the capa engine later as we only
+	// need one global I/O domain for now
+	pr_info("create I/O domain");
+	if (tyche_create_domain(1, &io_domain_handle)) {
+		panic("Unable to create an I/O domain");
+	}
+
+	// FIXME(yuchen): refactor this code...
+	io_domain = io_domain_handle;
+
 	pr_info("tyche enum: find a shared region");
 	if (tyche_find_shared_region(&capa_index, &start, &len, &prot)) {
 		panic("Cannot find a shared region on the current tyche domain");
@@ -399,6 +416,12 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		panic("Tyche shared region smaller than the expected swiotlb length");
 	}
 
+	// FIXME(yuchen): refactor this code...
+	shared_region_capa = capa_index;
+	shared_region = start;
+	shared_region_sz = len;
+	shared_region_prot = prot;
+
 	pr_info("swiotlb allocation with tyche guest");
 	if ((tlb = tyche_memblock_alloc(start, bytes)) == NULL) {
 		panic("Cannot alloc the swiotlb on the shared memory region");
@@ -408,17 +431,14 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	// whole shared region tyche has partitioned, the guest needs to
 	// further segment the shared region into DMA region and non-DMA region
 	// into two region capabilities and inform tyche about this
-	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x)", capa_index, start, start + len - 1, prot);
-	if (tyche_segment_region(capa_index, &capa1, &capa2, start, start + len - 1, prot, __pa(tlb), __pa(tlb) + bytes, prot)) {
+	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x)", shared_region_capa, start, start + len - 1, prot);
+	if (tyche_segment_region(shared_region_capa, &capa1, &capa2, start, start + len - 1, prot, __pa(tlb), __pa(tlb) + bytes, prot)) {
 		panic("Unable to segment the guest DMA region");
 	}
 
-	// TODO(yuchen): move this part to the capa engine later as we only
-	// need one global I/O domain for now
-	pr_info("create I/O domain");
-	if (tyche_create_domain(1, &io_domain_handle)) {
-		panic("Unable to create an I/O domain");
-	}
+	// FIXME(yuchen): refactor this code...
+	shared_region_capa = capa1;
+	swiotlb_region_capa = capa2;
 
 	// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
 	// so that all DMA goes to the shared region of the memory
