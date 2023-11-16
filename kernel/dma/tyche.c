@@ -120,64 +120,109 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 	return 0;
 }
 
-int tyche_enum(unsigned long *next, unsigned long *start, unsigned long *size,
-	       unsigned long *prot)
+static int serialize_tyche_region(size_t *capa_index, vmcall_frame_t *frame,
+				  struct tyche_region *r)
 {
-	uint8_t capa_type = 0;
-	uint8_t flags = 0;
-	bool active = 0;
-	bool confidential = 0;
+	BUG_ON(!frame);
+	BUG_ON(!r);
 
-	pr_info("%s: next=%lu", __func__, *next);
-	vmcall_frame_t frame = {
-		.vmcall = 8,
-		.arg_1 = *next,
-	};
+	uint8_t flags = frame->value_3 >> 8;
 
-	if (tyche_call(&frame)) {
+	r->capa_index = *capa_index;
+	r->start = frame->value_1;
+	r->end = frame->value_2;
+	r->alias = frame->value_4;
+	r->ops = flags >> 2;
+	r->active = flags & 0b01;
+	r->confidential = flags & 0b10;
+
+	return 0;
+}
+
+static int tyche_enum(vmcall_frame_t *frame)
+{
+	BUG_ON(!frame);
+
+	if (tyche_call(frame)) {
 		pr_warn("tyche enumerate hypercall failed");
 		return 1;
 	}
 
-	pr_info("enum returns: start=0x%llx, end=0x%llx, cap_type=0x%llx, alias=0x%llx, next=0x%llx",
-		frame.value_1, frame.value_2, frame.value_3, frame.value_4,
-		frame.value_5);
+	return 0;
+}
 
-	capa_type = frame.value_3 & 0xff;
-	flags = frame.value_3 >> 8;
-	active = flags & 0b01;
-	confidential = flags & 0b10;
-	*next = frame.value_5;
+// next points to zero if we have iterated all capas on the domain
+// returns 1 if the current capa is not a region
+// only inspect the region when the function returns 0 and next
+static int tyche_enum_region(size_t *capa_index, struct tyche_region *r)
+{
+	vmcall_frame_t frame = {
+		.vmcall = 8,
+		.arg_1 = *capa_index,
+	};
 
-	// Check if the cap returned is a region
-	if (capa_type != 0) {
-		pr_info("cap is not region");
+	if (tyche_enum(&frame)) {
 		return 1;
 	}
 
-	// Check if the region is active
-	if (!active) {
-		pr_info("region is not active");
+	if ((frame.value_3 & 0xff) != 0) {
+		pr_info("cap is not region");
+		*capa_index = frame.value_5;
 		return 1;
+	}
+
+	serialize_tyche_region(capa_index, &frame, r);
+	*capa_index = frame.value_5;
+
+	return 0;
+}
+
+// check linux's list api
+static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t))
+{
+	struct tyche_region r;
+	size_t capa_index = 0;
+
+	do {
+		if (tyche_enum_region(&capa_index, &r)) {
+			continue;
+		}
+
+		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u",
+			r.capa_index, r.start, r.end, r.alias, r.active,
+			r.confidential, r.ops);
+
+		if (f(&r)) {
+			BUG_ON(tyche_shared_region_len >= TYCHE_SHARED_REGIONS);
+			memcpy(&(tyche_shared_regions[tyche_shared_region_len]),
+			       &r, sizeof(struct tyche_region));
+			tyche_shared_region_len += 1;
+		}
+	} while (capa_index != 0);
+
+	return 0;
+}
+
+static bool is_shared_active_region(struct tyche_region *t)
+{
+	// Check if the region is active
+	if (!t->active) {
+		pr_info("region is not active");
+		return false;
 	}
 
 	// Check if the region is shared
-	if (confidential) {
+	if (t->confidential) {
 		pr_info("region is not shared");
-		return 1;
+		return false;
 	}
 
-	// Check if the region is aliased
-	if (frame.value_4 != 0) {
-		pr_info("shared region is aliased: 0x%llx -> 0x%llx",
-			frame.value_1, frame.value_4);
-		*start = frame.value_4;
-	} else {
-		*start = frame.value_1;
-	}
+	return true;
+}
 
-	*size = frame.value_2 - frame.value_1 + 1;
-	*prot = frame.value_3;
+int tyche_collect_shared_regions(void)
+{
+	tyche_filter_capabilities(is_shared_active_region);
 
 	return 0;
 }
@@ -205,28 +250,4 @@ void __init *tyche_memblock_alloc(unsigned long start, unsigned long size)
 	}
 
 	return tlb;
-}
-
-int __init tyche_find_shared_region(unsigned long *capa_index,
-				    unsigned long *start, unsigned long *len,
-				    unsigned long *prot)
-{
-	unsigned long next = 0;
-	unsigned long begin = 0;
-	unsigned long size = 0;
-	unsigned long flags = 0;
-
-	do {
-		*capa_index = next;
-		if (tyche_enum(&next, &begin, &size, &flags) == 0) {
-			pr_info("start=0x%lx, size=%ld, prot=%lx", start, size,
-				flags);
-			*start = begin;
-			*len = size;
-			*prot = flags;
-			return 0;
-		}
-	} while (next != 0);
-
-	return 1;
 }

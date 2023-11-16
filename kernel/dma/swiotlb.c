@@ -66,6 +66,11 @@
 
 #define INVALID_PHYS_ADDR (~(phys_addr_t)0)
 
+#ifdef CONFIG_TYCHE_GUEST
+struct tyche_region tyche_shared_regions[TYCHE_SHARED_REGIONS];
+size_t tyche_shared_region_len = 0;
+#endif
+
 unsigned long shared_region_capa = 0;
 unsigned long swiotlb_region_capa = 0;
 int io_domain = 0;
@@ -406,24 +411,28 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	// FIXME(yuchen): refactor this code...
 	io_domain = io_domain_handle;
 
+	// find all shared regions
 	pr_info("tyche enum: find a shared region");
-	if (tyche_find_shared_region(&capa_index, &start, &len, &prot)) {
+	if (tyche_collect_shared_regions()) {
 		panic("Cannot find a shared region on the current tyche domain");
 	}
 
-	// should not panic, but just to make the code simpler...
-	if (len < bytes) {
-		panic("Tyche shared region smaller than the expected swiotlb length");
+	for (size_t i = 0; i < tyche_shared_region_len; ++i) {
+		struct tyche_region *r = &(tyche_shared_regions[i]);
+		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r->capa_index, r->start, r->end, r->alias, r->active, r->confidential, r->ops);
 	}
 
 	// FIXME(yuchen): refactor this code...
-	shared_region_capa = capa_index;
-	shared_region = start;
-	shared_region_sz = len;
-	shared_region_prot = prot;
+	start = tyche_shared_regions[0].start;
+	len = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
+	prot = tyche_shared_regions[0].ops;
+	shared_region_capa = tyche_shared_regions[0].capa_index;
+	shared_region = tyche_shared_regions[0].start;
+	shared_region_sz = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
+	shared_region_prot = tyche_shared_regions[0].ops;
 
 	pr_info("swiotlb allocation with tyche guest");
-	if ((tlb = tyche_memblock_alloc(start, bytes)) == NULL) {
+	if ((tlb = tyche_memblock_alloc(shared_region, bytes)) == NULL) {
 		panic("Cannot alloc the swiotlb on the shared memory region");
 	}
 
