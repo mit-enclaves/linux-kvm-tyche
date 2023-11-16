@@ -413,7 +413,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 
 	// find all shared regions
 	pr_info("tyche enum: find a shared region");
-	if (tyche_find_shared_regions()) {
+	if (tyche_collect_shared_regions()) {
 		panic("Cannot find a shared region on the current tyche domain");
 	}
 

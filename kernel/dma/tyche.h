@@ -26,7 +26,6 @@ struct tyche_region_node {
 };
 
 #ifdef CONFIG_TYCHE_GUEST
-// extern list_head tyche_shared_regions;
 #define TYCHE_SHARED_REGIONS 10
 extern struct tyche_region tyche_shared_regions[TYCHE_SHARED_REGIONS];
 extern size_t tyche_shared_region_len;
@@ -40,6 +39,6 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 			 unsigned long start2, unsigned long end2,
 			 unsigned long prot2);
 void *tyche_memblock_alloc(unsigned long start, unsigned long size);
-int tyche_find_shared_regions(void);
+int tyche_collect_shared_regions(void);
 
 #endif

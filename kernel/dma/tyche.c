@@ -211,7 +211,7 @@ static bool is_shared_active_region(struct tyche_region *t) {
 	return true;
 }
 
-int tyche_find_shared_regions(void) {
+int tyche_collect_shared_regions(void) {
 	tyche_filter_capabilities(is_shared_active_region);
 
 	return 0;
