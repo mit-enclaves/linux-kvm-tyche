@@ -120,7 +120,9 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 	return 0;
 }
 
-static int serialize_tyche_region(size_t *capa_index, vmcall_frame_t *frame, struct tyche_region *r) {
+static int serialize_tyche_region(size_t *capa_index, vmcall_frame_t *frame,
+				  struct tyche_region *r)
+{
 	BUG_ON(!frame);
 	BUG_ON(!r);
 
@@ -137,7 +139,8 @@ static int serialize_tyche_region(size_t *capa_index, vmcall_frame_t *frame, str
 	return 0;
 }
 
-static int tyche_enum(vmcall_frame_t *frame) {
+static int tyche_enum(vmcall_frame_t *frame)
+{
 	BUG_ON(!frame);
 
 	if (tyche_call(frame)) {
@@ -150,8 +153,9 @@ static int tyche_enum(vmcall_frame_t *frame) {
 
 // next points to zero if we have iterated all capas on the domain
 // returns 1 if the current capa is not a region
-// only inspect the region when the function returns 0 and next 
-static int tyche_enum_region(size_t *capa_index, struct tyche_region *r) {
+// only inspect the region when the function returns 0 and next
+static int tyche_enum_region(size_t *capa_index, struct tyche_region *r)
+{
 	vmcall_frame_t frame = {
 		.vmcall = 8,
 		.arg_1 = *capa_index,
@@ -160,7 +164,7 @@ static int tyche_enum_region(size_t *capa_index, struct tyche_region *r) {
 	if (tyche_enum(&frame)) {
 		return 1;
 	}
-	
+
 	if ((frame.value_3 & 0xff) != 0) {
 		pr_info("cap is not region");
 		*capa_index = frame.value_5;
@@ -174,7 +178,8 @@ static int tyche_enum_region(size_t *capa_index, struct tyche_region *r) {
 }
 
 // check linux's list api
-static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t)) {
+static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t))
+{
 	struct tyche_region r;
 	size_t capa_index = 0;
 
@@ -183,19 +188,23 @@ static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t)) {
 			continue;
 		}
 
-		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r.capa_index, r.start, r.end, r.alias, r.active, r.confidential, r.ops);
+		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u",
+			r.capa_index, r.start, r.end, r.alias, r.active,
+			r.confidential, r.ops);
 
 		if (f(&r)) {
 			BUG_ON(tyche_shared_region_len >= TYCHE_SHARED_REGIONS);
-			memcpy(&(tyche_shared_regions[tyche_shared_region_len]), &r, sizeof(struct tyche_region));
-			tyche_shared_region_len += 1; 
+			memcpy(&(tyche_shared_regions[tyche_shared_region_len]),
+			       &r, sizeof(struct tyche_region));
+			tyche_shared_region_len += 1;
 		}
 	} while (capa_index != 0);
 
 	return 0;
 }
 
-static bool is_shared_active_region(struct tyche_region *t) {
+static bool is_shared_active_region(struct tyche_region *t)
+{
 	// Check if the region is active
 	if (!t->active) {
 		pr_info("region is not active");
@@ -211,7 +220,8 @@ static bool is_shared_active_region(struct tyche_region *t) {
 	return true;
 }
 
-int tyche_collect_shared_regions(void) {
+int tyche_collect_shared_regions(void)
+{
 	tyche_filter_capabilities(is_shared_active_region);
 
 	return 0;
