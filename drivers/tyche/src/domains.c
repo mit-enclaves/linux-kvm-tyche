@@ -723,3 +723,38 @@ failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_delete_domain);
+
+
+int driver_delete_domain_regions(driver_domain_t *dom)
+{
+	segment_t* segment = NULL;
+	usize phys_start = 0;
+	usize size = 0;
+	if (dom == NULL) {
+		ERROR("The domain is null.");
+		goto failure;
+	}
+	if (dom->domain_id == UNINIT_DOM_ID) {
+		goto delete_dom_struct;
+	}
+	if (revoke_domain_regions(dom->domain_id) != SUCCESS) {
+		ERROR("Unable to delete the domain %lld for domain %p", dom->domain_id, dom);
+		goto failure;
+	}
+delete_dom_struct:
+	// Delete all segments;
+	while(!dll_is_empty(&(dom->segments))) {
+		segment = dll_head(&(dom->segments));
+		if (phys_start == 0) {
+			phys_start = segment->pa;
+		}
+		size += segment->size;
+		dll_remove(&(dom->segments), segment, list);
+		kfree(segment);
+		segment = NULL;
+	}
+	return SUCCESS;
+failure:
+	return FAILURE;
+}
+EXPORT_SYMBOL(driver_delete_domain_regions);

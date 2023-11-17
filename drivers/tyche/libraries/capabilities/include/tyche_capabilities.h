@@ -60,6 +60,10 @@ int switch_domain(domain_id_t id, void *args);
 /// them.
 int revoke_domain(domain_id_t id);
 
+/// Delete a domain's memory region.
+/// This function goes through the revocations and calls internal revoke.
+int revoke_domain_regions(domain_id_t id);
+
 /// Set configurations for the domain (traps, cores, switch type, perms).
 /// The domain must not be sealed and values must be subsets of the parents.
 int set_domain_configuration(domain_id_t id, tyche_configurations_t idx,

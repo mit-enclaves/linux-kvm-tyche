@@ -13,6 +13,8 @@
  *   Yaniv Kamay  <yaniv@qumranet.com>
  */
 
+#include "asm/kvm_host.h"
+#include "domains.h"
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
 #include <linux/kernel.h>
@@ -6841,6 +6843,20 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 			return 1;
 	}
 
+	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT) {
+		vmx_cache_reg(vcpu, VCPU_REGS_RIP);
+		vmx_cache_reg(vcpu, VCPU_REGS_RSP);
+		pr_err("[0x%lx:0x%lx] -%d-\n",
+				vcpu->arch.regs[VCPU_REGS_RIP],
+				vcpu->arch.regs[VCPU_REGS_RSP],
+				exit_reason.basic);
+		if (exit_reason.basic == EXIT_REASON_CPUID) {
+			pr_err("Reached cpuid\n");
+			tyche_print_all_slots(vcpu);
+			BUG_ON(1);
+		}
+	}*/
+
 	/* If guest state is invalid, start emulating.  L2 is handled above. */
 	if (vmx->emulation_required)
 		return handle_invalid_guest_state(vcpu);
@@ -8969,9 +8985,9 @@ static __init int hardware_setup(void)
 	vmx_setup_me_spte_mask();
 
 	// TODO @aghosn: removing this as we do not use epts.
-	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
+	kvm_configure_mmu(/*enable_ept*/ false, 0, vmx_get_max_tdp_level(),
 			  ept_caps_to_lpage_level(vmx_capability.ept));
-	kvm_enable_tyche_mmu(tyche_mmu_map);
+	kvm_enable_tyche_mmu(tyche_mmu_map, tyche_delete_regions);
 
 	/*
 	 * Only enable PML when hardware supports PML feature, and both EPT

@@ -107,6 +107,7 @@ bool tdp_enabled = false;
  */
 bool tyche_enabled = false;
 int (*__tyche_map)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault) = NULL;
+int (*__tyche_delete_regions)(struct kvm *kvm) = NULL;
 
 static int max_huge_page_level __read_mostly;
 static int tdp_root_level __read_mostly;
@@ -3159,10 +3160,10 @@ static int __direct_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	struct kvm_mmu_page *sp;
 	int ret;
 	gfn_t base_gfn = fault->gfn;
-  if (tyche_enabled) {
-    pr_err("Why is __direct_map called?\n");
-    BUG_ON(1);
-  }
+  	if (tyche_enabled) {
+    		pr_err("Why is __direct_map called?\n");
+    		BUG_ON(1);
+  	}
 
 	kvm_mmu_hugepage_adjust(vcpu, fault);
 
@@ -4350,11 +4351,9 @@ static int direct_page_fault(struct kvm_vcpu *vcpu,
 		goto out_unlock;
 
 	if (is_tdp_mmu_fault) {
-		if (tyche_enabled && __tyche_map != NULL) {
-			r = __tyche_map(vcpu, fault);
-		} else {
-			r = kvm_tdp_mmu_map(vcpu, fault);
-		}
+		r = kvm_tdp_mmu_map(vcpu, fault);
+	} else if (is_tyche_mmu_enabled(vcpu->kvm)) {
+		r = __tyche_map(vcpu, fault);
 	} else {
 		r = make_mmu_pages_available(vcpu);
 		if (r)
@@ -5815,14 +5814,16 @@ void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 /*
  * Turn on tyche mmu.
  */
-void kvm_enable_tyche_mmu(int (*pf)(struct kvm_vcpu *, struct kvm_page_fault *))
+void kvm_enable_tyche_mmu(int (*pf)(struct kvm_vcpu *, struct kvm_page_fault *),
+		int (*dl)(struct kvm *kvm))
 {
 	pr_err("Tyche enabled");
 	if (tdp_enabled) {
 		printk(KERN_ERR "tdp was enabled before tyche.\n");
-		//tdp_enabled = 0;
+		tdp_enabled = 0;
 	}
 	__tyche_map = pf;
+	__tyche_delete_regions = dl;
 	tyche_enabled = true;
 }
 EXPORT_SYMBOL_GPL(kvm_enable_tyche_mmu);
@@ -6082,8 +6083,13 @@ static void kvm_mmu_zap_all_fast(struct kvm *kvm)
 	 * write and in the same critical section as making the reload request,
 	 * e.g. before kvm_zap_obsolete_pages() could drop mmu_lock and yield.
 	 */
-	if (is_tdp_mmu_enabled(kvm))
+	if (is_tdp_mmu_enabled(kvm)) {
 		kvm_tdp_mmu_invalidate_all_roots(kvm);
+	}
+
+	if (is_tyche_mmu_enabled(kvm)) {
+		BUG_ON(__tyche_delete_regions(kvm));
+	}
 
 	/*
 	 * Notify all vcpus to reload its shadow page table and flush TLB.
@@ -6136,6 +6142,9 @@ int kvm_mmu_init_vm(struct kvm *kvm)
 	r = kvm_mmu_init_tdp_mmu(kvm);
 	if (r < 0)
 		return r;
+	if (tyche_enabled) {
+		kvm->arch.tyche_mmu_enabled = true;
+	}
 
 	node->track_write = kvm_mmu_pte_write;
 	node->track_flush_slot = kvm_mmu_invalidate_zap_pages_in_memslot;

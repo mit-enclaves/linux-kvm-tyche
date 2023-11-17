@@ -175,4 +175,7 @@ int driver_switch_domain(driver_domain_t *domain, void *args);
 
 /// Delete the domain and revoke the capabilities.
 int driver_delete_domain(driver_domain_t *domain);
+
+/// Delete the domain's regions.
+int driver_delete_domain_regions(driver_domain_t *dom);
 #endif /*__SRC_DOMAINS_H__*/
