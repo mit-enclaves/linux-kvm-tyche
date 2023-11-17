@@ -231,8 +231,10 @@ static inline bool kvm_shadow_root_allocated(struct kvm *kvm)
 
 #ifdef CONFIG_X86_64
 extern bool tdp_mmu_enabled;
+static inline bool is_tyche_mmu_enabled(struct kvm *kvm) {return kvm->arch.tyche_mmu_enabled;}
 #else
 #define tdp_mmu_enabled false
+static inline bool is_tyche_mmu_enabled(struct kvm *kvm) {return false; }
 #endif
 
 static inline bool kvm_memslots_have_rmaps(struct kvm *kvm)

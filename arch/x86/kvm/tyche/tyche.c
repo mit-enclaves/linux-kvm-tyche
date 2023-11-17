@@ -182,7 +182,7 @@ static __init int tyche_hardware_setup(void) {
 
 
   // Enable tyche mmu (which is basically no mmu).
-  kvm_enable_tyche_mmu(NULL);
+  kvm_enable_tyche_mmu(NULL, NULL);
   //TODO figure that out.
 	//kvm_configure_mmu(1, 0, 4, 0);
   printk(KERN_ERR "In hardware setup\n");

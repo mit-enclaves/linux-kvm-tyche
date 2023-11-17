@@ -1,4 +1,7 @@
 #include "tyche.h"
+#include "asm/kvm_host.h"
+#include "domains.h"
+#include "linux/kvm_host.h"
 #include "vmx.h"
 #include "../mmu/mmu_internal.h"
 
@@ -175,8 +178,6 @@ static int mmu_pages_are_contiguous(struct kvm_memory_slot *slot, bool write)
 {
 	kvm_pfn_t pfn = __gfn_to_pfn_memslot(slot, slot->base_gfn, false, false,
 					     NULL, write, NULL, NULL);
-	gfn_t base_gfn = slot->base_gfn;
-	//usize vaddr = slot->userspace_addr;
 	int i = 0;
 	if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
 		// For the moment ignore these entries.
@@ -189,9 +190,6 @@ static int mmu_pages_are_contiguous(struct kvm_memory_slot *slot, bool write)
 		kvm_pfn_t npfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
 						      NULL, write, NULL, NULL);
 		if (npfn != (pfn + i)) {
-			pr_err("The pages are not contiguous.\n");
-			pr_err("Expected %llx, got %llx (i: %d)\n", pfn + i,
-			       npfn, i);
 			return 0;
 		}
 	}
@@ -204,7 +202,6 @@ static int mmu_pages_all_the_same(struct kvm_memory_slot *slot, bool write)
 	int i = 0;
 	kvm_pfn_t pfn = __gfn_to_pfn_memslot(slot, slot->base_gfn, false, false,
 					     NULL, write, NULL, NULL);
-	gfn_t base_gfn = slot->base_gfn;
 	if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
 		// For the moment ignore these entries.
 		pr_err("Wrong type of memory segment %llx\n", pfn);
@@ -215,9 +212,6 @@ static int mmu_pages_all_the_same(struct kvm_memory_slot *slot, bool write)
 		kvm_pfn_t npfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
 						      NULL, write, NULL, NULL);
 		if (npfn != pfn) {
-			pr_err("Found a different entry.\n");
-			pr_err("Expected %llx, got %llx (i: %d)\n", pfn, npfn,
-			       i);
 			return 0;
 		}
 	}
@@ -259,8 +253,8 @@ static int map_segment(driver_domain_t* dom, usize user_addr,
 		return FAILURE;
 	}
 
-	pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d\n",
-	       hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe);
+	pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d | prot: %d\n",
+	       hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe, rights);
 
 	return SUCCESS;
 }
@@ -272,8 +266,13 @@ static int map_eager(driver_domain_t *dom, struct kvm_memory_slot *slot, bool wr
 	gfn_t base_gfn = slot->base_gfn;
 	usize nb_pages = 1;
 	segment_type_t tpe = SHARED; 
-	memory_access_right_t rights =  MEM_READ | MEM_WRITE |
-		MEM_EXEC | MEM_SUPER | MEM_ACTIVE;
+	memory_access_right_t rights =  MEM_READ | MEM_EXEC | MEM_SUPER | MEM_ACTIVE;
+
+	// KVM_MEM_READONLY only disables writes, not execute.
+	if (!(slot->flags & KVM_MEM_READONLY)) {
+		rights |= MEM_WRITE;
+	}
+
 	for (i = 1; i <= slot->npages; i++) {
 		gfn_t gfn = slot->base_gfn + i;
 		usize gnpages = gfn - base_gfn;
@@ -326,7 +325,7 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	segment_type_t seg_tpe = SHARED;
 	int ret = RET_PF_FIXED;
 	kvm_pfn_t pfn = 0;
-	//boot wprot = false;
+	memory_access_right_t rights =  MEM_READ | MEM_EXEC | MEM_SUPER | MEM_ACTIVE;
 
 	//TODO(aghosn) Not sure we need this.
 	//kvm_mmu_hugepage_adjust(vcpu, fault);
@@ -341,9 +340,11 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	rcu_read_lock();
 
 	if (unlikely(!fault->slot)) {
-		ERROR("This is probably mmio.");
-		rcu_read_unlock();
+		pr_err("This is probably mmio: %llx.", fault->addr);
+		tyche_print_all_slots(vcpu);
 		BUG_ON(1);
+		rcu_read_unlock();
+		return RET_PF_EMULATE;
 	}
 
 	//TODO obviously some are not contiguous soooo let's have a look shall we.
@@ -363,12 +364,16 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	goto unlock;
 
 map_segment:
+	// KVM_MEM_READONLY only disables writes, not execute.
+	if (!(fault->slot->flags & KVM_MEM_READONLY)) {
+		rights |= MEM_WRITE;
+	}
 	pfn = __gfn_to_pfn_memslot(fault->slot, fault->slot->base_gfn, false,
 				   false, NULL, fault->write, NULL, NULL);
 	if (map_segment(vmx->domain, fault->slot->userspace_addr, pfn, 
 			fault->slot->base_gfn,
 			fault->slot->npages, seg_tpe, 
-			MEM_READ | MEM_WRITE | MEM_EXEC | MEM_SUPER | MEM_ACTIVE) != SUCCESS) {
+			rights) != SUCCESS) {
 		pr_err("Map segment failed.\n");
 		ret = RET_PF_INVALID;
 		BUG_ON(1);
@@ -377,4 +382,28 @@ map_segment:
 unlock:
 	rcu_read_unlock();
 	return ret;
+}
+
+/// Delete the domain regions. There is a write lock on kvm->mmu_lock. 
+int tyche_delete_regions(struct kvm *kvm) {
+	struct kvm_vmx *vmx = to_kvm_vmx(kvm);
+	if (vmx->domain == NULL) {
+		ERROR("Domain is null!");
+		return FAILURE;
+	} 
+	return driver_delete_domain_regions(vmx->domain);
+}
+
+/// Assume this is locked.
+void tyche_print_all_slots(struct kvm_vcpu* vcpu) {
+	struct kvm_memslots *slots = kvm_vcpu_memslots(vcpu);
+	struct kvm_memory_slot *slot = NULL;
+	int bkt = 0;
+	kvm_for_each_memslot(slot, bkt, slots) {
+		pr_err("[PAS] gpa: %llx, hva: %lx, npages: %ld | prot: %u | cont: %d, repeat: %d\n",
+		slot->base_gfn, slot->userspace_addr,
+		slot->npages, slot->flags,
+		mmu_pages_are_contiguous(slot, false),
+		mmu_pages_all_the_same(slot, false));
+	}
 }

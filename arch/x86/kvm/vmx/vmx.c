@@ -5866,6 +5866,17 @@ static int handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+/*static void dbg_print_all_slots(struct kvm_vcpu* vcpu) {
+	struct kvm_memslots *slots = kvm_vcpu_memslots(vcpu);
+	struct kvm_memory_slot *slot = NULL;
+	int bkt = 0;
+	kvm_for_each_memslot(slot, bkt, slots) {
+		pr_err("[PAS] gpa: %llx, hva: %lx, npages: %ld | prot: %u, id: %d\n",
+		slot->base_gfn << PAGE_SHIFT, slot->userspace_addr,
+		slot->npages, slot->flags, slot->id);
+	}
+}*/
+
 static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 {
 	if (vmx_emulation_required_with_pending_exception(vcpu)) {
@@ -6475,6 +6486,20 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		if (nested_vmx_reflect_vmexit(vcpu))
 			return 1;
 	}
+
+	//TODO(aghosn): remove.
+	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT) {
+		vmx_cache_reg(vcpu, VCPU_REGS_RIP);
+		vmx_cache_reg(vcpu, VCPU_REGS_RSP);
+		pr_err("[0x%lx:0x%lx] -%d-\n",
+				kvm_get_linear_rip(vcpu),
+				vcpu->arch.regs[VCPU_REGS_RSP],
+				exit_reason.basic);
+		if (exit_reason.basic == EXIT_REASON_CPUID) {
+			pr_err("Reached cpuid\n");
+			BUG_ON(1);
+		}
+	}*/
 
 	/* If guest state is invalid, start emulating.  L2 is handled above. */
 	if (vmx->emulation_required)

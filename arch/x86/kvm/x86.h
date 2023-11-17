@@ -2,6 +2,7 @@
 #ifndef ARCH_X86_KVM_X86_H
 #define ARCH_X86_KVM_X86_H
 
+#include "asm/kvm_host.h"
 #include <linux/kvm_host.h>
 #include <asm/mce.h>
 #include <asm/pvclock.h>
@@ -269,6 +270,22 @@ static inline void kvm_register_write(struct kvm_vcpu *vcpu,
 	if (!is_64_bit_mode(vcpu))
 		val = (u32)val;
 	return kvm_register_write_raw(vcpu, reg, val);
+}
+
+static inline void kvm_dump_gp_registers(struct kvm_vcpu *vcpu)
+{
+	pr_err("RIP=0x%016lx	RSP=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RIP),
+			kvm_register_read(vcpu, VCPU_REGS_RSP));
+	pr_err("RAX=0x%016lx	RBX=0x%016lx	RCX=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RAX),
+			kvm_register_read(vcpu, VCPU_REGS_RBX), kvm_register_read(vcpu, VCPU_REGS_RCX));
+	pr_err("RDX=0x%016lx	RBP=0x%016lx	RSI=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RDX),
+			kvm_register_read(vcpu, VCPU_REGS_RBP), kvm_register_read(vcpu, VCPU_REGS_RSI));
+	pr_err("RDI=0x%016lx	R8=0x%016lx	R9-0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_RDI),
+			kvm_register_read(vcpu, VCPU_REGS_R8), kvm_register_read(vcpu, VCPU_REGS_R9));
+	pr_err("R10=%016lx	R11=0x%016lx	R12=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_R10),
+			kvm_register_read(vcpu, VCPU_REGS_R11), kvm_register_read(vcpu, VCPU_REGS_R12));
+	pr_err("R13=0x%016lx	R14=0x%016lx	R15=0x%016lx\n", kvm_register_read(vcpu, VCPU_REGS_R13),
+			kvm_register_read(vcpu, VCPU_REGS_R14), kvm_register_read(vcpu, VCPU_REGS_R15));
 }
 
 static inline bool kvm_check_has_quirk(struct kvm *kvm, u64 quirk)

@@ -856,3 +856,39 @@ failure:
   ERROR("[revoke_domain] failure");
   return FAILURE;
 }
+
+
+int revoke_domain_regions(domain_id_t id)
+{
+	child_domain_t *child = find_child(id);
+  capability_t *capa = NULL;
+	int change = 0;
+
+	if (child == NULL) {
+		ERROR("Unable to find child with id %lld\n", id);
+		goto failure;
+	}
+
+	// First go through all the revocations.
+	while (!dll_is_empty(&(child->revocations))) {
+		capa = child->revocations.head;
+		if (capa->left != NULL) {
+			// By construction this should never happen.
+			ERROR("The revoked capa has non empty left.");
+			goto failure;
+		}
+		if (capa->right != NULL) {
+			// By construction this should never happen.
+			ERROR("The revoked capa has non empty right.");
+			goto failure;
+		}
+		ERROR("revoke domain regions of type %d\n", capa->capa_type);
+		if (internal_revoke(child, capa) != SUCCESS) {
+			ERROR("unable to revoke a capability.");
+			goto failure;
+		}
+	}
+	return SUCCESS;
+failure:
+	return FAILURE;
+}

@@ -33,4 +33,10 @@ void write_all_gp_registers(struct vcpu_vmx *vmx);
 /// Install the mapping following a page fault.
 int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault);
 
+/// Delete the domain's region following a change of memoryslots.
+int tyche_delete_regions(struct kvm *kvm);
+
+/// Debugging function, remove later on.
+void tyche_print_all_slots(struct kvm_vcpu *vcpu);
+
 #endif

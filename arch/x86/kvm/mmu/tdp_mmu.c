@@ -1218,17 +1218,18 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	goto retry;
 
 map_target_level:
+	ret = tdp_mmu_map_handle_target_level(vcpu, fault, &iter);
 	//TODO(aghosn): helpful debug information if needed.
 	/*if (fault->slot != NULL) {
 		kvm_pfn_t pfn =  __gfn_to_pfn_memslot(fault->slot, fault->slot->base_gfn, false, false,
 			NULL, fault->write, NULL, NULL);
 
-		pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %lx | npages: %ld | fault: %llx\n",
+		pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %lx | npages: %ld | fault: %llx| id: %d | prots: %d, write: %d, map_write: %d| ret: %d,\n",
 			pfn << PAGE_SHIFT, fault->slot->base_gfn << PAGE_SHIFT,
 			fault->slot->userspace_addr, fault->slot->npages,
-			fault->addr);
+			fault->addr, fault->slot->id, fault->slot->flags,
+			fault->write, fault->map_writable, ret);
 	}*/
-	ret = tdp_mmu_map_handle_target_level(vcpu, fault, &iter);
 
 retry:
 	rcu_read_unlock();
