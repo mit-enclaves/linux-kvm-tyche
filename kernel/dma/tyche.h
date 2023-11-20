@@ -39,6 +39,7 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 			 unsigned long start2, unsigned long end2,
 			 unsigned long prot2);
 void *tyche_memblock_alloc(unsigned long start, unsigned long size);
+void *tyche_ioremap(unsigned long start, unsigned long size);
 int tyche_collect_shared_regions(void);
 
 #endif

@@ -199,6 +199,7 @@ static inline bool is_swiotlb_force_bounce(struct device *dev)
 }
 
 void swiotlb_init(bool addressing_limited, unsigned int flags);
+void __init swiotlb_init_bufs(void);
 void __init swiotlb_exit(void);
 void swiotlb_dev_init(struct device *dev);
 size_t swiotlb_max_mapping_size(struct device *dev);

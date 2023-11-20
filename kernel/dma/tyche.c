@@ -227,7 +227,7 @@ int tyche_collect_shared_regions(void)
 	return 0;
 }
 
-void __init *tyche_memblock_alloc(unsigned long start, unsigned long size)
+void *tyche_memblock_alloc(unsigned long start, unsigned long size)
 {
 	void *tlb = NULL;
 
@@ -242,6 +242,32 @@ void __init *tyche_memblock_alloc(unsigned long start, unsigned long size)
 	// Call the memblock functions to allocate this range for DMA
 	tlb = memblock_alloc_try_nid(size, PAGE_SIZE, start, start + size,
 				     NUMA_NO_NODE);
+
+	if (!tlb) {
+		pr_warn("%s: Failed to allocate %zu bytes tlb structure\n",
+			__func__, size);
+		return NULL;
+	}
+
+	return tlb;
+}
+
+void *tyche_ioremap(unsigned long start, unsigned long size)
+{
+	void *tlb = NULL;
+
+	if (!size) {
+		pr_warn("Tyche: cannot allocate a swiotlb for size 0");
+		return NULL;
+	}
+
+	pr_warn("allocating a swiotlb buffer on start=0x%llx, size=%lu", start,
+		size);
+
+	// Call the memblock functions to allocate this range for DMA
+	// tlb = memblock_alloc_try_nid(size, PAGE_SIZE, start, start + size,
+	// 			     NUMA_NO_NODE);
+	tlb = ioremap(start, size);
 
 	if (!tlb) {
 		pr_warn("%s: Failed to allocate %zu bytes tlb structure\n",

@@ -398,7 +398,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	nslabs = default_nslabs;
 	nareas = limit_nareas(default_nareas, nslabs);
 
-#ifdef CONFIG_TYCHE_GUEST
+// #ifdef CONFIG_TYCHE_GUEST
 	bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
 
 	// TODO(yuchen): move this part to the capa engine later as we only
@@ -431,10 +431,14 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	shared_region_sz = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
 	shared_region_prot = tyche_shared_regions[0].ops;
 
+#if 0
 	pr_info("swiotlb allocation with tyche guest");
 	if ((tlb = tyche_memblock_alloc(shared_region, bytes)) == NULL) {
 		panic("Cannot alloc the swiotlb on the shared memory region");
 	}
+
+	// It shoule be assumed that these regions are already mapped inside
+	// the IOMMU, so we don't need to send over the region anymore
 
 	// Since the guest swiotlb allocation does not necessarily takes up the
 	// whole shared region tyche has partitioned, the guest needs to
@@ -455,7 +459,8 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	if (tyche_send(capa2, io_domain_handle)) {
 		panic("Unable to inform I/O domain to configure IOMMU");
 	}
-#else
+#endif
+// #else
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
 			return;
@@ -468,7 +473,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 			default_nslabs, nslabs);
 		default_nslabs = nslabs;
 	}
-#endif
+// #endif
 
 	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
 	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
@@ -495,6 +500,31 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
 {
 	swiotlb_init_remap(addressing_limit, flags, NULL);
+}
+
+void __init swiotlb_init_bufs(void) {
+	void *tlbs[10];
+
+	// pr_info("%s: size", __func__, size);
+
+	for (size_t i = 0; i < tyche_shared_region_len; ++i) {
+		struct tyche_region *r = &(tyche_shared_regions[i]);
+		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r->capa_index, r->start, r->end, r->alias, r->active, r->confidential, r->ops);
+
+		pr_info("swiotlb allocation with tyche guest");
+		if ((tlbs[i] = tyche_ioremap(tyche_shared_regions[i].start,
+						tyche_shared_regions[0].end -
+						tyche_shared_regions[0].start))
+				== NULL) {
+			panic("Cannot alloc the swiotlb on the shared memory region");
+		}
+
+		pr_info("tyche_alloc on address");
+		// pr_info("tyche_alloc on address: %pa", __pa(tlbs[i]));
+
+		// BUG_ON(__pa(tlbs[i]) != tyche_shared_regions[i].start);
+	}
+
 }
 
 /*
