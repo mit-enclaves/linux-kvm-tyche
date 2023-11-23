@@ -14,6 +14,8 @@ struct device;
 struct page;
 struct scatterlist;
 
+#define CONFIG_DMA_RESTRICTED_POOL 1
+
 #define SWIOTLB_VERBOSE	(1 << 0) /* verbose initialization */
 #define SWIOTLB_FORCE	(1 << 1) /* force bounce buffering */
 #define SWIOTLB_ANY	(1 << 2) /* allow any memory for the buffer */
@@ -271,6 +273,7 @@ static inline bool is_swiotlb_for_alloc(struct device *dev)
 #else
 static inline struct page *swiotlb_alloc(struct device *dev, size_t size)
 {
+	BUG_ON(true);
 	return NULL;
 }
 static inline bool swiotlb_free(struct device *dev, struct page *page,

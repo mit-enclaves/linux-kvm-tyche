@@ -69,14 +69,13 @@
 #ifdef CONFIG_TYCHE_GUEST
 struct tyche_region tyche_shared_regions[TYCHE_SHARED_REGIONS];
 size_t tyche_shared_region_len = 0;
-#endif
-
 unsigned long shared_region_capa = 0;
 unsigned long swiotlb_region_capa = 0;
 int io_domain = 0;
 unsigned long shared_region = 0;
 unsigned long shared_region_sz = 0;
 unsigned long shared_region_prot = 0;
+#endif
 
 /**
  * struct io_tlb_slot - IO TLB slot descriptor
@@ -111,8 +110,12 @@ static struct io_tlb_mem io_tlb_default_mem;
 
 #endif	/* CONFIG_SWIOTLB_DYNAMIC */
 
+#ifdef CONFIG_TYCHE_GUEST
+// Tyche guest will get the swiotlb regions directly from the tyche capabilities
+#else
 static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
 static unsigned long default_nareas;
+#endif
 
 /**
  * struct io_tlb_area - IO TLB memory area descriptor
@@ -140,18 +143,18 @@ struct io_tlb_area {
  *
  * Return true if default_nslabs is rounded up.
  */
-static bool round_up_default_nslabs(void)
-{
-	if (!default_nareas)
-		return false;
-
-	if (default_nslabs < IO_TLB_SEGSIZE * default_nareas)
-		default_nslabs = IO_TLB_SEGSIZE * default_nareas;
-	else if (is_power_of_2(default_nslabs))
-		return false;
-	default_nslabs = roundup_pow_of_two(default_nslabs);
-	return true;
-}
+// static bool round_up_default_nslabs(void)
+// {
+// 	if (!default_nareas)
+// 		return false;
+// 
+// 	if (default_nslabs < IO_TLB_SEGSIZE * default_nareas)
+// 		default_nslabs = IO_TLB_SEGSIZE * default_nareas;
+// 	else if (is_power_of_2(default_nslabs))
+// 		return false;
+// 	default_nslabs = roundup_pow_of_two(default_nslabs);
+// 	return true;
+// }
 
 /**
  * swiotlb_adjust_nareas() - adjust the number of areas and slots
@@ -161,20 +164,20 @@ static bool round_up_default_nslabs(void)
  * The default size of the memory pool may also change to meet minimum area
  * size requirements.
  */
-static void swiotlb_adjust_nareas(unsigned int nareas)
-{
-	if (!nareas)
-		nareas = 1;
-	else if (!is_power_of_2(nareas))
-		nareas = roundup_pow_of_two(nareas);
-
-	default_nareas = nareas;
-
-	pr_info("area num %d.\n", nareas);
-	if (round_up_default_nslabs())
-		pr_info("SWIOTLB bounce buffer size roundup to %luMB",
-			(default_nslabs << IO_TLB_SHIFT) >> 20);
-}
+// static void swiotlb_adjust_nareas(unsigned int nareas)
+// {
+// 	if (!nareas)
+// 		nareas = 1;
+// 	else if (!is_power_of_2(nareas))
+// 		nareas = roundup_pow_of_two(nareas);
+// 
+// 	default_nareas = nareas;
+// 
+// 	pr_info("area num %d.\n", nareas);
+// 	if (round_up_default_nslabs())
+// 		pr_info("SWIOTLB bounce buffer size roundup to %luMB",
+// 			(default_nslabs << IO_TLB_SHIFT) >> 20);
+// }
 
 /**
  * limit_nareas() - get the maximum number of areas for a given memory pool size
@@ -193,6 +196,11 @@ static unsigned int limit_nareas(unsigned int nareas, unsigned long nslots)
 	return nareas;
 }
 
+#ifdef CONFIG_TYCHE_GUEST
+// There's no point of specifying a swiotlb through kernel parameter, because
+// the swiotlb should be pre-determined through the tyche regions that are
+// already mapped on the IOMMU
+#else
 static int __init
 setup_io_tlb_npages(char *str)
 {
@@ -215,28 +223,30 @@ setup_io_tlb_npages(char *str)
 	return 0;
 }
 early_param("swiotlb", setup_io_tlb_npages);
+#endif
 
 unsigned long swiotlb_size_or_default(void)
 {
-	return default_nslabs << IO_TLB_SHIFT;
+	return 0; // just use the default
+	// return default_nslabs << IO_TLB_SHIFT;
 }
 
-void __init swiotlb_adjust_size(unsigned long size)
-{
-	/*
-	 * If swiotlb parameter has not been specified, give a chance to
-	 * architectures such as those supporting memory encryption to
-	 * adjust/expand SWIOTLB size for their use.
-	 */
-	if (default_nslabs != IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT)
-		return;
-
-	size = ALIGN(size, IO_TLB_SIZE);
-	default_nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
-	if (round_up_default_nslabs())
-		size = default_nslabs << IO_TLB_SHIFT;
-	pr_info("SWIOTLB bounce buffer size adjusted to %luMB", size >> 20);
-}
+// void __init swiotlb_adjust_size(unsigned long size)
+// {
+// 	/*
+// 	 * If swiotlb parameter has not been specified, give a chance to
+// 	 * architectures such as those supporting memory encryption to
+// 	 * adjust/expand SWIOTLB size for their use.
+// 	 */
+// 	if (default_nslabs != IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT)
+// 		return;
+// 
+// 	size = ALIGN(size, IO_TLB_SIZE);
+// 	default_nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+// 	if (round_up_default_nslabs())
+// 		size = default_nslabs << IO_TLB_SHIFT;
+// 	pr_info("SWIOTLB bounce buffer size adjusted to %luMB", size >> 20);
+// }
 
 void swiotlb_print_info(void)
 {
@@ -278,33 +288,39 @@ void __init swiotlb_update_mem_attributes(void)
 	set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
 }
 
-static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,
+static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start, phys_addr_t end,
 		unsigned long nslabs, bool late_alloc, unsigned int nareas)
 {
-	void *vaddr = phys_to_virt(start);
+	// void *vaddr = phys_to_virt(start);
 	unsigned long bytes = nslabs << IO_TLB_SHIFT, i;
+
+	pr_info("%s: %d", __func__, __LINE__);
 
 	mem->nslabs = nslabs;
 	mem->start = start;
-	mem->end = mem->start + bytes;
+	mem->end = end;
 	mem->late_alloc = late_alloc;
 	mem->nareas = nareas;
 	mem->area_nslabs = nslabs / mem->nareas;
 
+	pr_info("%s: %d", __func__, __LINE__);
 	for (i = 0; i < mem->nareas; i++) {
 		spin_lock_init(&mem->areas[i].lock);
 		mem->areas[i].index = 0;
 		mem->areas[i].used = 0;
 	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	for (i = 0; i < mem->nslabs; i++) {
 		mem->slots[i].list = IO_TLB_SEGSIZE - io_tlb_offset(i);
 		mem->slots[i].orig_addr = INVALID_PHYS_ADDR;
 		mem->slots[i].alloc_size = 0;
 	}
 
-	memset(vaddr, 0, bytes);
-	mem->vaddr = vaddr;
+	pr_info("%s: %d", __func__, __LINE__);
+	// memset(vaddr, 0, bytes);
+	mem->vaddr = NULL;
+	pr_info("%s: %d", __func__, __LINE__);
 	return;
 }
 
@@ -368,12 +384,8 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	unsigned long nslabs;
 	unsigned int nareas;
 	size_t alloc_size;
-	void *tlb = NULL;
-	unsigned long capa_index = 0;
-	unsigned long long capa1 = 0, capa2 =0;
 	int io_domain_handle;
 	unsigned long start = 0, len = 0, prot = 0;
-	size_t bytes = 0;
 
 	if (!addressing_limit && !swiotlb_force_bounce)
 		return;
@@ -392,15 +404,6 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		io_tlb_default_mem.phys_limit = ARCH_LOW_ADDRESS_LIMIT;
 #endif
 
-	if (!default_nareas)
-		swiotlb_adjust_nareas(num_possible_cpus());
-
-	nslabs = default_nslabs;
-	nareas = limit_nareas(default_nareas, nslabs);
-
-// #ifdef CONFIG_TYCHE_GUEST
-	bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
-
 	// TODO(yuchen): move this part to the capa engine later as we only
 	// need one global I/O domain for now
 	pr_info("create I/O domain");
@@ -417,84 +420,45 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		panic("Cannot find a shared region on the current tyche domain");
 	}
 
+	io_tlb_default_mem.for_alloc = true;
 	for (size_t i = 0; i < tyche_shared_region_len; ++i) {
 		struct tyche_region *r = &(tyche_shared_regions[i]);
 		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r->capa_index, r->start, r->end, r->alias, r->active, r->confidential, r->ops);
+
+		struct io_tlb_pool *pool = memblock_alloc(sizeof(struct io_tlb_pool), PAGE_SIZE);
+
+		// calculate the nslabs, nareas of this io_tlb_pool;
+		nslabs = nr_slots(r->end - r->start);
+		nareas = limit_nareas(1, nslabs); // FIXME
+
+		pr_info("nslabs=%lu, nareas=%lu", nslabs, nareas);
+		alloc_size = PAGE_ALIGN(array_size(sizeof(*pool->slots), nslabs));
+		pr_info("alloc_size=%lu", alloc_size);
+		pool->slots = memblock_alloc(alloc_size, PAGE_SIZE);
+		pr_info("pool->slots");
+		if (!pool->slots) {
+			pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
+					__func__, alloc_size, PAGE_SIZE);
+			continue;
+		}
+		pr_info("pool->slots succeeded");
+
+		pr_info("pool->areas");
+		pool->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
+					nareas), SMP_CACHE_BYTES);
+		if (!pool->areas) {
+			pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
+			continue;
+		}
+		pr_info("pool->areas succeeded");
+
+		pr_info("swiotlb_init_io_tlb_pool");
+		swiotlb_init_io_tlb_pool(pool, r->start, r->end, nslabs, true, nareas);
+		pr_info("adding pool to io_tlb_defualt_mem");
+		// pr_info("adding pool to io_tlb_defualt_mem: start=%pa,end=%pa,nslabs=%lu,late_alloc=%d,nareas=%u,area_nslabs=%u", pool->start, pool->end, pool->nslabs, pool->late_alloc, pool->nareas, pool->area_nslabs);
+		add_mem_pool(&io_tlb_default_mem, pool);
+		pr_info("adding pool to io_tlb_defualt_mem: succeeded");
 	}
-
-	// FIXME(yuchen): refactor this code...
-	start = tyche_shared_regions[0].start;
-	len = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
-	prot = tyche_shared_regions[0].ops;
-	shared_region_capa = tyche_shared_regions[0].capa_index;
-	shared_region = tyche_shared_regions[0].start;
-	shared_region_sz = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
-	shared_region_prot = tyche_shared_regions[0].ops;
-
-#if 0
-	pr_info("swiotlb allocation with tyche guest");
-	if ((tlb = tyche_memblock_alloc(shared_region, bytes)) == NULL) {
-		panic("Cannot alloc the swiotlb on the shared memory region");
-	}
-
-	// It shoule be assumed that these regions are already mapped inside
-	// the IOMMU, so we don't need to send over the region anymore
-
-	// Since the guest swiotlb allocation does not necessarily takes up the
-	// whole shared region tyche has partitioned, the guest needs to
-	// further segment the shared region into DMA region and non-DMA region
-	// into two region capabilities and inform tyche about this
-	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x)", shared_region_capa, start, start + len - 1, prot);
-	if (tyche_segment_region(shared_region_capa, &capa1, &capa2, start, start + len - 1, prot, __pa(tlb), __pa(tlb) + bytes, prot)) {
-		panic("Unable to segment the guest DMA region");
-	}
-
-	// FIXME(yuchen): refactor this code...
-	shared_region_capa = capa1;
-	swiotlb_region_capa = capa2;
-
-	// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
-	// so that all DMA goes to the shared region of the memory
-	pr_info("send over capa_index=%d to the I/O domain %d", capa2, io_domain_handle);
-	if (tyche_send(capa2, io_domain_handle)) {
-		panic("Unable to inform I/O domain to configure IOMMU");
-	}
-#endif
-// #else
-	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
-		if (nslabs <= IO_TLB_MIN_SLABS)
-			return;
-		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
-		nareas = limit_nareas(nareas, nslabs);
-	}
-
-	if (default_nslabs != nslabs) {
-		pr_info("SWIOTLB bounce buffer size adjusted %lu -> %lu slabs",
-			default_nslabs, nslabs);
-		default_nslabs = nslabs;
-	}
-// #endif
-
-	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
-	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
-	if (!mem->slots) {
-		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
-			__func__, alloc_size, PAGE_SIZE);
-		return;
-	}
-
-	mem->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
-		nareas), SMP_CACHE_BYTES);
-	if (!mem->areas) {
-		pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
-		return;
-	}
-
-	swiotlb_init_io_tlb_pool(mem, __pa(tlb), nslabs, false, nareas);
-	add_mem_pool(&io_tlb_default_mem, mem);
-
-	if (flags & SWIOTLB_VERBOSE)
-		swiotlb_print_info();
 }
 
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
@@ -502,29 +466,24 @@ void __init swiotlb_init(bool addressing_limit, unsigned int flags)
 	swiotlb_init_remap(addressing_limit, flags, NULL);
 }
 
-void __init swiotlb_init_bufs(void) {
-	void *tlbs[10];
-
-	// pr_info("%s: size", __func__, size);
-
-	for (size_t i = 0; i < tyche_shared_region_len; ++i) {
-		struct tyche_region *r = &(tyche_shared_regions[i]);
-		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r->capa_index, r->start, r->end, r->alias, r->active, r->confidential, r->ops);
-
-		pr_info("swiotlb allocation with tyche guest");
-		if ((tlbs[i] = tyche_ioremap(tyche_shared_regions[i].start,
-						tyche_shared_regions[0].end -
-						tyche_shared_regions[0].start))
-				== NULL) {
-			panic("Cannot alloc the swiotlb on the shared memory region");
-		}
-
-		pr_info("tyche_alloc on address");
-		// pr_info("tyche_alloc on address: %pa", __pa(tlbs[i]));
-
-		// BUG_ON(__pa(tlbs[i]) != tyche_shared_regions[i].start);
+// loop through the io_tlb_default_mem and ioremap the buffers
+void __init swiotlb_allocate_pools(struct io_tlb_mem *mem)
+{
+	struct io_tlb_pool *pool;
+	list_for_each_entry_rcu(pool, &mem->pools, node) {
+		BUG_ON(pool->vaddr != NULL);
+		pool->vaddr = ioremap(pool->start, pool->end - pool->start);
+		BUG_ON(pool->vaddr == NULL);
 	}
+	list_for_each_entry_rcu(pool, &mem->pools, node) {
+		phys_addr_t paddr = virt_to_phys(pool->vaddr);
+		pr_info("io_tlb_pool: start=%pa, end=%pa, paddr=%pa, vaddr=%p, nslabs=%lu,late_alloc=%d,nareas=%u,area_nslabs=%u", &(pool->start), &(pool->end), &paddr, pool->vaddr, pool->nslabs, pool->late_alloc, pool->nareas, pool->area_nslabs);
+	}
+}
 
+void __init swiotlb_init_bufs(void)
+{
+	swiotlb_allocate_pools(&io_tlb_default_mem);
 }
 
 /*
@@ -535,96 +494,96 @@ void __init swiotlb_init_bufs(void) {
 int swiotlb_init_late(size_t size, gfp_t gfp_mask,
 		int (*remap)(void *tlb, unsigned long nslabs))
 {
-	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
-	unsigned long nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
-	unsigned int nareas;
-	unsigned char *vstart = NULL;
-	unsigned int order, area_order;
-	bool retried = false;
-	int rc = 0;
-
-	if (io_tlb_default_mem.nslabs)
-		return 0;
-
-	if (swiotlb_force_disable)
-		return 0;
-
-	io_tlb_default_mem.force_bounce = swiotlb_force_bounce;
-
-#ifdef CONFIG_SWIOTLB_DYNAMIC
-	if (!remap)
-		io_tlb_default_mem.can_grow = true;
-	if (IS_ENABLED(CONFIG_ZONE_DMA) && (gfp_mask & __GFP_DMA))
-		io_tlb_default_mem.phys_limit = DMA_BIT_MASK(zone_dma_bits);
-	else if (IS_ENABLED(CONFIG_ZONE_DMA32) && (gfp_mask & __GFP_DMA32))
-		io_tlb_default_mem.phys_limit = DMA_BIT_MASK(32);
-	else
-		io_tlb_default_mem.phys_limit = virt_to_phys(high_memory - 1);
-#endif
-
-	if (!default_nareas)
-		swiotlb_adjust_nareas(num_possible_cpus());
-
-retry:
-	order = get_order(nslabs << IO_TLB_SHIFT);
-	nslabs = SLABS_PER_PAGE << order;
-
-	while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
-		vstart = (void *)__get_free_pages(gfp_mask | __GFP_NOWARN,
-						  order);
-		if (vstart)
-			break;
-		order--;
-		nslabs = SLABS_PER_PAGE << order;
-		retried = true;
-	}
-
-	if (!vstart)
-		return -ENOMEM;
-
-	if (remap)
-		rc = remap(vstart, nslabs);
-	if (rc) {
-		free_pages((unsigned long)vstart, order);
-
-		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
-		if (nslabs < IO_TLB_MIN_SLABS)
-			return rc;
-		retried = true;
-		goto retry;
-	}
-
-	if (retried) {
-		pr_warn("only able to allocate %ld MB\n",
-			(PAGE_SIZE << order) >> 20);
-	}
-
-	nareas = limit_nareas(default_nareas, nslabs);
-	area_order = get_order(array_size(sizeof(*mem->areas), nareas));
-	mem->areas = (struct io_tlb_area *)
-		__get_free_pages(GFP_KERNEL | __GFP_ZERO, area_order);
-	if (!mem->areas)
-		goto error_area;
-
-	mem->slots = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
-		get_order(array_size(sizeof(*mem->slots), nslabs)));
-	if (!mem->slots)
-		goto error_slots;
-
-	set_memory_decrypted((unsigned long)vstart,
-			     (nslabs << IO_TLB_SHIFT) >> PAGE_SHIFT);
-	swiotlb_init_io_tlb_pool(mem, virt_to_phys(vstart), nslabs, true,
-				 nareas);
-	add_mem_pool(&io_tlb_default_mem, mem);
-
-	swiotlb_print_info();
+// 	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
+// 	unsigned long nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+// 	unsigned int nareas;
+// 	unsigned char *vstart = NULL;
+// 	unsigned int order, area_order;
+// 	bool retried = false;
+// 	int rc = 0;
+// 
+// 	if (io_tlb_default_mem.nslabs)
+// 		return 0;
+// 
+// 	if (swiotlb_force_disable)
+// 		return 0;
+// 
+// 	io_tlb_default_mem.force_bounce = swiotlb_force_bounce;
+// 
+// #ifdef CONFIG_SWIOTLB_DYNAMIC
+// 	if (!remap)
+// 		io_tlb_default_mem.can_grow = true;
+// 	if (IS_ENABLED(CONFIG_ZONE_DMA) && (gfp_mask & __GFP_DMA))
+// 		io_tlb_default_mem.phys_limit = DMA_BIT_MASK(zone_dma_bits);
+// 	else if (IS_ENABLED(CONFIG_ZONE_DMA32) && (gfp_mask & __GFP_DMA32))
+// 		io_tlb_default_mem.phys_limit = DMA_BIT_MASK(32);
+// 	else
+// 		io_tlb_default_mem.phys_limit = virt_to_phys(high_memory - 1);
+// #endif
+// 
+// 	if (!default_nareas)
+// 		swiotlb_adjust_nareas(num_possible_cpus());
+// 
+// retry:
+// 	order = get_order(nslabs << IO_TLB_SHIFT);
+// 	nslabs = SLABS_PER_PAGE << order;
+// 
+// 	while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
+// 		vstart = (void *)__get_free_pages(gfp_mask | __GFP_NOWARN,
+// 						  order);
+// 		if (vstart)
+// 			break;
+// 		order--;
+// 		nslabs = SLABS_PER_PAGE << order;
+// 		retried = true;
+// 	}
+// 
+// 	if (!vstart)
+// 		return -ENOMEM;
+// 
+// 	if (remap)
+// 		rc = remap(vstart, nslabs);
+// 	if (rc) {
+// 		free_pages((unsigned long)vstart, order);
+// 
+// 		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
+// 		if (nslabs < IO_TLB_MIN_SLABS)
+// 			return rc;
+// 		retried = true;
+// 		goto retry;
+// 	}
+// 
+// 	if (retried) {
+// 		pr_warn("only able to allocate %ld MB\n",
+// 			(PAGE_SIZE << order) >> 20);
+// 	}
+// 
+// 	nareas = limit_nareas(default_nareas, nslabs);
+// 	area_order = get_order(array_size(sizeof(*mem->areas), nareas));
+// 	mem->areas = (struct io_tlb_area *)
+// 		__get_free_pages(GFP_KERNEL | __GFP_ZERO, area_order);
+// 	if (!mem->areas)
+// 		goto error_area;
+// 
+// 	mem->slots = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
+// 		get_order(array_size(sizeof(*mem->slots), nslabs)));
+// 	if (!mem->slots)
+// 		goto error_slots;
+// 
+// 	set_memory_decrypted((unsigned long)vstart,
+// 			     (nslabs << IO_TLB_SHIFT) >> PAGE_SHIFT);
+// 	swiotlb_init_io_tlb_pool(mem, virt_to_phys(vstart), nslabs, true,
+// 				 nareas);
+// 	add_mem_pool(&io_tlb_default_mem, mem);
+// 
+// 	swiotlb_print_info();
 	return 0;
 
-error_slots:
-	free_pages((unsigned long)mem->areas, area_order);
-error_area:
-	free_pages((unsigned long)vstart, order);
-	return -ENOMEM;
+// error_slots:
+// 	free_pages((unsigned long)mem->areas, area_order);
+// error_area:
+// 	free_pages((unsigned long)vstart, order);
+// 	return -ENOMEM;
 }
 
 void __init swiotlb_exit(void)
@@ -809,7 +768,7 @@ static struct io_tlb_pool *swiotlb_alloc_pool(struct device *dev,
 	if (!pool->slots)
 		goto error_slots;
 
-	swiotlb_init_io_tlb_pool(pool, page_to_phys(tlb), nslabs, true, nareas);
+	swiotlb_init_io_tlb_pool(pool, page_to_phys(tlb), page_to_phys(tlb), nslabs, true, nareas);
 	return pool;
 
 error_slots:
@@ -830,14 +789,14 @@ static void swiotlb_dyn_alloc(struct work_struct *work)
 		container_of(work, struct io_tlb_mem, dyn_alloc);
 	struct io_tlb_pool *pool;
 
-	pool = swiotlb_alloc_pool(NULL, IO_TLB_MIN_SLABS, default_nslabs,
-				  default_nareas, mem->phys_limit, GFP_KERNEL);
-	if (!pool) {
-		pr_warn_ratelimited("Failed to allocate new pool");
-		return;
-	}
+	// pool = swiotlb_alloc_pool(NULL, IO_TLB_MIN_SLABS, default_nslabs,
+	// 			  default_nareas, mem->phys_limit, GFP_KERNEL);
+	// if (!pool) {
+	// 	pr_warn_ratelimited("Failed to allocate new pool");
+	// 	return;
+	// }
 
-	add_mem_pool(mem, pool);
+	// add_mem_pool(mem, pool);
 }
 
 /**
@@ -1705,15 +1664,24 @@ struct page *swiotlb_alloc(struct device *dev, size_t size)
 	phys_addr_t tlb_addr;
 	int index;
 
-	if (!mem)
+	pr_info("%s: %d", __func__, __LINE__);
+	if (!mem) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return NULL;
+	}
+
+	pr_info("%s: %d", __func__, __LINE__);
 
 	index = swiotlb_find_slots(dev, 0, size, 0, &pool);
-	if (index == -1)
+	if (index == -1) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return NULL;
+	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	tlb_addr = slot_addr(pool->start, index);
 
+	pr_info("%s: %d", __func__, __LINE__);
 	return pfn_to_page(PFN_DOWN(tlb_addr));
 }
 
@@ -1729,94 +1697,94 @@ bool swiotlb_free(struct device *dev, struct page *page, size_t size)
 	return true;
 }
 
-static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
-				    struct device *dev)
-{
-	struct io_tlb_mem *mem = rmem->priv;
-	unsigned long nslabs = rmem->size >> IO_TLB_SHIFT;
-
-	/* Set Per-device io tlb area to one */
-	unsigned int nareas = 1;
-
-	if (PageHighMem(pfn_to_page(PHYS_PFN(rmem->base)))) {
-		dev_err(dev, "Restricted DMA pool must be accessible within the linear mapping.");
-		return -EINVAL;
-	}
-
-	/*
-	 * Since multiple devices can share the same pool, the private data,
-	 * io_tlb_mem struct, will be initialized by the first device attached
-	 * to it.
-	 */
-	if (!mem) {
-		struct io_tlb_pool *pool;
-
-		mem = kzalloc(sizeof(*mem), GFP_KERNEL);
-		if (!mem)
-			return -ENOMEM;
-		pool = &mem->defpool;
-
-		pool->slots = kcalloc(nslabs, sizeof(*pool->slots), GFP_KERNEL);
-		if (!pool->slots) {
-			kfree(mem);
-			return -ENOMEM;
-		}
-
-		pool->areas = kcalloc(nareas, sizeof(*pool->areas),
-				GFP_KERNEL);
-		if (!pool->areas) {
-			kfree(pool->slots);
-			kfree(mem);
-			return -ENOMEM;
-		}
-
-		set_memory_decrypted((unsigned long)phys_to_virt(rmem->base),
-				     rmem->size >> PAGE_SHIFT);
-		swiotlb_init_io_tlb_pool(pool, rmem->base, nslabs,
-					 false, nareas);
-		mem->force_bounce = true;
-		mem->for_alloc = true;
-#ifdef CONFIG_SWIOTLB_DYNAMIC
-		spin_lock_init(&mem->lock);
-#endif
-		add_mem_pool(mem, pool);
-
-		rmem->priv = mem;
-
-		swiotlb_create_debugfs_files(mem, rmem->name);
-	}
-
-	dev->dma_io_tlb_mem = mem;
-
-	return 0;
-}
-
-static void rmem_swiotlb_device_release(struct reserved_mem *rmem,
-					struct device *dev)
-{
-	dev->dma_io_tlb_mem = &io_tlb_default_mem;
-}
-
-static const struct reserved_mem_ops rmem_swiotlb_ops = {
-	.device_init = rmem_swiotlb_device_init,
-	.device_release = rmem_swiotlb_device_release,
-};
-
-static int __init rmem_swiotlb_setup(struct reserved_mem *rmem)
-{
-	unsigned long node = rmem->fdt_node;
-
-	if (of_get_flat_dt_prop(node, "reusable", NULL) ||
-	    of_get_flat_dt_prop(node, "linux,cma-default", NULL) ||
-	    of_get_flat_dt_prop(node, "linux,dma-default", NULL) ||
-	    of_get_flat_dt_prop(node, "no-map", NULL))
-		return -EINVAL;
-
-	rmem->ops = &rmem_swiotlb_ops;
-	pr_info("Reserved memory: created restricted DMA pool at %pa, size %ld MiB\n",
-		&rmem->base, (unsigned long)rmem->size / SZ_1M);
-	return 0;
-}
-
-RESERVEDMEM_OF_DECLARE(dma, "restricted-dma-pool", rmem_swiotlb_setup);
+// static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
+// 				    struct device *dev)
+// {
+// 	struct io_tlb_mem *mem = rmem->priv;
+// 	unsigned long nslabs = rmem->size >> IO_TLB_SHIFT;
+// 
+// 	/* Set Per-device io tlb area to one */
+// 	unsigned int nareas = 1;
+// 
+// 	if (PageHighMem(pfn_to_page(PHYS_PFN(rmem->base)))) {
+// 		dev_err(dev, "Restricted DMA pool must be accessible within the linear mapping.");
+// 		return -EINVAL;
+// 	}
+// 
+// 	/*
+// 	 * Since multiple devices can share the same pool, the private data,
+// 	 * io_tlb_mem struct, will be initialized by the first device attached
+// 	 * to it.
+// 	 */
+// 	if (!mem) {
+// 		struct io_tlb_pool *pool;
+// 
+// 		mem = kzalloc(sizeof(*mem), GFP_KERNEL);
+// 		if (!mem)
+// 			return -ENOMEM;
+// 		pool = &mem->defpool;
+// 
+// 		pool->slots = kcalloc(nslabs, sizeof(*pool->slots), GFP_KERNEL);
+// 		if (!pool->slots) {
+// 			kfree(mem);
+// 			return -ENOMEM;
+// 		}
+// 
+// 		pool->areas = kcalloc(nareas, sizeof(*pool->areas),
+// 				GFP_KERNEL);
+// 		if (!pool->areas) {
+// 			kfree(pool->slots);
+// 			kfree(mem);
+// 			return -ENOMEM;
+// 		}
+// 
+// 		set_memory_decrypted((unsigned long)phys_to_virt(rmem->base),
+// 				     rmem->size >> PAGE_SHIFT);
+// 		swiotlb_init_io_tlb_pool(pool, rmem->base, page_to_phys(rmem->base) + nslabs << IO_TLB_SHIFT, nslabs,
+// 					 false, nareas);
+// 		mem->force_bounce = true;
+// 		mem->for_alloc = true;
+// #ifdef CONFIG_SWIOTLB_DYNAMIC
+// 		spin_lock_init(&mem->lock);
+// #endif
+// 		add_mem_pool(mem, pool);
+// 
+// 		rmem->priv = mem;
+// 
+// 		swiotlb_create_debugfs_files(mem, rmem->name);
+// 	}
+// 
+// 	dev->dma_io_tlb_mem = mem;
+// 
+// 	return 0;
+// }
+// 
+// static void rmem_swiotlb_device_release(struct reserved_mem *rmem,
+// 					struct device *dev)
+// {
+// 	dev->dma_io_tlb_mem = &io_tlb_default_mem;
+// }
+// 
+// static const struct reserved_mem_ops rmem_swiotlb_ops = {
+// 	.device_init = rmem_swiotlb_device_init,
+// 	.device_release = rmem_swiotlb_device_release,
+// };
+// 
+// static int __init rmem_swiotlb_setup(struct reserved_mem *rmem)
+// {
+// 	unsigned long node = rmem->fdt_node;
+// 
+// 	// if (of_get_flat_dt_prop(node, "reusable", NULL) ||
+// 	//     of_get_flat_dt_prop(node, "linux,cma-default", NULL) ||
+// 	//     of_get_flat_dt_prop(node, "linux,dma-default", NULL) ||
+// 	//     of_get_flat_dt_prop(node, "no-map", NULL))
+// 	// 	return -EINVAL;
+// 
+// 	// rmem->ops = &rmem_swiotlb_ops;
+// 	pr_info("Reserved memory: created restricted DMA pool at %pa, size %ld MiB\n",
+// 		&rmem->base, (unsigned long)rmem->size / SZ_1M);
+// 	return 0;
+// }
+// 
+// RESERVEDMEM_OF_DECLARE(dma, "restricted-dma-pool", rmem_swiotlb_setup);
 #endif /* CONFIG_DMA_RESTRICTED_POOL */
