@@ -408,6 +408,8 @@ static void append_io_tlb_mem(struct tyche_region *r, struct io_tlb_mem *mem)
 	struct io_tlb_pool *pool =
 		memblock_alloc(sizeof(struct io_tlb_pool), PAGE_SIZE);
 
+	pool->capa_index = r->capa_index;
+	pool->ops = r->ops;
 	nslabs = nr_slots(r->end - r->start);
 	nareas = limit_nareas(1, nslabs); // FIXME
 	swiotlb_init_slabs(nslabs, nareas, pool);
@@ -429,6 +431,12 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	unsigned int nareas;
 	size_t alloc_size;
 	void *tlb = NULL;
+#if defined(CONFIG_TYCHE_GUEST)
+	int io_domain_handle;
+	unsigned long long capa1, capa2;
+	unsigned long bytes;
+	struct io_tlb_pool *pool;
+#endif
 
 	if (!addressing_limit && !swiotlb_force_bounce)
 		return;
@@ -461,6 +469,32 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	if (tyche_filter_capabilities(is_shared_active_region, append_io_tlb_mem, &io_tlb_default_mem)) {
 		panic("Cannot find a shared region on the current tyche domain for DMA");
 	}
+
+	/* configure the IOMMU by sending the region to I/O domain (NOTE: will remove later as the mapping should be fixed) */
+	pr_info("create I/O domain");
+	if (tyche_create_domain(1, &io_domain_handle)) {
+		panic("Unable to create an I/O domain");
+	}
+	list_for_each_entry_rcu(pool, &io_tlb_default_mem.pools, node) {
+		bytes = pool->end - pool->start;
+
+		pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x)", pool->capa_index, pool->start, pool->end, pool->ops);
+		// Since the guest swiotlb allocation does not necessarily takes up the
+		// whole shared region tyche has partitioned, the guest needs to
+		// further segment the shared region into DMA region and non-DMA region
+		// into two region capabilities and inform tyche about this
+		if (tyche_segment_region(pool->capa_index, &capa1, &capa2, pool->start, pool->end, pool->ops, pool->start, pool->end, pool->ops)) {
+			panic("Unable to segment the guest DMA region");
+		}
+
+		// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
+		// so that all DMA goes to the shared region of the memory
+		pr_info("send over capa_index=%d to the I/O domain %d", capa2, io_domain_handle);
+		if (tyche_send(capa2, io_domain_handle)) {
+			panic("Unable to inform I/O domain to configure IOMMU");
+		}
+	}
+
 
 #else /* !CONFIG_TYCHE_GUEST */
 	if (!default_nareas)

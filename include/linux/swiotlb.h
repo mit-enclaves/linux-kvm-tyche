@@ -93,6 +93,10 @@ struct io_tlb_pool {
 	bool late_alloc;
 	unsigned int nareas;
 	unsigned int area_nslabs;
+#if defined(CONFIG_TYCHE_GUEST)
+	unsigned long capa_index;
+	uint8_t ops;
+#endif
 	struct io_tlb_area *areas;
 	struct io_tlb_slot *slots;
 #ifdef CONFIG_SWIOTLB_DYNAMIC
