@@ -196,7 +196,6 @@ int tyche_filter_capabilities(bool (*f)(struct tyche_region *),
 			r.confidential, r.ops);
 
 		if (f(&r)) {
-			pr_info("%s: %d", __func__, __LINE__);
 			append(&r, mem);
 			property += 1;
 		}
