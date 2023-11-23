@@ -281,7 +281,11 @@ void __init swiotlb_update_mem_attributes(void)
 static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,
 		unsigned long nslabs, bool late_alloc, unsigned int nareas)
 {
+#if defined(CONFIG_TYCHE_GUEST)
+	void *vaddr = NULL;
+#else
 	void *vaddr = phys_to_virt(start);
+#endif
 	unsigned long bytes = nslabs << IO_TLB_SHIFT, i;
 
 	mem->nslabs = nslabs;
@@ -303,7 +307,9 @@ static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,
 		mem->slots[i].alloc_size = 0;
 	}
 
+#if !defined(CONFIG_TYCHE_GUEST)
 	memset(vaddr, 0, bytes);
+#endif
 	mem->vaddr = vaddr;
 	return;
 }
@@ -315,7 +321,7 @@ static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,
  */
 static void add_mem_pool(struct io_tlb_mem *mem, struct io_tlb_pool *pool)
 {
-#ifdef CONFIG_SWIOTLB_DYNAMIC
+#if defined(CONFIG_SWIOTLB_DYNAMIC) || defined(CONFIG_TYCHE_GUEST)
 	spin_lock(&mem->lock);
 	list_add_rcu(&pool->node, &mem->pools);
 	mem->nslabs += pool->nslabs;
@@ -357,6 +363,60 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 	return tlb;
 }
 
+void swiotlb_init_slabs(unsigned long nslabs, unsigned int nareas, struct io_tlb_pool *pool)
+{
+	size_t alloc_size;
+
+	alloc_size = PAGE_ALIGN(array_size(sizeof(*pool->slots), nslabs));
+	pool->slots = memblock_alloc(alloc_size, PAGE_SIZE);
+	if (!pool->slots) {
+		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
+			__func__, alloc_size, PAGE_SIZE);
+		return;
+	}
+
+	pool->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
+		nareas), SMP_CACHE_BYTES);
+	if (!pool->areas) {
+		pr_warn("%s: Failed to allocate pool->areas.\n", __func__);
+		return;
+	}
+}
+
+#if defined(CONFIG_TYCHE_GUEST)
+static bool is_shared_active_region(struct tyche_region *t)
+{
+	// Check if the region is active
+	if (!t->active) {
+		pr_info("region is not active");
+		return false;
+	}
+
+	// Check if the region is shared
+	if (t->confidential) {
+		pr_info("region is not shared");
+		return false;
+	}
+
+	return true;
+}
+
+static void append_io_tlb_mem(struct tyche_region *r, struct io_tlb_mem *mem)
+{
+	unsigned long nslabs;
+	unsigned int nareas;
+	struct io_tlb_pool *pool =
+		memblock_alloc(sizeof(struct io_tlb_pool), PAGE_SIZE);
+
+	nslabs = nr_slots(r->end - r->start);
+	nareas = limit_nareas(1, nslabs); // FIXME
+	swiotlb_init_slabs(nslabs, nareas, pool);
+
+	swiotlb_init_io_tlb_pool(pool, r->start, nslabs, true, nareas);
+	add_mem_pool(mem, pool);
+}
+
+#endif
 /*
  * Statically reserve bounce buffer space and initialize bounce buffer data
  * structures for the software IO TLB used to implement the DMA API.
@@ -369,11 +429,6 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	unsigned int nareas;
 	size_t alloc_size;
 	void *tlb = NULL;
-	unsigned long capa_index = 0;
-	unsigned long long capa1 = 0, capa2 =0;
-	int io_domain_handle;
-	unsigned long start = 0, len = 0, prot = 0;
-	size_t bytes = 0;
 
 	if (!addressing_limit && !swiotlb_force_bounce)
 		return;
@@ -392,70 +447,28 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		io_tlb_default_mem.phys_limit = ARCH_LOW_ADDRESS_LIMIT;
 #endif
 
+#if defined(CONFIG_TYCHE_GUEST)
+	BUG_ON(remap != NULL);
+	BUG_ON(io_tlb_default_mem.force_bounce == false);
+	io_tlb_default_mem.can_grow = false;
+
+	/**
+	 * Loop through the tyche shared memory regions, and add these regions onto the io_tlb_mem linked list
+	 * without ioremap
+	 */
+	pr_info("tyche guest: collect all shared regions");
+
+	if (tyche_filter_capabilities(is_shared_active_region, append_io_tlb_mem, &io_tlb_default_mem)) {
+		panic("Cannot find a shared region on the current tyche domain for DMA");
+	}
+
+#else /* !CONFIG_TYCHE_GUEST */
 	if (!default_nareas)
 		swiotlb_adjust_nareas(num_possible_cpus());
 
 	nslabs = default_nslabs;
 	nareas = limit_nareas(default_nareas, nslabs);
 
-#ifdef CONFIG_TYCHE_GUEST
-	bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
-
-	// TODO(yuchen): move this part to the capa engine later as we only
-	// need one global I/O domain for now
-	pr_info("create I/O domain");
-	if (tyche_create_domain(1, &io_domain_handle)) {
-		panic("Unable to create an I/O domain");
-	}
-
-	// FIXME(yuchen): refactor this code...
-	io_domain = io_domain_handle;
-
-	// find all shared regions
-	pr_info("tyche enum: find a shared region");
-	if (tyche_collect_shared_regions()) {
-		panic("Cannot find a shared region on the current tyche domain");
-	}
-
-	for (size_t i = 0; i < tyche_shared_region_len; ++i) {
-		struct tyche_region *r = &(tyche_shared_regions[i]);
-		pr_info("tyche_region: capa_index=%u, start=0x%lx, end=0x%lx, alias=0x%lx, active=%d, confidential=%d, ops=%u", r->capa_index, r->start, r->end, r->alias, r->active, r->confidential, r->ops);
-	}
-
-	// FIXME(yuchen): refactor this code...
-	start = tyche_shared_regions[0].start;
-	len = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
-	prot = tyche_shared_regions[0].ops;
-	shared_region_capa = tyche_shared_regions[0].capa_index;
-	shared_region = tyche_shared_regions[0].start;
-	shared_region_sz = tyche_shared_regions[0].end - tyche_shared_regions[0].start + 1;
-	shared_region_prot = tyche_shared_regions[0].ops;
-
-	pr_info("swiotlb allocation with tyche guest");
-	if ((tlb = tyche_memblock_alloc(shared_region, bytes)) == NULL) {
-		panic("Cannot alloc the swiotlb on the shared memory region");
-	}
-
-	// Since the guest swiotlb allocation does not necessarily takes up the
-	// whole shared region tyche has partitioned, the guest needs to
-	// further segment the shared region into DMA region and non-DMA region
-	// into two region capabilities and inform tyche about this
-	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x)", shared_region_capa, start, start + len - 1, prot);
-	if (tyche_segment_region(shared_region_capa, &capa1, &capa2, start, start + len - 1, prot, __pa(tlb), __pa(tlb) + bytes, prot)) {
-		panic("Unable to segment the guest DMA region");
-	}
-
-	// FIXME(yuchen): refactor this code...
-	shared_region_capa = capa1;
-	swiotlb_region_capa = capa2;
-
-	// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
-	// so that all DMA goes to the shared region of the memory
-	pr_info("send over capa_index=%d to the I/O domain %d", capa2, io_domain_handle);
-	if (tyche_send(capa2, io_domain_handle)) {
-		panic("Unable to inform I/O domain to configure IOMMU");
-	}
-#else
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
 			return;
@@ -468,28 +481,14 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 			default_nslabs, nslabs);
 		default_nslabs = nslabs;
 	}
-#endif
 
-	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
-	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
-	if (!mem->slots) {
-		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
-			__func__, alloc_size, PAGE_SIZE);
-		return;
-	}
-
-	mem->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
-		nareas), SMP_CACHE_BYTES);
-	if (!mem->areas) {
-		pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
-		return;
-	}
-
+	swiotlb_init_slabs(nslabs, nareas, mem);
 	swiotlb_init_io_tlb_pool(mem, __pa(tlb), nslabs, false, nareas);
 	add_mem_pool(&io_tlb_default_mem, mem);
 
 	if (flags & SWIOTLB_VERBOSE)
 		swiotlb_print_info();
+#endif
 }
 
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
@@ -497,6 +496,37 @@ void __init swiotlb_init(bool addressing_limit, unsigned int flags)
 	swiotlb_init_remap(addressing_limit, flags, NULL);
 }
 
+#if defined(CONFIG_TYCHE_GUEST)
+/**
+ * TODO(yuchen):
+ * post mm initialization, ioremap on each of the tyche shared region
+ *
+ * Add a new io_tlb_mem for the coherent memory allocation on all devices
+ *
+ */
+void __init swiotlb_allocate_pools(struct io_tlb_mem *mem)
+{
+	struct io_tlb_pool *pool;
+	unsigned long bytes = 0;
+
+	list_for_each_entry_rcu(pool, &mem->pools, node) {
+		bytes = pool->end - pool->start;
+		pool->vaddr = ioremap(pool->start, bytes);
+		BUG_ON(pool->vaddr == NULL);
+		pr_info("io_tlb_pool: start=%pa, end=%pa, vaddr=%p, nslabs=%lu,late_alloc=%d,nareas=%u,area_nslabs=%u",
+			&(pool->start), &(pool->end), pool->vaddr,
+			pool->nslabs, pool->late_alloc, pool->nareas,
+			pool->area_nslabs);
+		// takes too long and stuck too long at boot time if the region is large...
+		// memset(pool->vaddr, 0, bytes);
+	}
+}
+
+void __init swiotlb_post_init(void)
+{
+	swiotlb_allocate_pools(&io_tlb_default_mem);
+}
+#endif
 /*
  * Systems with larger DMA zones (those that don't support ISA) can
  * initialize the swiotlb later using the slab allocator if needed.
@@ -1460,6 +1490,14 @@ static bool swiotlb_del_transient(struct device *dev, phys_addr_t tlb_addr)
 	return true;
 }
 
+#elif CONFIG_TYCHE_GUEST
+
+static inline bool swiotlb_del_transient(struct device *dev,
+					 phys_addr_t tlb_addr)
+{
+	return false;
+}
+
 #else  /* !CONFIG_SWIOTLB_DYNAMIC */
 
 static inline bool swiotlb_del_transient(struct device *dev,
@@ -1790,3 +1828,9 @@ static int __init rmem_swiotlb_setup(struct reserved_mem *rmem)
 
 RESERVEDMEM_OF_DECLARE(dma, "restricted-dma-pool", rmem_swiotlb_setup);
 #endif /* CONFIG_DMA_RESTRICTED_POOL */
+
+// On Tyche (x86), we want to use the reserved memory without the device tree.
+// More specifically, we want to handout a region of the reserved swiotlb
+// region to the device upon the swiotlb coherent memory allocation.
+#ifdef CONFIG_TYCHE_GUEST
+#endif

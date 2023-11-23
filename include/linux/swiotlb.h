@@ -127,7 +127,7 @@ struct io_tlb_mem {
 	struct dentry *debugfs;
 	bool force_bounce;
 	bool for_alloc;
-#ifdef CONFIG_SWIOTLB_DYNAMIC
+#if defined(CONFIG_SWIOTLB_DYNAMIC) || defined(CONFIG_TYCHE_GUEST)
 	bool can_grow;
 	u64 phys_limit;
 	spinlock_t lock;
@@ -282,5 +282,9 @@ static inline bool is_swiotlb_for_alloc(struct device *dev)
 	return false;
 }
 #endif /* CONFIG_DMA_RESTRICTED_POOL */
+
+#if defined(CONFIG_TYCHE_GUEST)
+void __init swiotlb_post_init(void);
+#endif
 
 #endif /* __LINUX_SWIOTLB_H */

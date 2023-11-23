@@ -25,6 +25,7 @@
 #include <linux/pti.h>
 #include <linux/pgtable.h>
 #include <linux/swap.h>
+#include <linux/swiotlb.h>
 #include <linux/cma.h>
 #include "internal.h"
 #include "slab.h"
@@ -2797,4 +2798,7 @@ void __init mm_core_init(void)
 	pti_init();
 	kmsan_init_runtime();
 	mm_cache_init();
+#if defined(CONFIG_TYCHE_GUEST)
+	swiotlb_post_init();
+#endif
 }

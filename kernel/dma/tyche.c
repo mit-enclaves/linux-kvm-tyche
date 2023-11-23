@@ -177,11 +177,14 @@ static int tyche_enum_region(size_t *capa_index, struct tyche_region *r)
 	return 0;
 }
 
-// check linux's list api
-static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t))
+int tyche_filter_capabilities(bool (*f)(struct tyche_region *),
+			      void (*append)(struct tyche_region *,
+					     struct io_tlb_mem *),
+			      struct io_tlb_mem *mem)
 {
 	struct tyche_region r;
 	size_t capa_index = 0;
+	size_t property = 0;
 
 	do {
 		if (tyche_enum_region(&capa_index, &r)) {
@@ -193,38 +196,13 @@ static int tyche_filter_capabilities(bool (*f)(struct tyche_region *t))
 			r.confidential, r.ops);
 
 		if (f(&r)) {
-			BUG_ON(tyche_shared_region_len >= TYCHE_SHARED_REGIONS);
-			memcpy(&(tyche_shared_regions[tyche_shared_region_len]),
-			       &r, sizeof(struct tyche_region));
-			tyche_shared_region_len += 1;
+			pr_info("%s: %d", __func__, __LINE__);
+			append(&r, mem);
+			property += 1;
 		}
 	} while (capa_index != 0);
 
-	return 0;
-}
-
-static bool is_shared_active_region(struct tyche_region *t)
-{
-	// Check if the region is active
-	if (!t->active) {
-		pr_info("region is not active");
-		return false;
-	}
-
-	// Check if the region is shared
-	if (t->confidential) {
-		pr_info("region is not shared");
-		return false;
-	}
-
-	return true;
-}
-
-int tyche_collect_shared_regions(void)
-{
-	tyche_filter_capabilities(is_shared_active_region);
-
-	return 0;
+	return property == 0;
 }
 
 void __init *tyche_memblock_alloc(unsigned long start, unsigned long size)

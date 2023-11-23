@@ -2,6 +2,7 @@
 #define _LINUX_DMA_TYCHE_H
 
 #include <linux/ctype.h>
+#include <linux/swiotlb.h>
 
 extern unsigned long shared_region_capa;
 extern unsigned long swiotlb_region_capa;
@@ -39,6 +40,8 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 			 unsigned long start2, unsigned long end2,
 			 unsigned long prot2);
 void *tyche_memblock_alloc(unsigned long start, unsigned long size);
-int tyche_collect_shared_regions(void);
-
+int tyche_filter_capabilities(bool (*f)(struct tyche_region *),
+			      void (*append)(struct tyche_region *,
+					     struct io_tlb_mem *),
+			      struct io_tlb_mem *mem);
 #endif
