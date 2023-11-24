@@ -179,8 +179,8 @@ static int tyche_enum_region(size_t *capa_index, struct tyche_region *r)
 
 int tyche_filter_capabilities(bool (*f)(struct tyche_region *),
 			      void (*append)(struct tyche_region *,
-					     struct io_tlb_mem *),
-			      struct io_tlb_mem *mem)
+					     struct dma_mem *),
+			      struct dma_mem *mem)
 {
 	struct tyche_region r;
 	size_t capa_index = 0;

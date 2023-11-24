@@ -99,7 +99,7 @@ struct io_tlb_pool {
 #endif
 	struct io_tlb_area *areas;
 	struct io_tlb_slot *slots;
-#ifdef CONFIG_SWIOTLB_DYNAMIC
+#if defined(CONFIG_SWIOTLB_DYNAMIC)
 	struct list_head node;
 	struct rcu_head rcu;
 	bool transient;
@@ -131,7 +131,7 @@ struct io_tlb_mem {
 	struct dentry *debugfs;
 	bool force_bounce;
 	bool for_alloc;
-#if defined(CONFIG_SWIOTLB_DYNAMIC) || defined(CONFIG_TYCHE_GUEST)
+#if defined(CONFIG_SWIOTLB_DYNAMIC)
 	bool can_grow;
 	u64 phys_limit;
 	spinlock_t lock;
@@ -142,6 +142,20 @@ struct io_tlb_mem {
 	atomic_long_t total_used;
 	atomic_long_t used_hiwater;
 #endif
+};
+
+struct dma_mem_pool {
+	phys_addr_t start;
+	phys_addr_t end;
+	unsigned long capa_index;
+	uint8_t ops;
+	struct list_head node;
+	struct rcu_head rcu;
+};
+
+struct dma_mem {
+	spinlock_t lock;
+	struct list_head pools;
 };
 
 #ifdef CONFIG_SWIOTLB_DYNAMIC
@@ -263,7 +277,7 @@ static inline phys_addr_t default_swiotlb_limit(void)
 
 extern void swiotlb_print_info(void);
 
-#ifdef CONFIG_DMA_RESTRICTED_POOL
+#if defined(CONFIG_DMA_RESTRICTED_POOL) || defined(CONFIG_TYCHE_GUEST)
 struct page *swiotlb_alloc(struct device *dev, size_t size);
 bool swiotlb_free(struct device *dev, struct page *page, size_t size);
 

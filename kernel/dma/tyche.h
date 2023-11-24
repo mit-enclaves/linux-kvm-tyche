@@ -42,6 +42,6 @@ int tyche_segment_region(unsigned long long capa, unsigned long long *left,
 void *tyche_memblock_alloc(unsigned long start, unsigned long size);
 int tyche_filter_capabilities(bool (*f)(struct tyche_region *),
 			      void (*append)(struct tyche_region *,
-					     struct io_tlb_mem *),
-			      struct io_tlb_mem *mem);
+					     struct dma_mem *),
+			      struct dma_mem *mem);
 #endif
