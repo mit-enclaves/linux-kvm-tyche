@@ -1534,13 +1534,16 @@ static void * __init memblock_alloc_internal(
 	if (max_addr > memblock.current_limit)
 		max_addr = memblock.current_limit;
 
+	// pr_info("%s: memblock_alloc_range_nid on min_addr=%0xlx, max_addr=0x%lx, size=%lu", min_addr, max_addr, size);
 	alloc = memblock_alloc_range_nid(size, align, min_addr, max_addr, nid,
 					exact_nid);
 
 	/* retry allocation without lower limit */
-	if (!alloc && min_addr)
+	if (!alloc && min_addr) {
+		pr_warn("%s: retry allocation without lower limit", __func__);
 		alloc = memblock_alloc_range_nid(size, align, 0, max_addr, nid,
 						exact_nid);
+	}
 
 	if (!alloc)
 		return NULL;

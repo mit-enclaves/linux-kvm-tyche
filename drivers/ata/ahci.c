@@ -1929,14 +1929,18 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return rc;
 
 	ahci_pci_init_controller(host);
+	dev_info(host->dev, "ahci_pci_print_info\n");
 	ahci_pci_print_info(host);
 
+	dev_info(host->dev, "pci_set_master\n");
 	pci_set_master(pdev);
 
+	dev_info(host->dev, "ahci_host_activate\n");
 	rc = ahci_host_activate(host, &ahci_sht);
 	if (rc)
 		return rc;
 
+	dev_info(host->dev, "pm_runtime_put_noidle\n");
 	pm_runtime_put_noidle(&pdev->dev);
 	return 0;
 }

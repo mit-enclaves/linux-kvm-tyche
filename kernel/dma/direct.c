@@ -105,13 +105,17 @@ static void __dma_direct_free_pages(struct device *dev, struct page *page,
 
 static struct page *dma_direct_alloc_swiotlb(struct device *dev, size_t size)
 {
+	pr_info("%s: %d", __func__, __LINE__);
 	struct page *page = swiotlb_alloc(dev, size);
+	pr_info("%s: %d", __func__, __LINE__);
 
 	if (page && !dma_coherent_ok(dev, page_to_phys(page), size)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		swiotlb_free(dev, page, size);
 		return NULL;
 	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	return page;
 }
 
@@ -124,12 +128,16 @@ static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
 
 	WARN_ON_ONCE(!PAGE_ALIGNED(size));
 
-	if (is_swiotlb_for_alloc(dev))
+	if (is_swiotlb_for_alloc(dev)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return dma_direct_alloc_swiotlb(dev, size);
+	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	gfp |= dma_direct_optimal_gfp_mask(dev, &phys_limit);
 	page = dma_alloc_contiguous(dev, size, gfp);
 	if (page) {
+		pr_info("%s: %d", __func__, __LINE__);
 		if (!dma_coherent_ok(dev, page_to_phys(page), size) ||
 		    (!allow_highmem && PageHighMem(page))) {
 			dma_free_contiguous(dev, page, size);
@@ -137,8 +145,10 @@ static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
 		}
 	}
 again:
-	if (!page)
+	if (!page) {
+		pr_info("%s: %d", __func__, __LINE__);
 		page = alloc_pages_node(node, gfp, get_order(size));
+	}
 	if (page && !dma_coherent_ok(dev, page_to_phys(page), size)) {
 		dma_free_contiguous(dev, page, size);
 		page = NULL;
@@ -211,15 +221,19 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	struct page *page;
 	void *ret;
 
+	pr_info("%s: %d", __func__, __LINE__);
 	size = PAGE_ALIGN(size);
 	if (attrs & DMA_ATTR_NO_WARN)
 		gfp |= __GFP_NOWARN;
 
 	if ((attrs & DMA_ATTR_NO_KERNEL_MAPPING) &&
-	    !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev))
+	    !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return dma_direct_alloc_no_mapping(dev, size, dma_handle, gfp);
+	}
 
 	if (!dev_is_dma_coherent(dev)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		/*
 		 * Fallback to the arch handler if it exists.  This should
 		 * eventually go away.
@@ -227,17 +241,21 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 		if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED) &&
 		    !IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
 		    !IS_ENABLED(CONFIG_DMA_GLOBAL_POOL) &&
-		    !is_swiotlb_for_alloc(dev))
+		    !is_swiotlb_for_alloc(dev)) {
+			pr_info("%s: %d", __func__, __LINE__);
 			return arch_dma_alloc(dev, size, dma_handle, gfp,
 					      attrs);
+		}
 
 		/*
 		 * If there is a global pool, always allocate from it for
 		 * non-coherent devices.
 		 */
-		if (IS_ENABLED(CONFIG_DMA_GLOBAL_POOL))
+		if (IS_ENABLED(CONFIG_DMA_GLOBAL_POOL)) {
+			pr_info("%s: %d", __func__, __LINE__);
 			return dma_alloc_from_global_coherent(dev, size,
 					dma_handle);
+		}
 
 		/*
 		 * Otherwise remap if the architecture is asking for it.  But
@@ -246,12 +264,17 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 		 */
 		remap = IS_ENABLED(CONFIG_DMA_DIRECT_REMAP);
 		if (remap) {
-			if (dma_direct_use_pool(dev, gfp))
+			pr_info("%s: %d", __func__, __LINE__);
+			if (dma_direct_use_pool(dev, gfp)) {
+				pr_info("%s: %d", __func__, __LINE__);
 				return dma_direct_alloc_from_pool(dev, size,
 						dma_handle, gfp);
+			}
 		} else {
-			if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED))
+			if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED)) {
+				pr_info("%s: %d", __func__, __LINE__);
 				return NULL;
+			}
 			set_uncached = true;
 		}
 	}
@@ -260,13 +283,18 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	 * Decrypting memory may block, so allocate the memory from the atomic
 	 * pools if we can't block.
 	 */
-	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp))
+	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
+	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	/* we always manually zero the memory once we are done */
 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
-	if (!page)
+	if (!page) {
+		pr_info("%s: %d", __func__, __LINE__);
 		return NULL;
+	}
 
 	/*
 	 * dma_alloc_contiguous can return highmem pages depending on a
@@ -274,11 +302,13 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	 * remapped to return a kernel virtual address.
 	 */
 	if (PageHighMem(page)) {
+		pr_info("%s: %d", __func__, __LINE__);
 		remap = true;
 		set_uncached = false;
 	}
 
 	if (remap) {
+		pr_info("%s: %d", __func__, __LINE__);
 		pgprot_t prot = dma_pgprot(dev, PAGE_KERNEL, attrs);
 
 		if (force_dma_unencrypted(dev))
@@ -293,27 +323,37 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 		if (!ret)
 			goto out_free_pages;
 	} else {
+		pr_info("%s: %d", __func__, __LINE__);
 		ret = page_address(page);
 		if (dma_set_decrypted(dev, ret, size))
 			goto out_free_pages;
 	}
+	pr_info("%s: %d", __func__, __LINE__);
+	pr_info("ret=%p, size=%lu", ret, size);
+	phys_addr_t pa_ret = virt_to_phys(ret);
+	pr_info("pa_ret=%pa", &pa_ret);
 
 	memset(ret, 0, size);
 
+	pr_info("%s: %d", __func__, __LINE__);
 	if (set_uncached) {
+		pr_info("%s: %d", __func__, __LINE__);
 		arch_dma_prep_coherent(page, size);
 		ret = arch_dma_set_uncached(ret, size);
 		if (IS_ERR(ret))
 			goto out_encrypt_pages;
 	}
 
+	pr_info("%s: %d", __func__, __LINE__);
 	*dma_handle = phys_to_dma_direct(dev, page_to_phys(page));
 	return ret;
 
 out_encrypt_pages:
+	pr_info("%s: %d", __func__, __LINE__);
 	if (dma_set_encrypted(dev, page_address(page), size))
 		return NULL;
 out_free_pages:
+	pr_info("%s: %d", __func__, __LINE__);
 	__dma_direct_free_pages(dev, page, size);
 	return NULL;
 }

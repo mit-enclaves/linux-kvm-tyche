@@ -186,6 +186,9 @@ int dma_alloc_from_dev_coherent(struct device *dev, ssize_t size,
 		dma_addr_t *dma_handle, void **ret)
 {
 	struct dma_coherent_mem *mem = dev_get_coherent_memory(dev);
+	phys_addr_t paddr = virt_to_phys(mem->virt_base);
+
+	pr_info("dma_coherent_mem: paddr=%pa, size=%lu", &paddr, mem->size);
 
 	if (!mem)
 		return 0;

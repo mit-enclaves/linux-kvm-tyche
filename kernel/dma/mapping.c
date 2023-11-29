@@ -513,6 +513,14 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 	if (WARN_ON_ONCE(flag & __GFP_COMP))
 		return NULL;
 
+// #if defined(CONFIG_TYCHE_GUEST)
+// 	if ((is_swiotlb_force_bounce(dev))) {
+// 		cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
+// 		debug_dma_alloc_coherent(dev, size, *dma_handle, cpu_addr, attrs);
+// 		return cpu_addr;
+// 	}
+// #endif
+
 	if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr)) {
 		goto success;
 	}
@@ -520,14 +528,18 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 	/* let the implementation decide on the zone to allocate from: */
 	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
 
-	if (dma_alloc_direct(dev, ops))
+	if (dma_alloc_direct(dev, ops)) {
+		pr_info("dma_alloc_direct");
 		cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
-	else if (ops->alloc)
+	} else if (ops->alloc) {
+		pr_info("ops->alloc");
 		cpu_addr = ops->alloc(dev, size, dma_handle, flag, attrs);
-	else
+	} else {
+		pr_info("return NULL");
 		return NULL;
-
+	}
 success:
+#if 0
 	// segment the region
 	pr_info("segment the shared region (capa: %d), [%.4x, %.4x] (prot=%.4x) -> [%.4x, %.4x] (prot=%.4x)", shared_region_capa, shared_region, shared_region + shared_region_sz - 1, shared_region_prot, dma_handle, dma_handle + size, shared_region_prot);
 	if (tyche_segment_region(shared_region_capa, &capa1, &capa2, shared_region, shared_region + shared_region_sz - 1, shared_region_prot, *dma_handle, *dma_handle + size, shared_region_prot)) {
@@ -541,7 +553,7 @@ success:
 	if (tyche_send(capa2, io_domain)) {
 		panic("Unable to inform I/O domain to configure IOMMU");
 	}
-
+#endif
 	debug_dma_alloc_coherent(dev, size, *dma_handle, cpu_addr, attrs);
 	return cpu_addr;
 }

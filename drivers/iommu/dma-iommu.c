@@ -1038,6 +1038,8 @@ static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 	struct iova_domain *iovad = &cookie->iovad;
 	dma_addr_t iova, dma_mask = dma_get_mask(dev);
 
+	pr_info("%s: dev=%s, size=%ld\n", __func__, dev->init_name, size);
+
 	/*
 	 * If both the physical buffer start address and size are
 	 * page aligned, we don't need to use a bounce page.
@@ -1071,11 +1073,13 @@ static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 
 		memset(padding_start, 0, padding_size);
 	}
+	pr_info("%s: => phys=0x%lx\n", __func__, phys);
 
 	if (!coherent && !(attrs & DMA_ATTR_SKIP_CPU_SYNC))
 		arch_sync_dma_for_device(phys, size, dir);
 
 	iova = __iommu_dma_map(dev, phys, size, prot, dma_mask);
+	pr_info("%s: => iova=0x%lx\n", __func__, iova);
 	if (iova == DMA_MAPPING_ERROR && is_swiotlb_buffer(dev, phys))
 		swiotlb_tbl_unmap_single(dev, phys, size, dir, attrs);
 	return iova;

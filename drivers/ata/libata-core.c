@@ -5757,11 +5757,13 @@ int ata_host_start(struct ata_host *host)
 	if (host->flags & ATA_HOST_STARTED)
 		return 0;
 
+	dev_info(host->dev, "ata_finalize_port_ops\n");
 	ata_finalize_port_ops(host->ops);
 
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
 
+		dev_info(host->dev, "ata_finalize_port_ops\n");
 		ata_finalize_port_ops(ap->ops);
 
 		if (!host->ops && !ata_port_is_dummy(ap))
@@ -5775,6 +5777,7 @@ int ata_host_start(struct ata_host *host)
 		have_stop = 1;
 
 	if (have_stop) {
+		dev_info(host->dev, "devres_alloc\n");
 		start_dr = devres_alloc(ata_host_stop, 0, GFP_KERNEL);
 		if (!start_dr)
 			return -ENOMEM;
@@ -5784,6 +5787,7 @@ int ata_host_start(struct ata_host *host)
 		struct ata_port *ap = host->ports[i];
 
 		if (ap->ops->port_start) {
+			dev_info(host->dev, "ap->ops->port_start\n");
 			rc = ap->ops->port_start(ap);
 			if (rc) {
 				if (rc != -ENODEV)
@@ -5793,6 +5797,7 @@ int ata_host_start(struct ata_host *host)
 				goto err_out;
 			}
 		}
+		dev_info(host->dev, "ata_eh_freeze_port\n");
 		ata_eh_freeze_port(ap);
 	}
 
@@ -6004,6 +6009,7 @@ int ata_host_activate(struct ata_host *host, int irq,
 	int i, rc;
 	char *irq_desc;
 
+	dev_info(host->dev, "ata_host_start\n");
 	rc = ata_host_start(host);
 	if (rc)
 		return rc;
@@ -6014,12 +6020,14 @@ int ata_host_activate(struct ata_host *host, int irq,
 		return ata_host_register(host, sht);
 	}
 
+	dev_info(host->dev, "devm_kasprintf\n");
 	irq_desc = devm_kasprintf(host->dev, GFP_KERNEL, "%s[%s]",
 				  dev_driver_string(host->dev),
 				  dev_name(host->dev));
 	if (!irq_desc)
 		return -ENOMEM;
 
+	dev_info(host->dev, "devm_request_irq\n");
 	rc = devm_request_irq(host->dev, irq, irq_handler, irq_flags,
 			      irq_desc, host);
 	if (rc)
@@ -6028,6 +6036,7 @@ int ata_host_activate(struct ata_host *host, int irq,
 	for (i = 0; i < host->n_ports; i++)
 		ata_port_desc(host->ports[i], "irq %d", irq);
 
+	dev_info(host->dev, "ata_host_register\n");
 	rc = ata_host_register(host, sht);
 	/* if failed, just free the IRQ and leave ports alone */
 	if (rc)

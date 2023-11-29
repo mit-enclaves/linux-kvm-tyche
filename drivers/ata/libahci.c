@@ -30,6 +30,7 @@
 #include <scsi/scsi_cmnd.h>
 #include <linux/libata.h>
 #include <linux/pci.h>
+#include <linux/dma-direct.h>
 #include "ahci.h"
 #include "libata.h"
 
@@ -741,28 +742,40 @@ EXPORT_SYMBOL_GPL(ahci_stop_engine);
 
 void ahci_start_fis_rx(struct ata_port *ap)
 {
+	struct device *dev = ap->host->dev;
 	void __iomem *port_mmio = ahci_port_base(ap);
 	struct ahci_host_priv *hpriv = ap->host->private_data;
 	struct ahci_port_priv *pp = ap->private_data;
 	u32 tmp;
 
+	dev_info(dev, "port_mmio: %p\n", port_mmio);
+	dev_info(dev, "set FIS registers\n");
 	/* set FIS registers */
-	if (hpriv->cap & HOST_CAP_64)
+	if (hpriv->cap & HOST_CAP_64) {
+		dev_info(dev, "set FIS registers: writel(%llx, port_mmio + PORT_LST_ADDR_HI=0x%p)\n", (pp->cmd_slot_dma >> 16) >> 16, port_mmio + PORT_LST_ADDR_HI);
 		writel((pp->cmd_slot_dma >> 16) >> 16,
 		       port_mmio + PORT_LST_ADDR_HI);
+	}
+	dev_info(dev, "writel(%llx, port_mmio + PORT_LST_ADDR=0x%p);\n", pp->cmd_slot_dma & 0xffffffff, port_mmio + PORT_LST_ADDR);
 	writel(pp->cmd_slot_dma & 0xffffffff, port_mmio + PORT_LST_ADDR);
 
-	if (hpriv->cap & HOST_CAP_64)
+	if (hpriv->cap & HOST_CAP_64) {
+		dev_info(dev, "writel(%llx, port_mmio + PORT_FIS_ADDR_HI=0x%p);\n", (pp->rx_fis_dma >> 16) >> 16, port_mmio + PORT_FIS_ADDR_HI);
 		writel((pp->rx_fis_dma >> 16) >> 16,
 		       port_mmio + PORT_FIS_ADDR_HI);
+	}
+	dev_info(dev, "writel(%llx, port_mmio + PORT_FIS_ADDR=0x%p);\n", pp->rx_fis_dma & 0xffffffff, port_mmio + PORT_FIS_ADDR);
 	writel(pp->rx_fis_dma & 0xffffffff, port_mmio + PORT_FIS_ADDR);
 
 	/* enable FIS reception */
+	dev_info(dev, "readl(port_mmio + PORT_CMD=0x%p);\n", port_mmio + PORT_CMD);
 	tmp = readl(port_mmio + PORT_CMD);
 	tmp |= PORT_CMD_FIS_RX;
+	dev_info(dev, "writel(%x, port_mmio + PORT_CMD=0x%p);\n", tmp, port_mmio + PORT_CMD);
 	writel(tmp, port_mmio + PORT_CMD);
 
 	/* flush */
+	dev_info(dev, "readl(port_mmio + PORT_CMD=0x%p);\n", port_mmio + PORT_CMD);
 	readl(port_mmio + PORT_CMD);
 }
 EXPORT_SYMBOL_GPL(ahci_start_fis_rx);
@@ -901,6 +914,7 @@ static void ahci_power_down(struct ata_port *ap)
 
 static void ahci_start_port(struct ata_port *ap)
 {
+	struct device *dev = ap->host->dev;
 	struct ahci_host_priv *hpriv = ap->host->private_data;
 	struct ahci_port_priv *pp = ap->private_data;
 	struct ata_link *link;
@@ -908,14 +922,17 @@ static void ahci_start_port(struct ata_port *ap)
 	ssize_t rc;
 	int i;
 
+	dev_info(dev, "ahci_start_fis_rx\n");
 	/* enable FIS reception */
 	ahci_start_fis_rx(ap);
 
 	/* enable DMA */
+	dev_info(dev, "enable DMA\n");
 	if (!(hpriv->flags & AHCI_HFLAG_DELAY_ENGINE))
 		hpriv->start_engine(ap);
 
 	/* turn on LEDs */
+	dev_info(dev, "turn on LEDs\n");
 	if (ap->flags & ATA_FLAG_EM) {
 		ata_for_each_link(link, ap, EDGE) {
 			emp = &pp->em_priv[link->pmp];
@@ -941,6 +958,7 @@ static void ahci_start_port(struct ata_port *ap)
 		}
 	}
 
+	dev_info(dev, "ahci_init_sw_activity\n");
 	if (ap->flags & ATA_FLAG_SW_ACTIVITY)
 		ata_for_each_link(link, ap, EDGE)
 			ahci_init_sw_activity(link);
@@ -2440,15 +2458,23 @@ static void ahci_pmp_detach(struct ata_port *ap)
 
 int ahci_port_resume(struct ata_port *ap)
 {
+	struct device *dev = ap->host->dev;
+
+	dev_info(dev, "ahci_rpm_get_port\n");
 	ahci_rpm_get_port(ap);
 
+	dev_info(dev, "ahci_power_up\n");
 	ahci_power_up(ap);
+	dev_info(dev, "ahci_start_port\n");
 	ahci_start_port(ap);
 
-	if (sata_pmp_attached(ap))
+	if (sata_pmp_attached(ap)) {
+		dev_info(dev, "ahci_pmp_attach\n");
 		ahci_pmp_attach(ap);
-	else
+	} else {
+		dev_info(dev, "ahci_pmp_detach\n");
 		ahci_pmp_detach(ap);
+	}
 
 	return 0;
 }
@@ -2497,12 +2523,16 @@ static int ahci_port_start(struct ata_port *ap)
 	dma_addr_t mem_dma;
 	size_t dma_sz, rx_fis_sz;
 
+	dev_info(dev, "devm_kzalloc: size=%lu\n", sizeof(*pp));
 	pp = devm_kzalloc(dev, sizeof(*pp), GFP_KERNEL);
+	dev_info(dev, "devm_kzalloc succeed: pp=%p, size=%lu\n", pp, sizeof(*pp));
 	if (!pp)
 		return -ENOMEM;
 
 	if (ap->host->n_ports > 1) {
+		dev_info(dev, "devm_kzalloc: size=%u\n", 8);
 		pp->irq_desc = devm_kzalloc(dev, 8, GFP_KERNEL);
+		dev_info(dev, "devm_kzalloc succeed: ieq_desc=%p, size=%lu\n", pp, sizeof(*pp));
 		if (!pp->irq_desc) {
 			devm_kfree(dev, pp);
 			return -ENOMEM;
@@ -2512,9 +2542,11 @@ static int ahci_port_start(struct ata_port *ap)
 	}
 
 	/* check FBS capability */
+	dev_info(dev, "check FBS capa\n");
 	if ((hpriv->cap & HOST_CAP_FBS) && sata_pmp_supported(ap)) {
 		void __iomem *port_mmio = ahci_port_base(ap);
 		u32 cmd = readl(port_mmio + PORT_CMD);
+		dev_info(dev, "cmd=%u\n", cmd);
 		if (cmd & PORT_CMD_FBSCP)
 			pp->fbs_supported = true;
 		else if (hpriv->flags & AHCI_HFLAG_YES_FBS) {
@@ -2534,9 +2566,15 @@ static int ahci_port_start(struct ata_port *ap)
 		rx_fis_sz = AHCI_RX_FIS_SZ;
 	}
 
+	dev_info(dev, "dmam_alloc_coherent: size=%lu\n", dma_sz);
 	mem = dmam_alloc_coherent(dev, dma_sz, &mem_dma, GFP_KERNEL);
-	if (!mem)
+	// phys_addr_t temp = dma_to_phys(dev, mem_dma);
+	// dev_info(dev, "dmam_alloc_coherent succeed: mem=%pa, size=%lu\n", &temp, dma_sz);
+	dev_info(dev, "dmam_alloc_coherent succeed: mem=0x%llx, size=%lu\n", mem_dma, dma_sz);
+	if (!mem) {
+		dev_info(dev, "dmam_alloc_coherent: failed\n");
 		return -ENOMEM;
+	}
 
 	/*
 	 * First item in chunk of DMA memory: 32-slot command table,
@@ -2580,6 +2618,7 @@ static int ahci_port_start(struct ata_port *ap)
 
 	ap->private_data = pp;
 
+	dev_info(dev, "ahci_port_resume\n");
 	/* engage engines, captain */
 	return ahci_port_resume(ap);
 }

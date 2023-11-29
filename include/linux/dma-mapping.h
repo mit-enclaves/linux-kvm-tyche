@@ -559,8 +559,16 @@ static inline int dma_get_cache_alignment(void)
 static inline void *dmam_alloc_coherent(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, gfp_t gfp)
 {
-	return dmam_alloc_attrs(dev, size, dma_handle, gfp,
+	pr_info("dmam_alloc_coherent\n");
+	void *p = dmam_alloc_attrs(dev, size, dma_handle, gfp,
 			(gfp & __GFP_NOWARN) ? DMA_ATTR_NO_WARN : 0);
+	// 1. make sure we only allocate the dma buffer from the shared region on tyche...
+	// 2. Segment the region
+	// 3. Send the coherent region allocation region to tyche
+	
+	// phys_addr_t pa = dma_to_phys(dev, dma_handle);
+	// dev_info(dev, "dmam_alloc_coherent succeed: mem=%pa, size=%lu\n", &temp, dma_sz);
+	return p;
 }
 
 static inline void *dma_alloc_wc(struct device *dev, size_t size,
