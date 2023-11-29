@@ -354,7 +354,7 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 	return tlb;
 }
 
-void swiotlb_init_slabs(unsigned long nslabs, unsigned int nareas, struct io_tlb_pool *pool)
+void __init swiotlb_init_slabs(unsigned long nslabs, unsigned int nareas, struct io_tlb_pool *pool)
 {
 	size_t alloc_size;
 
@@ -394,7 +394,7 @@ static bool is_shared_active_region(struct tyche_region *t)
 
 // mem_pools only serves as a linked list of the iommu regions, so we don't
 // do any real allocations here
-static void append_mem_pools(struct tyche_region *r, struct dma_mem *mem)
+static __init void append_mem_pools(struct tyche_region *r, struct dma_mem *mem)
 {
 	struct dma_mem_pool *pool =
 		memblock_alloc(sizeof(struct dma_mem_pool), PAGE_SIZE);
@@ -498,8 +498,8 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	size_t alloc_size;
 	void *tlb = NULL;
 #if defined(CONFIG_TYCHE_GUEST)
-	int io_domain_handle;
-	unsigned long long capa1, capa2;
+	capa_index_t io_domain_handle;
+	capa_index_t capa1, capa2;
 	unsigned long bytes;
 #endif
 
@@ -554,7 +554,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		// Now the dom0 guest has to inform the I/O domain to configure IOMMU,
 		// so that all DMA goes to the shared region of the memory
 		pr_info("send over capa_index=%d to the I/O domain %d", capa2, io_domain_handle);
-		if (tyche_send(capa2, io_domain_handle)) {
+		if (tyche_send(io_domain_handle, capa2)) {
 			panic("Unable to inform I/O domain to configure IOMMU");
 		}
 	}
