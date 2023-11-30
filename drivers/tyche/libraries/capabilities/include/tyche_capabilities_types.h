@@ -61,6 +61,7 @@ typedef struct capa_region_t {
   paddr_t start;
   paddr_t end;
   memory_access_right_t flags;
+  paddr_t alias;
 } capa_region_t;
 
 /// Information about a domain management capability.

@@ -375,16 +375,22 @@ void __init swiotlb_init_slabs(unsigned long nslabs, unsigned int nareas, struct
 }
 
 #if defined(CONFIG_TYCHE_GUEST)
-static bool is_shared_active_region(struct tyche_region *t)
+static bool is_shared_active_region(struct capability_t *capa)
 {
+	// Check if the cap is a region
+	if (capa->capa_type != Region) {
+		pr_info("capa is not a region");
+		return false;
+	}
+
 	// Check if the region is active
-	if (!t->active) {
+	if (!(capa->info.region.flags & 0b01)) {
 		pr_info("region is not active");
 		return false;
 	}
 
 	// Check if the region is shared
-	if (t->confidential) {
+	if ((capa->info.region.flags & 0b10)) {
 		pr_info("region is not shared");
 		return false;
 	}
@@ -394,16 +400,16 @@ static bool is_shared_active_region(struct tyche_region *t)
 
 // mem_pools only serves as a linked list of the iommu regions, so we don't
 // do any real allocations here
-static __init void append_mem_pools(struct tyche_region *r, struct dma_mem *mem)
+static __init void append_mem_pools(struct capability_t *cap, struct dma_mem *mem)
 {
 	struct dma_mem_pool *pool =
 		memblock_alloc(sizeof(struct dma_mem_pool), PAGE_SIZE);
 
 	pr_info("%s: %d", __func__, __LINE__);
-	pool->start = r->start;
-	pool->end = r->end;
-	pool->capa_index = r->capa_index;
-	pool->ops = r->ops;
+	pool->start = cap->info.region.start;
+	pool->end = cap->info.region.end;
+	pool->capa_index = cap->local_id;
+	pool->ops = cap->info.region.flags;
 
 	pr_info("%s: %d", __func__, __LINE__);
 	spin_lock(&mem->lock);

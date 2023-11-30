@@ -15,14 +15,16 @@ int enumerate_capa(capa_index_t idx, capa_index_t *next, capability_t *capa) {
   }
 
   // Next token
-  token = frame.value_4;
+  token = frame.value_5;
   if (token == 0) {
     // No more capa
+    goto fail;
+  } else if (token != idx + 1) {
     goto fail;
   }
 
   // Setup the capability with the values in the registers.
-  capa->local_id = frame.value_4 - 1; // value_4 is the **next** token
+  capa->local_id = frame.value_5 - 1; // value_5 is the **next** token
   capa->capa_type = frame.value_3 & 0xFF;
 
   // Parse the information encoded from AccessRights.as_bits().
@@ -31,6 +33,7 @@ int enumerate_capa(capa_index_t idx, capa_index_t *next, capability_t *capa) {
     capa->info.region.start = frame.value_1;
     capa->info.region.end = frame.value_2;
     capa->info.region.flags = frame.value_3 >> 8;
+    capa->info.region.alias = frame.value_4;
     break;
   case Management:
     capa->info.management.id = frame.value_1;
