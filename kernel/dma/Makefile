@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
 
+ccflags-y += -I $(srctree)/drivers/tyche/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
+
 obj-$(CONFIG_HAS_DMA)			+= mapping.o direct.o
 obj-$(CONFIG_DMA_OPS)			+= ops_helpers.o
 obj-$(CONFIG_DMA_OPS)			+= dummy.o
