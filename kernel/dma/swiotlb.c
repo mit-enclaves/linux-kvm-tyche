@@ -49,6 +49,27 @@
 #include <linux/slab.h>
 #endif
 
+#ifdef CONFIG_TYCHE_TD0
+#include <ecs.h>
+#include <tyche_capabilities_types.h>
+
+typedef unsigned long long capa_index_t;
+typedef unsigned long long usize;
+
+extern int tyche_create_domain(bool io, capa_index_t *management);
+
+extern int tyche_send(capa_index_t dest, capa_index_t capa);
+extern int tyche_segment_region(capa_index_t capa, capa_index_t *left,
+				capa_index_t *right, usize start1, usize end1,
+				usize prot1, usize start2, usize end2,
+				usize prot2);
+void *tyche_td0_memblock_alloc(unsigned long start, unsigned long size);
+int tyche_filter_capabilities(bool (*f)(struct capability_t *),
+			      void (*append)(struct capability_t *,
+					     struct dma_mem *),
+			      struct dma_mem *mem);
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/swiotlb.h>
 
@@ -90,7 +111,16 @@ static struct io_tlb_mem io_tlb_default_mem = {
 					swiotlb_dyn_alloc),
 };
 
-#else  /* !CONFIG_SWIOTLB_DYNAMIC */
+#elif defined(CONFIG_TYCHE_TD0)
+
+static struct dma_mem mem_pools = {
+	.lock = __SPIN_LOCK_UNLOCKED(mem_pools.lock),
+	.pools = LIST_HEAD_INIT(mem_pools.pools),
+};
+static struct io_tlb_mem io_tlb_default_mem;
+static struct io_tlb_mem reserved_mem;
+
+#else
 
 static struct io_tlb_mem io_tlb_default_mem;
 
@@ -310,6 +340,7 @@ static void add_mem_pool(struct io_tlb_mem *mem, struct io_tlb_pool *pool)
 #endif
 }
 
+#ifndef CONFIG_TYCHE_TD0
 static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 		unsigned int flags,
 		int (*remap)(void *tlb, unsigned long nslabs))
@@ -341,27 +372,195 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 
 	return tlb;
 }
+#endif
+
+void __init swiotlb_init_slabs(unsigned long nslabs, unsigned int nareas,
+			       struct io_tlb_pool *pool)
+{
+	size_t alloc_size;
+
+	alloc_size = PAGE_ALIGN(array_size(sizeof(*pool->slots), nslabs));
+	pool->slots = memblock_alloc(alloc_size, PAGE_SIZE);
+	if (!pool->slots) {
+		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
+			__func__, alloc_size, PAGE_SIZE);
+		return;
+	}
+
+	pool->areas =
+		memblock_alloc(array_size(sizeof(struct io_tlb_area), nareas),
+			       SMP_CACHE_BYTES);
+	if (!pool->areas) {
+		pr_warn("%s: Failed to allocate pool->areas.\n", __func__);
+		return;
+	}
+}
+
+#ifdef CONFIG_TYCHE_TD0
+static bool is_shared_active_region(capability_t *capa)
+{
+	// Check if the cap is a region
+	if (capa->capa_type != Region) {
+		pr_info("capa is not a region");
+		return false;
+	}
+
+	// Check if the region is active
+	if (!(capa->info.region.flags & 0b01)) {
+		pr_info("region is not active");
+		return false;
+	}
+
+	// Check if the region is shared
+	if ((capa->info.region.flags & 0b10)) {
+		pr_info("region is not shared");
+		return false;
+	}
+
+	return true;
+}
+
+static __init void append_mem_pools(struct capability_t *cap,
+				    struct dma_mem *mem)
+{
+	struct dma_mem_pool *pool =
+		memblock_alloc(sizeof(struct dma_mem_pool), PAGE_SIZE);
+
+	pool->start = cap->info.region.start;
+	pool->end = cap->info.region.end;
+	pool->capa_index = cap->local_id;
+	pool->ops = cap->info.region.flags;
+
+	spin_lock(&mem->lock);
+	list_add_rcu(&pool->node, &mem->pools);
+	spin_unlock(&mem->lock);
+}
+
+static size_t dma_mem_pool_idx = 0;
+
+static void init_io_tlb_mem(struct io_tlb_mem *mem, struct dma_mem *mem_pool,
+			    bool is_reserved)
+{
+	struct io_tlb_pool *pool = &mem->defpool;
+	struct dma_mem_pool *dma_pool = NULL;
+	unsigned long bytes = 0;
+	unsigned long nslabs;
+	unsigned int nareas;
+
+	size_t idx = 0;
+	// TODO: pop the first element from the list...
+	list_for_each_entry_rcu(dma_pool, &mem_pool->pools, node) {
+		if (idx++ == dma_mem_pool_idx) {
+			pool->start = dma_pool->start;
+			pool->end = dma_pool->end;
+			pool->capa_index = dma_pool->capa_index;
+			pool->ops = dma_pool->ops;
+		}
+	}
+	dma_mem_pool_idx += 1;
+
+	bytes = pool->end - pool->start;
+	pool->vaddr = tyche_td0_memblock_alloc(pool->start, bytes);
+	BUG_ON(__pa(pool->vaddr) != pool->start);
+
+	nslabs = nr_slots(bytes);
+	mem->force_bounce = 1;
+	if (is_reserved) {
+		nareas = 1;
+		mem->for_alloc = 1;
+	} else {
+		nareas = limit_nareas(1, nslabs); // FIXME
+	}
+
+	swiotlb_init_slabs(nslabs, nareas, pool);
+	swiotlb_init_io_tlb_pool(pool, pool->start, nslabs, true, nareas);
+	add_mem_pool(mem, pool);
+}
+
+void __init *tyche_td0_memblock_alloc(unsigned long start, unsigned long size)
+{
+	void *tlb = NULL;
+
+	if (!size) {
+		pr_warn("Tyche: cannot allocate a swiotlb for size 0");
+		return NULL;
+	}
+
+	// Call the memblock functions to allocate this range for DMA
+	tlb = memblock_alloc_try_nid(size, PAGE_SIZE, start, start + size,
+				     NUMA_NO_NODE);
+
+	if (!tlb) {
+		pr_warn("%s: Failed to allocate %zu bytes tlb structure\n",
+			__func__, size);
+		return NULL;
+	}
+
+	return tlb;
+}
+
+static int tyche_enum_capa(size_t *capa_index, capability_t *capa)
+{
+	capa_index_t next;
+
+	if (enumerate_capa(*capa_index, &next, capa) != SUCCESS) {
+		return FAILURE;
+	}
+
+	if (next != *capa_index + 1) {
+		return FAILURE;
+	}
+	*capa_index = next;
+
+	return SUCCESS;
+}
+
+int tyche_filter_capabilities(bool (*f)(capability_t *),
+			      void (*append)(capability_t *, struct dma_mem *),
+			      struct dma_mem *mem)
+{
+	capability_t cap;
+	size_t capa_index = 0;
+	size_t property = 0;
+
+	for (;;) {
+		if (tyche_enum_capa(&capa_index, &cap) != SUCCESS) {
+			break;
+		}
+
+		if (f(&cap)) {
+			append(&cap, mem);
+			property += 1;
+		}
+	}
+
+	return property == 0;
+}
+
+#endif
 
 /*
  * Statically reserve bounce buffer space and initialize bounce buffer data
  * structures for the software IO TLB used to implement the DMA API.
  */
 void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
-		int (*remap)(void *tlb, unsigned long nslabs))
+			       int (*remap)(void *tlb, unsigned long nslabs))
 {
+#ifdef CONFIG_TYCHE_TD0
+	capa_index_t io_domain_handle;
+	capa_index_t capa1, capa2;
+	unsigned long bytes;
+	struct dma_mem_pool *pool;
+#else
 	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
-	unsigned long nslabs;
-	unsigned int nareas;
-	size_t alloc_size;
-	void *tlb;
-
+#endif
 	if (!addressing_limit && !swiotlb_force_bounce)
 		return;
 	if (swiotlb_force_disable)
 		return;
 
-	io_tlb_default_mem.force_bounce =
-		swiotlb_force_bounce || (flags & SWIOTLB_FORCE);
+	io_tlb_default_mem.force_bounce = swiotlb_force_bounce ||
+					  (flags & SWIOTLB_FORCE);
 
 #ifdef CONFIG_SWIOTLB_DYNAMIC
 	if (!remap)
@@ -372,6 +571,44 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		io_tlb_default_mem.phys_limit = ARCH_LOW_ADDRESS_LIMIT;
 #endif
 
+#ifdef CONFIG_TYCHE_TD0
+	BUG_ON(remap != NULL);
+	BUG_ON(io_tlb_default_mem.force_bounce == false);
+	// io_tlb_default_mem.can_grow = false;
+
+	/**
+	 * Loop through the tyche shared memory regions, and add these regions onto the mem_pools linked list
+	 */
+	if (tyche_filter_capabilities(is_shared_active_region, append_mem_pools,
+				      &mem_pools)) {
+	}
+
+	/* configure the IOMMU by sending the region to I/O domain (NOTE: will remove later as the mapping should be fixed) */
+	if (tyche_create_domain(1, &io_domain_handle)) {
+		pr_err("Unable to create an I/O domain");
+	}
+
+	list_for_each_entry_rcu(pool, &mem_pools.pools, node) {
+		bytes = pool->end - pool->start;
+
+		if (tyche_segment_region(pool->capa_index, &capa1, &capa2,
+					 pool->start, pool->end, 0b1111,
+					 pool->start, pool->end, 0b1111)) {
+			pr_err("Unable to segment the guest DMA region");
+		}
+
+		if (tyche_send(io_domain_handle, capa2)) {
+			pr_err("Unable to inform I/O domain to configure IOMMU");
+		}
+	}
+
+	// Assuming we will have two regions on the mem_pools list: the first
+	// one goes to the io_tlb_default_mem.defpool and the second one goes
+	// to the reserved_mem.defpool
+	init_io_tlb_mem(&io_tlb_default_mem, &mem_pools, false);
+	init_io_tlb_mem(&reserved_mem, &mem_pools, true);
+
+#else /* !CONFIG_TYCHE_TD0 */
 	if (!default_nareas)
 		swiotlb_adjust_nareas(num_possible_cpus());
 
@@ -390,26 +627,13 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		default_nslabs = nslabs;
 	}
 
-	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
-	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
-	if (!mem->slots) {
-		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
-			__func__, alloc_size, PAGE_SIZE);
-		return;
-	}
-
-	mem->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
-		nareas), SMP_CACHE_BYTES);
-	if (!mem->areas) {
-		pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
-		return;
-	}
-
+	swiotlb_init_slabs(nslabs, nareas, mem);
 	swiotlb_init_io_tlb_pool(mem, __pa(tlb), nslabs, false, nareas);
 	add_mem_pool(&io_tlb_default_mem, mem);
 
 	if (flags & SWIOTLB_VERBOSE)
 		swiotlb_print_info();
+#endif
 }
 
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
@@ -805,6 +1029,9 @@ void swiotlb_dev_init(struct device *dev)
 	INIT_LIST_HEAD(&dev->dma_io_tlb_pools);
 	spin_lock_init(&dev->dma_io_tlb_lock);
 	dev->dma_uses_io_tlb = false;
+#endif
+#ifdef CONFIG_TYCHE_TD0
+	dev->dma_io_tlb_mem = &reserved_mem;
 #endif
 }
 
@@ -1586,7 +1813,7 @@ static inline void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
 
 #endif	/* CONFIG_DEBUG_FS */
 
-#ifdef CONFIG_DMA_RESTRICTED_POOL
+#if defined(CONFIG_DMA_RESTRICTED_POOL) || defined(CONFIG_TYCHE_TD0)
 
 struct page *swiotlb_alloc(struct device *dev, size_t size)
 {
@@ -1618,6 +1845,10 @@ bool swiotlb_free(struct device *dev, struct page *page, size_t size)
 
 	return true;
 }
+
+#endif
+
+#ifdef CONFIG_DMA_RESTRICTED_POOL
 
 static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
 				    struct device *dev)

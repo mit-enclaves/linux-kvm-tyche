@@ -93,6 +93,10 @@ struct io_tlb_pool {
 	bool late_alloc;
 	unsigned int nareas;
 	unsigned int area_nslabs;
+#ifdef CONFIG_TYCHE_TD0
+	unsigned long capa_index;
+	uint8_t ops;
+#endif
 	struct io_tlb_area *areas;
 	struct io_tlb_slot *slots;
 #ifdef CONFIG_SWIOTLB_DYNAMIC
@@ -139,6 +143,22 @@ struct io_tlb_mem {
 	atomic_long_t used_hiwater;
 #endif
 };
+
+#ifdef CONFIG_TYCHE_TD0
+struct dma_mem_pool {
+	phys_addr_t start;
+	phys_addr_t end;
+	unsigned long capa_index;
+	uint8_t ops;
+	struct list_head node;
+	struct rcu_head rcu;
+};
+
+struct dma_mem {
+	spinlock_t lock;
+	struct list_head pools;
+};
+#endif
 
 #ifdef CONFIG_SWIOTLB_DYNAMIC
 
@@ -259,7 +279,7 @@ static inline phys_addr_t default_swiotlb_limit(void)
 
 extern void swiotlb_print_info(void);
 
-#ifdef CONFIG_DMA_RESTRICTED_POOL
+#if defined(CONFIG_DMA_RESTRICTED_POOL) || defined(CONFIG_TYCHE_TD0)
 struct page *swiotlb_alloc(struct device *dev, size_t size);
 bool swiotlb_free(struct device *dev, struct page *page, size_t size);
 
