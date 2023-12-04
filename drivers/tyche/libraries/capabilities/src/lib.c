@@ -882,7 +882,7 @@ int revoke_domain_regions(domain_id_t id)
 			ERROR("The revoked capa has non empty right.");
 			goto failure;
 		}
-		ERROR("revoke domain regions of type %d\n", capa->capa_type);
+		//ERROR("revoke domain regions of type %d\n", capa->capa_type);
 		if (internal_revoke(child, capa) != SUCCESS) {
 			ERROR("unable to revoke a capability.");
 			goto failure;
