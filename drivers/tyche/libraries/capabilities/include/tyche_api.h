@@ -57,7 +57,7 @@ typedef struct vmcall_frame_t {
 
 int tyche_call(vmcall_frame_t* frame);
 
-int tyche_create_domain(bool io, capa_index_t* management);
+int tyche_create_domain(capa_index_t* management);
 
 int tyche_set_cores(capa_index_t management, usize cores);
 

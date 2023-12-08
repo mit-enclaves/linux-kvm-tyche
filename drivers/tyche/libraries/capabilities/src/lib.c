@@ -117,7 +117,7 @@ int create_domain(domain_id_t *id) {
   }
 
   // Create the domain.
-  if (tyche_create_domain(false, &child_idx) != SUCCESS) {
+  if (tyche_create_domain(&child_idx) != SUCCESS) {
     ERROR("Failed to create domain.");
     goto fail_child_capa;
   }
