@@ -259,7 +259,7 @@ static inline phys_addr_t default_swiotlb_limit(void)
 
 extern void swiotlb_print_info(void);
 
-#ifdef CONFIG_DMA_RESTRICTED_POOL
+#if defined(CONFIG_DMA_RESTRICTED_POOL) || defined(CONFIG_TYCHE_TD0)
 struct page *swiotlb_alloc(struct device *dev, size_t size);
 bool swiotlb_free(struct device *dev, struct page *page, size_t size);
 

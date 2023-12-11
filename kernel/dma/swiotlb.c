@@ -49,6 +49,23 @@
 #include <linux/slab.h>
 #endif
 
+#ifdef CONFIG_TYCHE_TD0
+#include <ecs.h>
+#include <tyche_capabilities_types.h>
+
+typedef unsigned long long capa_index_t;
+typedef unsigned long long usize;
+
+extern int tyche_create_domain(capa_index_t *management);
+
+extern int tyche_send(capa_index_t dest, capa_index_t capa);
+extern int tyche_segment_region(capa_index_t capa, capa_index_t *left,
+				capa_index_t *right, usize start1, usize end1,
+				usize prot1, usize start2, usize end2,
+				usize prot2);
+void *tyche_td0_memblock_alloc(unsigned long start, unsigned long size);
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/swiotlb.h>
 
@@ -90,11 +107,16 @@ static struct io_tlb_mem io_tlb_default_mem = {
 					swiotlb_dyn_alloc),
 };
 
-#else  /* !CONFIG_SWIOTLB_DYNAMIC */
+#elif CONFIG_TYCHE_TD0
+
+static struct io_tlb_mem io_tlb_default_mem;
+static struct io_tlb_mem reserved_mem;
+
+#else
 
 static struct io_tlb_mem io_tlb_default_mem;
 
-#endif	/* CONFIG_SWIOTLB_DYNAMIC */
+#endif
 
 static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
 static unsigned long default_nareas;
@@ -255,12 +277,18 @@ static inline unsigned long nr_slots(u64 val)
 void __init swiotlb_update_mem_attributes(void)
 {
 	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
+#ifdef CONFIG_TYCHE_TD0
+	struct io_tlb_pool *rmem = &reserved_mem.defpool;
+#endif
 	unsigned long bytes;
 
 	if (!mem->nslabs || mem->late_alloc)
 		return;
 	bytes = PAGE_ALIGN(mem->nslabs << IO_TLB_SHIFT);
 	set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
+#ifdef CONFIG_TYCHE_TD0
+	set_memory_decrypted((unsigned long)rmem->vaddr, bytes >> PAGE_SHIFT);
+#endif
 }
 
 static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,
@@ -342,44 +370,85 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
 	return tlb;
 }
 
-/*
- * Statically reserve bounce buffer space and initialize bounce buffer data
- * structures for the software IO TLB used to implement the DMA API.
- */
-void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
-		int (*remap)(void *tlb, unsigned long nslabs))
+#ifdef CONFIG_TYCHE_TD0
+static bool is_management_domain(capability_t *capa)
 {
-	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
-	unsigned long nslabs;
-	unsigned int nareas;
-	size_t alloc_size;
-	void *tlb;
+	return capa->capa_type == Management;
+}
 
-	if (!addressing_limit && !swiotlb_force_bounce)
-		return;
-	if (swiotlb_force_disable)
-		return;
+static bool is_private_active_region(capability_t *capa)
+{
+	// Check if the cap is a region
+	if (capa->capa_type != Region) {
+		pr_info("capa is not a region");
+		return false;
+	}
 
-	io_tlb_default_mem.force_bounce =
-		swiotlb_force_bounce || (flags & SWIOTLB_FORCE);
+	// Check if the region is active
+	if (!(capa->info.region.flags & 0b01)) {
+		pr_info("region is not active");
+		return false;
+	}
 
-#ifdef CONFIG_SWIOTLB_DYNAMIC
-	if (!remap)
-		io_tlb_default_mem.can_grow = true;
-	if (flags & SWIOTLB_ANY)
-		io_tlb_default_mem.phys_limit = virt_to_phys(high_memory - 1);
-	else
-		io_tlb_default_mem.phys_limit = ARCH_LOW_ADDRESS_LIMIT;
+	// Check if the region is shared
+	if (!(capa->info.region.flags & 0b10)) {
+		pr_info("region is not private");
+		return false;
+	}
+
+	return true;
+}
+
+static int tyche_enum_capa(size_t *capa_index, capability_t *capa)
+{
+	capa_index_t next;
+
+	if (enumerate_capa(*capa_index, &next, capa) != SUCCESS) {
+		return FAILURE;
+	}
+
+	if (next != *capa_index + 1) {
+		return FAILURE;
+	}
+	*capa_index = next;
+
+	return SUCCESS;
+}
+
+static int tyche_find_capability(bool (*f)(capability_t *), capability_t *cap)
+{
+	size_t capa_index = 0;
+
+	for (;;) {
+		if (tyche_enum_capa(&capa_index, cap) != SUCCESS) {
+			break;
+		}
+
+		pr_info("cap: local_id=%lld, capa_type=%d", cap->local_id,
+			cap->capa_type);
+
+		if (f(cap)) {
+			return SUCCESS;
+		}
+	}
+
+	return FAILURE;
+}
 #endif
 
-	if (!default_nareas)
-		swiotlb_adjust_nareas(num_possible_cpus());
+static void __init *
+swiotlb_alloc_pool(struct io_tlb_mem *tlb_mem, unsigned long nslabs,
+		   unsigned int nareas, unsigned int flags,
+		   int (*remap)(void *tlb, unsigned long nslabs))
+{
+	struct io_tlb_pool *mem =
+		&(tlb_mem->defpool); // &io_tlb_default_mem.defpool;
+	void *tlb;
+	size_t alloc_size;
 
-	nslabs = default_nslabs;
-	nareas = limit_nareas(default_nareas, nslabs);
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
-			return;
+			return NULL;
 		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
 		nareas = limit_nareas(nareas, nslabs);
 	}
@@ -395,21 +464,120 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	if (!mem->slots) {
 		pr_warn("%s: Failed to allocate %zu bytes align=0x%lx\n",
 			__func__, alloc_size, PAGE_SIZE);
-		return;
+		return NULL;
 	}
 
-	mem->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
-		nareas), SMP_CACHE_BYTES);
+	mem->areas =
+		memblock_alloc(array_size(sizeof(struct io_tlb_area), nareas),
+			       SMP_CACHE_BYTES);
 	if (!mem->areas) {
 		pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
-		return;
+		return NULL;
 	}
 
 	swiotlb_init_io_tlb_pool(mem, __pa(tlb), nslabs, false, nareas);
-	add_mem_pool(&io_tlb_default_mem, mem);
+	add_mem_pool(tlb_mem, mem);
 
 	if (flags & SWIOTLB_VERBOSE)
 		swiotlb_print_info();
+
+	return tlb;
+}
+
+/*
+ * Statically reserve bounce buffer space and initialize bounce buffer data
+ * structures for the software IO TLB used to implement the DMA API.
+ */
+void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
+			       int (*remap)(void *tlb, unsigned long nslabs))
+{
+	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
+	unsigned long nslabs;
+	unsigned int nareas;
+	void *tlb;
+#ifdef CONFIG_TYCHE_TD0
+	struct io_tlb_pool *rmem = &reserved_mem.defpool;
+	capability_t region_capa;
+	capa_region_t *private_region;
+	capability_t management_domain_capa;
+	capa_index_t capa1, capa2;
+	void *rmem_tlb;
+#endif
+
+	if (!addressing_limit && !swiotlb_force_bounce)
+		return;
+	if (swiotlb_force_disable)
+		return;
+
+	io_tlb_default_mem.force_bounce = swiotlb_force_bounce ||
+					  (flags & SWIOTLB_FORCE);
+
+#ifdef CONFIG_SWIOTLB_DYNAMIC
+	if (!remap)
+		io_tlb_default_mem.can_grow = true;
+	if (flags & SWIOTLB_ANY)
+		io_tlb_default_mem.phys_limit = virt_to_phys(high_memory - 1);
+	else
+		io_tlb_default_mem.phys_limit = ARCH_LOW_ADDRESS_LIMIT;
+#endif
+
+	if (!default_nareas)
+		swiotlb_adjust_nareas(num_possible_cpus());
+
+	nslabs = default_nslabs;
+	nareas = limit_nareas(default_nareas, nslabs);
+
+	if ((tlb = swiotlb_alloc_pool(&io_tlb_default_mem, nslabs, nareas,
+				      flags, remap)) == NULL) {
+		pr_err("Unable to allocate swiotlb");
+		return;
+	}
+
+#ifdef CONFIG_TYCHE_TD0
+	if ((rmem_tlb = swiotlb_alloc_pool(&reserved_mem, nslabs, nareas, flags,
+					   NULL)) == NULL) {
+		pr_err("Unable to allocate dma restricted buffer on swiotlb");
+		return;
+	}
+
+	reserved_mem.force_bounce = true;
+	reserved_mem.for_alloc = true;
+
+	/**
+	 * Loop through the tyche capas and find the active private memory region
+	 */
+	if (tyche_find_capability(is_private_active_region, &region_capa) !=
+	    SUCCESS) {
+		pr_err("Unable to find private region");
+	}
+
+	private_region = (capa_region_t *)(&region_capa.info);
+
+	if (tyche_find_capability(is_management_domain,
+				  &management_domain_capa) != SUCCESS) {
+		pr_err("Unable to find management domain");
+	}
+
+	if (tyche_segment_region(region_capa.local_id, &capa1, &capa2,
+				 private_region->start, private_region->end,
+				 0b1111, mem->start, mem->end, 0b1111)) {
+		pr_err("Unable to segment the guest DMA region");
+	}
+
+	if (tyche_send(management_domain_capa.local_id, capa2)) {
+		pr_err("Unable to inform I/O domain to configure IOMMU");
+	}
+
+	if (tyche_segment_region(capa1, &capa1, &capa2, private_region->start,
+				 private_region->end, 0b1111, rmem->start,
+				 rmem->end, 0b1111)) {
+		pr_err("Unable to segment the guest DMA region");
+	}
+
+	if (tyche_send(management_domain_capa.local_id, capa2)) {
+		pr_err("Unable to inform I/O domain to configure IOMMU");
+	}
+#endif
 }
 
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
@@ -800,11 +968,15 @@ static void swiotlb_del_pool(struct device *dev, struct io_tlb_pool *pool)
  */
 void swiotlb_dev_init(struct device *dev)
 {
-	dev->dma_io_tlb_mem = &io_tlb_default_mem;
 #ifdef CONFIG_SWIOTLB_DYNAMIC
 	INIT_LIST_HEAD(&dev->dma_io_tlb_pools);
 	spin_lock_init(&dev->dma_io_tlb_lock);
 	dev->dma_uses_io_tlb = false;
+#endif
+#ifdef CONFIG_TYCHE_TD0
+	dev->dma_io_tlb_mem = &reserved_mem;
+#else
+	dev->dma_io_tlb_mem = &io_tlb_default_mem;
 #endif
 }
 
@@ -1586,7 +1758,7 @@ static inline void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
 
 #endif	/* CONFIG_DEBUG_FS */
 
-#ifdef CONFIG_DMA_RESTRICTED_POOL
+#if defined(CONFIG_DMA_RESTRICTED_POOL) || defined(CONFIG_TYCHE_TD0)
 
 struct page *swiotlb_alloc(struct device *dev, size_t size)
 {
@@ -1618,6 +1790,10 @@ bool swiotlb_free(struct device *dev, struct page *page, size_t size)
 
 	return true;
 }
+
+#endif
+
+#ifdef CONFIG_DMA_RESTRICTED_POOL
 
 static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
 				    struct device *dev)
