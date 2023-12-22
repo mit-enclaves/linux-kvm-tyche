@@ -1,3 +1,5 @@
+#include "arch_cache.h"
+#include "tyche_api.h"
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -7,11 +9,13 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
+#include <asm/vmx.h>
 
 #include "common.h"
 #include "domains.h"
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
+#include "arch_cache.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -316,19 +320,26 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
     ERROR("The domain is null");
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to set config on unallowed core: %u", (unsigned int) core);
-    goto failure;
-  }
-  if (core >= ENTRIES_PER_DOMAIN) {
-    ERROR("The supplied core is greater than supported cores.");
-    goto failure;
-  }
   /*if (dom->state != DRIVER_NOT_COMMITED) {
     ERROR("The domain is already committed or dead: %d", dom->state);
     goto failure;
   }*/
-  if (dom->domain_id == UNINIT_DOM_ID) {
+  if (core >= ENTRIES_PER_DOMAIN) {
+    ERROR("The supplied core is greater than supported cores.");
+    goto failure;
+  }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
+      dom->contexts[core] == NULL) {
+    ERROR("Trying to set config on unallowed/unallocated core: %u", (unsigned int) core);
+    goto failure;
+  }
+  if (cache_write_any(dom->contexts[core], idx, value) != SUCCESS) {
+    ERROR("Unable to write the value in the cache %llx.\n", idx);     
+    goto failure;
+  }
+
+  //TODO(aghosn): we need to flush later.
+  /*if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
     goto failure;
   } 
@@ -336,7 +347,7 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
       != SUCCESS) {
     ERROR("Unable to set core configuration");
     goto failure;
-  }
+  }*/
 
   return SUCCESS;
 failure:
@@ -347,6 +358,8 @@ EXPORT_SYMBOL(driver_set_domain_core_config);
 
 /// Expose the configuration of fields (read).
 int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, usize *value) {
+  u64 v = 0;
+  int res = FAILURE;
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
@@ -355,18 +368,25 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, u
     ERROR("The provided value is null.");
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to commit entry point on unallowed core");
-    goto failure;
-  }
   if (core >= ENTRIES_PER_DOMAIN) {
     ERROR("The supplied core is greater than supported cores.");
+    goto failure;
+  }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
+      dom->contexts[core] == NULL) {
+    ERROR("Trying to commit entry point on unallowed/unallocated core");
     goto failure;
   }
   /*if (dom->state != DRIVER_NOT_COMMITED) {
     ERROR("The domain is already committed or dead");
     goto failure;
   }*/
+  // The value was in the cache.
+  if (cache_read_any(dom->contexts[core], idx, &v) == 0) {
+      *value = v;
+      return SUCCESS;
+  }
+  // The value is not in the cache.
   if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
     goto failure;
@@ -375,6 +395,12 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, u
       != SUCCESS) {
     ERROR("Unable to get core configuration");
     goto failure;
+  }
+  // Update the cache.
+  res = cache_set_any(dom->contexts[core], idx, *value);
+  if (res != 0) {
+    ERROR("Unable to update the cache value %llx, %d\n", idx, res);
+    return FAILURE;
   }
   return SUCCESS;
 failure:
@@ -407,8 +433,9 @@ int driver_alloc_core_context(driver_domain_t *dom, usize core) {
     ERROR("The domain is null.");
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to commit entry point on unallowed core");
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
+      dom->contexts[core] != NULL) {
+    ERROR("Trying to commit entry point on unallowed/allocated core");
     goto failure;
   }
   if (core >= ENTRIES_PER_DOMAIN) {
@@ -419,6 +446,14 @@ int driver_alloc_core_context(driver_domain_t *dom, usize core) {
     ERROR("Unable to allocate context on core");
     goto failure;
   }
+  // Allocate the context for this core.
+  dom->contexts[core] = kmalloc(sizeof(arch_cache_t), GFP_KERNEL); 
+  if (dom->contexts[core] == NULL) {
+    ERROR("Unable to allocate a context.");
+    goto failure;
+  }
+  // Set everything to 0.
+  memset(dom->contexts[core], 0, sizeof(arch_cache_t));
   return SUCCESS;
 failure:
   return FAILURE;
@@ -582,6 +617,35 @@ failure:
 }
 EXPORT_SYMBOL(driver_commit_regions);
 
+// This is called from us so we should be okay with the values passed.
+// Every corner case should have been checked before hand.
+static int flush_caches(driver_domain_t *dom, usize core) {
+  int i = 0;
+  u64 values[114]; 
+  u64 fields[114];
+  int to_write = 0;
+  memset(values, 0xFF, sizeof(values));
+  memset(fields, 0xFF, sizeof(fields));
+  to_write = cache_collect_dirties(dom->contexts[core], values, fields, 114);
+  if (to_write < 0) {
+    ERROR("Our buffer is too small, need: %d", cache_dirty_count(dom->contexts[core]));
+    return -1;
+  }
+  // Write the registers.
+  while (i < to_write) {
+    int end = ((i + 6) <= to_write)? i+6 : to_write; 
+    if (write_fields(dom->domain_id, core, fields+i, values+i, end - i) != SUCCESS) {
+      ERROR("Trouble writting the values to domain.");
+      for (int j = 0; j < end -i; j++) {
+        ERROR("field: %llx, value: %llx", fields[i+j], values[i+j]);
+      }
+      return -1;
+    }
+    i = end;
+  }
+  return 0;
+}
+
 int driver_commit_domain(driver_domain_t *dom, int full)
 {
   if (dom == NULL) {
@@ -614,6 +678,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
 
   // We need to commit some of the configuration.
   if (full != 0) {
+    ERROR("Full is not 0");
     usize core_map = dom->configs[TYCHE_CONFIG_CORES];
     if (driver_commit_regions(dom) != SUCCESS) {
       ERROR("Failed to commit regions.");
@@ -645,6 +710,17 @@ int driver_commit_domain(driver_domain_t *dom, int full)
       }
     } 
   }
+  //ERROR("About to seal the domain.");
+  //TODO(aghosn) try to flush the cache.
+  for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
+    if (dom->contexts[i] != NULL) {
+      if (flush_caches(dom, i) != SUCCESS) {
+        ERROR("Unable to flush the cache.");
+        goto failure;
+      }
+      cache_clear(dom->contexts[i], 0);
+    }
+  }
   // Commit the domain.
   if (seal_domain(dom->domain_id) != SUCCESS) {
     ERROR("Unable to seal domain %p", dom);
@@ -662,16 +738,112 @@ failure:
 }
 EXPORT_SYMBOL(driver_commit_domain);
 
-int driver_switch_domain(driver_domain_t * dom, void* args)
-{
+/// The format of the exit frame.
+const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
+  GUEST_RIP,
+  GUEST_RSP,
+  GUEST_RFLAGS,
+  VM_INSTRUCTION_ERROR,
+  VM_EXIT_REASON,
+  VM_EXIT_INTR_INFO,
+  VM_EXIT_INTR_ERROR_CODE,
+  VM_EXIT_INSTRUCTION_LEN,
+  VM_INSTRUCTION_ERROR,
+};
+
+// Flush the exit frame.
+// This is called internally and corner cases should have been checked.
+static int update_set_exit(driver_domain_t *dom, usize core, usize exit[TYCHE_EXIT_FRAME_SIZE]) {
+  int i = 0;
+  arch_cache_t* cache = dom->contexts[core];
+  for (i = 0; i < TYCHE_EXIT_FRAME_SIZE; i++) {
+    if (cache_set_any(cache, EXIT_FRAME_FIELDS[i], exit[i]) != SUCCESS) {
+      ERROR("Unable to set a cache values?");
+      goto failure;
+    }
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+const usize GP_REGS_FIELDS[TYCHE_GP_REGS_SIZE] = {
+  REG_GP_RAX,
+  REG_GP_RBX,
+  REG_GP_RCX,
+  REG_GP_RDX,
+  REG_GP_RBP,
+  REG_GP_RSI,
+  REG_GP_RDI,
+  REG_GP_R8 ,
+  REG_GP_R9 ,
+  REG_GP_R10,
+  REG_GP_R11,
+  REG_GP_R12,
+  REG_GP_R13,
+  REG_GP_R14,
+  REG_GP_R15, 
+};
+
+static int update_set_gp(driver_domain_t *dom, usize core, usize regs[TYCHE_GP_REGS_SIZE])  {
+  int i = 0;
+  arch_cache_t *cache = dom->contexts[core];
+  for (i = 0; i < TYCHE_GP_REGS_SIZE; i++) {
+    if (cache_set_any(cache, GP_REGS_FIELDS[i], regs[i]) != SUCCESS) {
+      ERROR("Unable to set a gp cache value?");
+      goto failure;
+    }
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_switch_domain(driver_domain_t * dom, usize core) {
+  usize exit_frame[TYCHE_EXIT_FRAME_SIZE] = {0};
+  usize gp_frame[TYCHE_GP_REGS_SIZE] = {0};
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
+  } 
+  if (core >= ENTRIES_PER_DOMAIN) {
+    ERROR("Invalid core.");
+    goto failure;
   }
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
+      dom->contexts[core] == NULL) {
+    ERROR("Invalid core.");
+    goto failure;
+  }
+
+  // Let's flush the caches.
+  if (flush_caches(dom, core) != SUCCESS) {
+    ERROR("Unable to flush caches.");
+    goto failure;
+  }
+
+  // We can clear the cache now.
+  cache_clear(dom->contexts[core], 1);
+
   DEBUG("About to try to switch to domain %lld| dom %lld",
       dom->domain_id, dom->handle);
-  if (switch_domain(dom->domain_id, args) != SUCCESS) {
+  if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {
     ERROR("Unable to switch to domain %p", dom->handle);
+    goto failure;
+  }
+  // Update the exit frame.
+  if (update_set_exit(dom, core, exit_frame) != SUCCESS) {
+    ERROR("Unable to update the exit frame.");
+    goto failure;
+  }
+  // Get the gp registers.
+  // TODO(aghosn) See if it's really necessary or not.
+  if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) {
+    ERROR("Unable to read the domain's general purpose registers.");
+    goto failure;
+  }
+  if (update_set_gp(dom, core, gp_frame) != SUCCESS) {
+    ERROR("Unable to set the domain's general purpose registers.");
     goto failure;
   }
   return SUCCESS;
@@ -716,6 +888,13 @@ delete_dom_struct:
   if (dom->handle != NULL) {
     free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
   }
+
+  // Delete the contexts.
+  for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
+    if (dom->contexts[i] != NULL) {
+      kfree(dom->contexts[i]);
+    }
+  } 
   dll_remove(&domains, dom, list);
   kfree(dom);
   return SUCCESS;

@@ -199,6 +199,21 @@ failure:
   return FAILURE;
 }
 
+int write_fields(domain_id_t id, usize core, usize* fields, usize* values, int size) {
+  child_domain_t *child = find_child(id);
+  if (child == NULL || size > 7) {
+    ERROR("Child not found or size too big.");
+    goto failure;
+  }
+  if (tyche_write_fields(child->management->local_id, core, fields, values, size) != SUCCESS) {
+    ERROR("Unable to write the fields with tyche.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int alloc_core_context(domain_id_t id, usize core) {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
@@ -738,11 +753,32 @@ failure:
   return FAILURE;
 }
 
+int read_gp_domain(domain_id_t id, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
+  child_domain_t *child = NULL; 
+  child = find_child(id);
+  if (child == NULL || regs == NULL) {
+    ERROR("Child is null or regs is null.");
+    goto failure;
+  }
+  if (tyche_read_gp_registers(child->management->local_id, core, regs) != SUCCESS) {
+    ERROR("Failed to read gp registers from tyche.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 // TODO nothing thread safe in this implementation for the moment.
-int switch_domain(domain_id_t id, void *args) {
+int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
+
+  if (exit_frame == NULL) {
+    ERROR("Exit frame is null.");
+    goto failure;
+  }
 
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
@@ -776,13 +812,23 @@ int switch_domain(domain_id_t id, void *args) {
   DEBUG("Found a handle for domain %lld, id %lld", id,
         wrapper->transition->local_id);
 
-  if (tyche_switch(&(wrapper->transition->local_id), args) !=
+  //TODO remove the tyche_write_gp_registers.
+  /*if (args != NULL && tyche_write_gp_registers(child->management->local_id, args) != SUCCESS) {
+    ERROR("failed to write all the registers.");
+    goto failure;
+  }*/
+  if (tyche_switch(&(wrapper->transition->local_id), exit_frame) !=
       SUCCESS) {
     ERROR("failed to perform a switch on capa %lld",
           wrapper->transition->local_id);
     goto failure;
   }
   DEBUG("[switch_domain] Came back from the switch");
+  //TODO(aghosn) remove this from capabilities.
+  /*if (args != NULL && tyche_read_gp_registers(child->management->local_id, args) != SUCCESS) {
+    ERROR("Unable to read gp registers.");
+    goto failure;
+  }*/
   // We are back from the switch, unlock the wrapper.
   wrapper->lock = TRANSITION_UNLOCKED;
   return SUCCESS;
@@ -862,7 +908,6 @@ int revoke_domain_regions(domain_id_t id)
 {
 	child_domain_t *child = find_child(id);
   capability_t *capa = NULL;
-	int change = 0;
 
 	if (child == NULL) {
 		ERROR("Unable to find child with id %lld\n", id);

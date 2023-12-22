@@ -1,5 +1,6 @@
 #include "tyche_api.h"
 #include "common.h"
+#include "tyche_capabilities_types.h"
 
 /// Simple generic vmcall implementation.
 int tyche_call(vmcall_frame_t* frame)
@@ -115,6 +116,101 @@ int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx,
     goto failure;
   }
   return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize* values, int size) {
+  usize frame[3] = {TYCHE_WRITE_FIELDS, management, core};
+  if (size > 6) {
+    ERROR("Wrong size for tyche write fields.");
+    goto failure;
+  }
+  asm volatile(
+    // Push all the registers we want to save.
+    // Start with rax that we globber several times.
+    "pushq %%rax\n\t"
+    "pushq %%rdi\n\t"
+    "pushq %%rsi\n\t"
+    "pushq %%rbp\n\t"
+    "pushq %%rbx\n\t"
+    "pushq %%rcx\n\t"
+    "pushq %%rdx\n\t"
+    "pushq %%r8\n\t"
+    "pushq %%r9\n\t"
+    "pushq %%r10\n\t"
+    "pushq %%r11\n\t"
+    "pushq %%r12\n\t"
+    "pushq %%r13\n\t"
+    "pushq %%r14\n\t"
+    "pushq %%r15\n\t"
+    // Get the arguments in registers.
+    "movq %0, %%rax\n\t"
+    "movq %1, %%rdi\n\t"
+    "movq %2, %%rsi\n\t"
+    // Push the result array and arguments for later.
+    "pushq %%rax\n\t"
+    "pushq (%%rax)\n\t"
+    "pushq 8(%%rax)\n\t"
+    "pushq 16(%%rax)\n\t"
+    //Set the arguments
+    // First couple (rbp, rbx).
+    "movq (%%rdi), %%rbp\n\t"
+    "movq (%%rsi), %%rbx\n\t"
+    // Second couple (rcx, rdx)
+    "movq 8(%%rdi), %%rcx\n\t"
+    "movq 8(%%rsi), %%rdx\n\t"
+    // Third couple (r8, r9)
+    "movq 16(%%rdi), %%r8\n\t"
+    "movq 16(%%rsi), %%r9\n\t"
+    // Fourth couple (r10, r11)
+    "movq 24(%%rdi), %%r10\n\t"
+    "movq 24(%%rsi), %%r11\n\t"
+    // Fifth couple (r12, r13)
+    "movq 32(%%rdi), %%r12\n\t"
+    "movq 32(%%rsi), %%r13\n\t"
+    // Sixth couple (r14, r15)
+    "movq 40(%%rdi), %%r14\n\t"
+    "movq 40(%%rsi), %%r15\n\t"
+    // Now pop the call arguments.
+    "popq %%rsi\n\t"
+    "popq %%rdi\n\t"
+    "popq %%rax\n\t"
+    // Do the vmcall.
+    "vmcall\n\t"
+    // Save registers we globber.
+    "pushq %%rax\n\t"
+    "pushq %%rdi\n\t"
+    // Put the return value in the pointer.
+    "movq 16(%%rsp), %%rax\n\t"
+    "movq 8(%%rsp), %%rdi\n\t"
+    "movq %%rdi, (%%rax)\n\t"
+    // Pop the registers.
+    "popq %%rdi\n\t"
+    "popq %%rax\n\t"
+    // Discard the result pointer.
+    "popq %%rax\n\t"
+    // Reload all registers.
+    "popq %%r15\n\t"
+    "popq %%r14\n\t"
+    "popq %%r13\n\t"
+    "popq %%r12\n\t"
+    "popq %%r11\n\t"
+    "popq %%r10\n\t"
+    "popq %%r9\n\t"
+    "popq %%r8\n\t"
+    "popq %%rdx\n\t"
+    "popq %%rcx\n\t"
+    "popq %%rbx\n\t"
+    "popq %%rbp\n\t"
+    "popq %%rsi\n\t"
+    "popq %%rdi\n\t"
+    "popq %%rax\n\t"
+    : 
+    : "rm" (frame), "rm" (fields), "rm" (values)
+    : "rax", "rdi", "memory"
+      );
+  return frame[0];
 failure:
   return FAILURE;
 }
@@ -297,63 +393,182 @@ failure:
   return FAILURE;
 }
 
-int tyche_switch(capa_index_t* transition_handle, void* args)
-{
-  usize result = FAILURE;
+int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
   vmcall_frame_t frame = {
-    .vmcall = TYCHE_SWITCH,
-    .arg_1 = 0,
-    .arg_3 = (usize) args, // TODO: not yet handled by v3
+    .vmcall = TYCHE_READ_ALL,
+    .arg_1 = management,
+    .arg_2 = core,
   };
+  if (regs == NULL) {
+    ERROR("Received null transition and/or regs");
+    return FAILURE;
+  }
+  asm volatile (
+    // Save all the registers on the stack.
+   "pushq %%rax\n\t"
+   "pushq %%rdi\n\t"
+   "pushq %%rsi\n\t"
+   "pushq %%rbp\n\t"
+   "pushq %%rbx\n\t"
+   "pushq %%rcx\n\t"
+   "pushq %%rdx\n\t"
+   "pushq %%r8\n\t"
+   "pushq %%r9\n\t"
+   "pushq %%r10\n\t"
+   "pushq %%r11\n\t"
+   "pushq %%r12\n\t"
+   "pushq %%r13\n\t"
+   "pushq %%r14\n\t"
+   "pushq %%r15\n\t"
+   // Save the array on the stack.
+   "movq %3, %%rax\n\t"
+   "pushq %%rax\n\t"
+   // Put the arguments in registers.
+   "movq %0, %%rax\n\t"
+   "movq %1, %%rdi\n\t"
+   "movq %2, %%rsi\n\t"
+   "vmcall\n\t"
+   // Save the current rax on the stack
+   "pushq %%rax\n\t"
+   // Read the array back into rax.
+    "movq 8(%%rsp), %%rax\n\t"
+   // Save the registers in the array.
+   "movq %%rbx, 8(%%rax)\n\t"
+   "movq %%rcx, 16(%%rax)\n\t"
+   "movq %%rdx, 24(%%rax)\n\t"
+   "movq %%rbp, 32(%%rax)\n\t"
+   "movq %%rsi, 40(%%rax)\n\t"
+   "movq %%rdi, 48(%%rax)\n\t"
+   "movq %%r8, 56(%%rax)\n\t"
+   "movq %%r9, 64(%%rax)\n\t"
+   "movq %%r10, 72(%%rax)\n\t"
+   "movq %%r11, 80(%%rax)\n\t"
+   "movq %%r12, 88(%%rax)\n\t"
+   "movq %%r13, 96(%%rax)\n\t"
+   "movq %%r14, 104(%%rax)\n\t"
+   "movq %%r15, 112(%%rax)\n\t"
+    // Save rax in the array.
+    "popq %%rdi\n\t"
+    "movq %%rdi, (%%rax)\n\t"
+   // Discard the array
+   "popq %%rax\n\t"
+   // Pop the caller's stack value.
+   "popq %%r15\n\t"
+   "popq %%r14\n\t"
+   "popq %%r13\n\t"
+   "popq %%r12\n\t"
+   "popq %%r11\n\t"
+   "popq %%r10\n\t"
+   "popq %%r9\n\t"
+   "popq %%r8\n\t"
+   "popq %%rdx\n\t"
+   "popq %%rcx\n\t"
+   "popq %%rbx\n\t"
+   "popq %%rbp\n\t"
+   "popq %%rsi\n\t"
+   "popq %%rdi\n\t"
+   "popq %%rax\n\t"
+   :
+   : "rm" (frame.vmcall), "rm" (frame.arg_1), "rm" (frame.arg_2), "rm" (regs)
+   : "rax", "rdi"
+      );
+  return SUCCESS;
+}
+
+//TODO rewrite to use the right registers.
+/// TODO there is an opportunity for unused registers here.
+/// That could be part of a write registers if we need it.
+int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
+{
+  int result = FAILURE;
+  usize results[2] = {TYCHE_SWITCH, 0};
   if (transition_handle == NULL) {
     ERROR("Received null handle");
     return FAILURE;
   }
-  frame.arg_1 = *transition_handle;
-  DEBUG("About to switch from the capability lib: handle %lld", transition_handle);
+  results[1] = *transition_handle;
 
 #if defined(CONFIG_X86) || defined(__x86_64__)
-  // TODO We must save some registers on the stack.
   asm volatile(
-    // Saving registers.
+    // Push all the registers on the stack.
+    // Start with rax, that we globber several times.
+    "pushq %%rax\n\t"
+    "pushq %%rdi\n\t"
+    "pushq %%rsi\n\t"
     "pushq %%rbp\n\t"
     "pushq %%rbx\n\t"
     "pushq %%rcx\n\t"
     "pushq %%rdx\n\t"
+    "pushq %%r8\n\t"
+    "pushq %%r9\n\t"
     "pushq %%r10\n\t"
     "pushq %%r11\n\t"
     "pushq %%r12\n\t"
     "pushq %%r13\n\t"
     "pushq %%r14\n\t"
     "pushq %%r15\n\t"
-    "pushfq\n\t"
-    "cli \n\t"
-    "movq %2, %%rax\n\t"
-    "movq %3, %%rdi\n\t"
-    "movq %4, %%rsi\n\t"
-    "movq %5, %%r11\n\t"
+    // Push the arrays, first the main one, then the result one.
+    "movq %1, %%rax\n\t"
+    "pushq %%rax\n\t"
+    "movq %0, %%rax\n\t"
+    "pushq %%rax\n\t"
+    // Set the arguments.
+    "movq 8(%%rax), %%rdi\n\t"
+    "movq 0(%%rax), %%rsi\n\t"
+    "movq %%rsi, %%rax\n\t"
+    // Do the call.
     "vmcall\n\t"
-    // Restoring registers first, otherwise gcc uses them.
-    "popfq\n\t"
+    // We are back. Let's save the values.
+    // Start by saving the current rax.
+    "pushq %%rax\n\t"
+    "pushq %%rdi\n\t"
+    // Read the array back into rax.
+    "movq 16(%%rsp), %%rax\n\t"
+    // Save the return handle.
+    "movq %%rdi, 8(%%rax)\n\t"
+    // Save the return value rax.
+    "movq 8(%%rsp), %%rdi\n\t"
+    "movq %%rdi, (%%rax)\n\t"
+    // Restore rdi.
+    "popq %%rdi\n\t"
+    // Discard rax, we saved it, discard the result array, we're done.
+    "popq %%rax\n\t"
+    "popq %%rax\n\t"
+    // Get the exit frame array.
+    "popq %%rax\n\t"
+    // Save the potential interrupt frame.
+    "movq %%rbx, 0(%%rax)\n\t" // guest rip.
+    "movq %%rcx, 8(%%rax)\n\t" // guest rsp.
+    "movq %%rdx, 16(%%rax)\n\t" // guest rflags.
+    "movq %%rsi, 24(%%rax)\n\t" // guest vm instruction error.
+    "movq %%r8, 32(%%rax)\n\t" // vm exit reason.
+    "movq %%r9, 40(%%rax)\n\t" // vm exit intr info.
+    "movq %%r10, 48(%%rax)\n\t" // vm exit intr error code.
+    "movq %%r11, 56(%%rax)\n\t" // vm exit instruction len.
+    "movq %%r12, 64(%%rax)\n\t" // vm instruction error.
+    // Now put back all the registers.
     "popq %%r15\n\t"
     "popq %%r14\n\t"
     "popq %%r13\n\t"
     "popq %%r12\n\t"
     "popq %%r11\n\t"
     "popq %%r10\n\t"
+    "popq %%r9\n\t"
+    "popq %%r8\n\t"
     "popq %%rdx\n\t"
     "popq %%rcx\n\t"
     "popq %%rbx\n\t"
     "popq %%rbp\n\t"
-    // Get the result from the call.
-    "movq %%rax, %0\n\t"
-    "movq %%rdi, %1\n\t"
-    : "=rm" (result), "=rm" (frame.value_1)
-    : "rm" (frame.vmcall), "rm" (frame.arg_1), "rm" (frame.arg_2), "rm" (frame.arg_3)
-    : "rax", "rdi", "rsi", "r11", "memory");
+    "popq %%rsi\n\t"
+    "popq %%rdi\n\t"
+    "popq %%rax\n\t"
+    :
+    : "rm" (results), "rm" (exit_frame) 
+    : "rax", "memory"
+      );
 
-  // Set the return handle as the one used to do the switch got consummed.
-  *transition_handle = frame.value_1;
+  result = results[0];
+  *transition_handle = results[1];
 #elif defined(CONFIG_RISCV) || defined(__riscv)
   //TODO(neelu)
   TEST(0);

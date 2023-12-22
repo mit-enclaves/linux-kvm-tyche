@@ -9,6 +9,7 @@
 #include "tyche_capabilities_types.h"
 #define _IN_MODULE
 #include "tyche_driver.h"
+#include "arch_cache.h"
 #undef _IN_MODULE
 
 // ————————————————————————————————— Types —————————————————————————————————— //
@@ -88,6 +89,9 @@ typedef struct driver_domain_t {
 
 	/// The domain's entry points per core.
 	entries_t entries;
+
+	/// Cached contexts for domains.
+	arch_cache_t *contexts[ENTRIES_PER_DOMAIN];
 
 	/// The available raw memory segments.
 	/// This is typically allocated during the mmap (from userspace),
@@ -170,8 +174,8 @@ int driver_commit_entry_on_core(driver_domain_t *dom, usize core);
 /// done.
 int driver_commit_domain(driver_domain_t *domain, int full);
 
-/// Implements the transition into a domain.
-int driver_switch_domain(driver_domain_t *domain, void *args);
+/// Implements the transition into a domain on specified core.
+int driver_switch_domain(driver_domain_t *domain, usize core);
 
 /// Delete the domain and revoke the capabilities.
 int driver_delete_domain(driver_domain_t *domain);

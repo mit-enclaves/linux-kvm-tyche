@@ -6321,6 +6321,29 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+bool dbg_aghosn = false;
+
+static int hypercall_marker(struct kvm_vcpu *vcpu)
+{
+  unsigned long rax = vcpu->arch.regs[VCPU_REGS_RAX];
+  unsigned long rdi = vcpu->arch.regs[VCPU_REGS_RDI];
+  if (rax != 0x666) {
+    pr_err("Unknown hypercall: %lx\n", rax);
+    goto skip;
+  }
+  pr_err("Marker called %ld\n", rdi);
+  if (rdi == 191) {
+    dbg_aghosn = true; 
+  }
+
+skip:
+  if (!kvm_skip_emulated_instruction(vcpu)) {
+    pr_err("Unable to skip instruction.\n");
+    BUG_ON(1);
+  }
+  return 0;
+}
+
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -6342,7 +6365,7 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INVD] = kvm_emulate_invd,
 	[EXIT_REASON_INVLPG] = handle_invlpg,
 	[EXIT_REASON_RDPMC] = kvm_emulate_rdpmc,
-	[EXIT_REASON_VMCALL] = kvm_emulate_hypercall,
+	[EXIT_REASON_VMCALL] = hypercall_marker,
 	[EXIT_REASON_VMCLEAR] = handle_vmx_instruction,
 	[EXIT_REASON_VMLAUNCH] = handle_vmx_instruction,
 	[EXIT_REASON_VMPTRLD] = handle_vmx_instruction,
@@ -6843,18 +6866,13 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 			return 1;
 	}
 
-	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT) {
+	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT && dbg_aghosn) {
 		vmx_cache_reg(vcpu, VCPU_REGS_RIP);
 		vmx_cache_reg(vcpu, VCPU_REGS_RSP);
 		pr_err("[0x%lx:0x%lx] -%d-\n",
 				vcpu->arch.regs[VCPU_REGS_RIP],
 				vcpu->arch.regs[VCPU_REGS_RSP],
 				exit_reason.basic);
-		if (exit_reason.basic == EXIT_REASON_CPUID) {
-			pr_err("Reached cpuid\n");
-			tyche_print_all_slots(vcpu);
-			BUG_ON(1);
-		}
 	}*/
 
 	/* If guest state is invalid, start emulating.  L2 is handled above. */
@@ -7628,7 +7646,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	//TODO(@aghosn) how do we relate a vcpu to a core for tyche?
 	//This mapping has to be re-designed I think.
 	write_all_gp_registers(vmx);
-	vmx->fail = driver_switch_domain(vmx_kvm->domain, NULL);
+	vmx->fail = driver_switch_domain(vmx_kvm->domain, vcpu->vcpu_id);
 	read_all_gp_registers(vmx);
 	vcpu->arch.cr2 = native_read_cr2();
 
