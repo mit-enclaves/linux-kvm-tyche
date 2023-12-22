@@ -219,7 +219,8 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (driver_switch_domain(domain, transition.args) != SUCCESS) {
+      //TODO(aghosn): fix this.
+      if (driver_switch_domain(domain, /*transition.args, NULL*/ 0) != SUCCESS) {
         ERROR("Unable to switch to domain %p", handle);
         goto failure;
       }

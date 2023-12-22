@@ -51,9 +51,11 @@ int share_repeat_region(domain_id_t id, paddr_t start, usize size,
 /// Start and end must match existing bounds on a capability.
 int revoke_region(domain_id_t id, paddr_t start, paddr_t end);
 
-/// Switch to the target domain, sets the args in r11.
+/// Switch to the target domain.
+/// If args is not null, registers will be dumped there upon return.
 /// Fails if all transition handles are used.
-int switch_domain(domain_id_t id, void *args);
+/// TODO(aghosn) where is the core?
+int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
 
 /// Delete a domain.
 /// This function goes through all the capabilities in the domain and revokes
@@ -64,6 +66,9 @@ int revoke_domain(domain_id_t id);
 /// This function goes through the revocations and calls internal revoke.
 int revoke_domain_regions(domain_id_t id);
 
+/// Read all general purpose registers (minus rip and rsp)
+int read_gp_domain(domain_id_t id, usize core, usize regs[TYCHE_GP_REGS_SIZE]);
+
 /// Set configurations for the domain (traps, cores, switch type, perms).
 /// The domain must not be sealed and values must be subsets of the parents.
 int set_domain_configuration(domain_id_t id, tyche_configurations_t idx,
@@ -72,6 +77,10 @@ int set_domain_configuration(domain_id_t id, tyche_configurations_t idx,
 /// Set values inside the target domain.
 int set_domain_core_configuration(domain_id_t id, usize core, usize idx,
 				  usize value);
+
+/// Set `size` values in the target domain on core.
+int write_fields(domain_id_t id, usize core, usize *fields, usize *values,
+		 int size);
 
 /// Allocate a core context for the domain.
 int alloc_core_context(domain_id_t id, usize core);

@@ -354,7 +354,7 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	rcu_read_lock();
 
 	if (unlikely(!fault->slot)) {
-		pr_err("This is probably mmio: %llx.", fault->addr);
+		//pr_err("This is probably mmio: %llx.", fault->addr);
 		//tyche_print_all_slots(vcpu);
 		rcu_read_unlock();
 		return RET_PF_EMULATE;

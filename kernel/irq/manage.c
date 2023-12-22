@@ -1479,6 +1479,17 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
 	return 0;
 }
 
+static void debug_aghosn(int value) {
+  asm volatile (
+    "movl $0x666, %%eax\n\t"
+    "movl %0, %%edi\n\t"
+    "vmcall\n\t"
+    :
+    : "rm" (value)
+    : "eax", "edi");
+}
+extern void aghosn_debug_toggle(void);
+
 /*
  * Internal function to register an irqaction - typically used to
  * allocate special interrupts that are part of the architecture.
@@ -1805,11 +1816,16 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		desc->istate &= ~IRQS_SPURIOUS_DISABLED;
 		__enable_irq(desc);
 	}
-
+  debug_aghosn(8011);
+  //aghosn_debug_toggle();
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
+  //aghosn_debug_toggle();
+  debug_aghosn(8012);
 	chip_bus_sync_unlock(desc);
+  debug_aghosn(8013);
 	mutex_unlock(&desc->request_mutex);
 
+  debug_aghosn(8014);
 	irq_setup_timings(desc, new);
 
 	wake_up_and_wait_for_irq_thread_ready(desc, new);
@@ -1818,6 +1834,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	register_irq_proc(irq, desc);
 	new->dir = NULL;
 	register_handler_proc(irq, new);
+  debug_aghosn(8015);
 	return 0;
 
 mismatch:
@@ -2164,7 +2181,8 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	    (!(irqflags & IRQF_SHARED) && (irqflags & IRQF_COND_SUSPEND)) ||
 	    ((irqflags & IRQF_NO_SUSPEND) && (irqflags & IRQF_COND_SUSPEND)))
 		return -EINVAL;
-
+  
+  debug_aghosn(4000);
 	desc = irq_to_desc(irq);
 	if (!desc)
 		return -EINVAL;
@@ -2189,15 +2207,18 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	action->name = devname;
 	action->dev_id = dev_id;
 
+  debug_aghosn(4001);
 	retval = irq_chip_pm_get(&desc->irq_data);
 	if (retval < 0) {
 		kfree(action);
 		return retval;
 	}
-
+  
+  debug_aghosn(4002);
 	retval = __setup_irq(irq, desc, action);
-
+  debug_aghosn(4003);
 	if (retval) {
+    debug_aghosn(4004);
 		irq_chip_pm_put(&desc->irq_data);
 		kfree(action->secondary);
 		kfree(action);

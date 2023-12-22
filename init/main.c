@@ -937,6 +937,16 @@ static void __init print_unknown_bootoptions(void)
 	memblock_free(unknown_options, len);
 }
 
+static void debug_aghosn(int value) {
+  asm volatile (
+    "movl $0x666, %%eax\n\t"
+    "movl %0, %%edi\n\t"
+    "vmcall\n\t"
+    :
+    : "rm" (value)
+    : "eax", "edi");
+}
+
 asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 {
 	char *command_line;
@@ -946,6 +956,8 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	smp_setup_processor_id();
 	debug_objects_early_init();
 	init_vmlinux_build_id();
+
+  debug_aghosn(1);
 
 	cgroup_init_early();
 
@@ -964,17 +976,22 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	setup_boot_config();
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
+  debug_aghosn(2);
 	setup_per_cpu_areas();
+  debug_aghosn(3);
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 	boot_cpu_hotplug_init();
+  debug_aghosn(4);
 
 	build_all_zonelists(NULL);
 	page_alloc_init();
+  debug_aghosn(5);
 
 	pr_notice("Kernel command line: %s\n", saved_command_line);
 	/* parameters may set static keys */
 	jump_label_init();
 	parse_early_param();
+  debug_aghosn(6);
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
 				  __stop___param - __start___param,
@@ -989,6 +1006,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 
 	/* Architectural and non-timekeeping rng init, before allocator init */
 	random_init_early(command_line);
+  debug_aghosn(7);
 
 	/*
 	 * These use large bootmem allocations and must precede
@@ -1001,6 +1019,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	mm_init();
 	poking_init();
 	ftrace_init();
+  debug_aghosn(8);
 
 	/* trace_printk can be enabled here */
 	early_trace_init();
@@ -1011,19 +1030,20 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
-
+  debug_aghosn(9);
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
 		local_irq_disable();
 	radix_tree_init();
 	maple_tree_init();
+  debug_aghosn(10);
 
 	/*
 	 * Set up housekeeping before setting up workqueues to allow the unbound
 	 * workqueue to take non-housekeeping into account.
 	 */
 	housekeeping_init();
-
+  debug_aghosn(11);
 	/*
 	 * Allow workqueue creation and work item queueing/cancelling
 	 * early.  Work item execution depends on kthreads and starts after
@@ -1040,8 +1060,10 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 		initcall_debug_enable();
 
 	context_tracking_init();
+  debug_aghosn(12);
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+  debug_aghosn(13);
 	init_IRQ();
 	tick_init();
 	rcu_init_nohz();
@@ -1051,6 +1073,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	softirq_init();
 	timekeeping_init();
 	time_init();
+  debug_aghosn(14);
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1063,6 +1086,8 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
+
+  debug_aghosn(15);
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
@@ -1079,6 +1104,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
 
+  debug_aghosn(16);
 	lockdep_init();
 
 	/*
@@ -1095,6 +1121,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * not cause "plain-text" data to be decrypted when accessed.
 	 */
 	mem_encrypt_init();
+  debug_aghosn(17);
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok &&
@@ -1107,13 +1134,23 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 #endif
 	setup_per_cpu_pageset();
 	numa_policy_init();
+  debug_aghosn(18);
 	acpi_early_init();
-	if (late_time_init)
+  debug_aghosn(19);
+	if (late_time_init) {
+    debug_aghosn(190);
 		late_time_init();
+    debug_aghosn(191);
+  }
+  debug_aghosn(20);
 	sched_clock_init();
+  debug_aghosn(21);
 	calibrate_delay();
+  debug_aghosn(22);
 	pid_idr_init();
+  debug_aghosn(23);
 	anon_vma_init();
+  debug_aghosn(24);
 #ifdef CONFIG_X86
 	if (efi_enabled(EFI_RUNTIME_SERVICES))
 		efi_enter_virtual_mode();
@@ -1124,6 +1161,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	proc_caches_init();
 	uts_ns_init();
 	key_init();
+  debug_aghosn(25);
 	security_init();
 	dbg_late_init();
 	net_ns_init();
@@ -1132,15 +1170,17 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	signals_init();
 	seq_file_init();
 	proc_root_init();
+  debug_aghosn(26);
 	nsfs_init();
 	cpuset_init();
 	cgroup_init();
 	taskstats_init_early();
 	delayacct_init();
-
+  debug_aghosn(27);
 	check_bugs();
-
+  debug_aghosn(28);
 	acpi_subsystem_init();
+  debug_aghosn(29);
 	arch_post_acpi_subsys_init();
 	kcsan_init();
 

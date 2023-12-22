@@ -21,6 +21,9 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_CONFIGURE_CORE = 14,
 	TYCHE_GET_CONFIG_CORE = 15,
 	TYCHE_ALLOC_CORE_CONTEXT = 16,
+	TYCHE_READ_ALL = 17,
+	TYCHE_WRITE_ALL = 18,
+	TYCHE_WRITE_FIELDS = 19,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -97,7 +100,14 @@ int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 
 int tyche_revoke(capa_index_t id);
 
-int tyche_switch(capa_index_t *transition_handle, void *args);
+int tyche_switch(capa_index_t *transition_handle,
+		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
+
+int tyche_read_gp_registers(capa_index_t management, usize core,
+			    usize regs[TYCHE_GP_REGS_SIZE]);
+
+int tyche_write_fields(capa_index_t management, usize core, usize *fields,
+		       usize *values, int size);
 
 int tyche_duplicate(capa_index_t *new_capa, capa_index_t capa);
 
