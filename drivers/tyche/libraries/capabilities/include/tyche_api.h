@@ -24,6 +24,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_READ_ALL = 17,
 	TYCHE_WRITE_ALL = 18,
 	TYCHE_WRITE_FIELDS = 19,
+	TYCHE_SELF_CONFIG = 20,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -75,6 +76,8 @@ int tyche_create_domain(capa_index_t *management, int aliased);
 
 int tyche_set_domain_config(capa_index_t management, tyche_configurations_t idx,
 			    usize value);
+
+int tyche_set_self_core_config(usize field, usize value);
 
 int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx,
 				 usize value);

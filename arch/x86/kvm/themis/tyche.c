@@ -256,9 +256,9 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		return FAILURE;
 	}
 
-	pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d | prot: %d\n",
+	/*pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d | prot: %d\n",
 	       hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe,
-	       rights);
+	       rights);*/
 
 	return SUCCESS;
 }
@@ -325,7 +325,7 @@ perform_mapping:
 		base_pfn = npfn;
 		tpe = SHARED;
 	}
-	pr_err("eager mapper used %u segments\n", seg_count);
+	//pr_err("eager mapper used %u segments\n", seg_count);
 	return SUCCESS;
 }
 
@@ -369,7 +369,7 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 		seg_tpe = SHARED_REPEAT;
 		goto map_segment;
 	}
-	ERROR("Pages are distinct, attempt eager mapper.\n");
+	//ERROR("Pages are distinct, attempt eager mapper.\n");
 	//mmu_pages_dump(fault->slot, fault->write);
 	if (map_eager(vmx->domain, fault->slot, fault->write) != SUCCESS) {
 		ERROR("Failure in map eager");

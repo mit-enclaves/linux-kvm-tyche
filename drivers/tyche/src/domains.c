@@ -313,6 +313,12 @@ failure:
 }
 EXPORT_SYMBOL(driver_set_domain_configuration);
 
+/// Expose the domain's own configuration for allowed selected fields.
+int driver_set_self_core_config(usize field, usize value) {
+  return tyche_set_self_core_config(field, value);
+}
+EXPORT_SYMBOL(driver_set_self_core_config);
+
 /// Expose the configuration of fields (write).
 int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
                                    usize value) {
