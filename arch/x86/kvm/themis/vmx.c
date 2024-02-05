@@ -4386,6 +4386,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 	WARN_ON(cr0 & X86_CR0_TS);
 	//TODO(@aghosn): we skip the host cr0 writes.
 	//vmcs_writel(HOST_CR0, cr0);  /* 22.2.3 */
+	BUG_ON(driver_set_self_core_config(GUEST_CR0, cr0));
 
 	/*
 	 * Save the most likely value for this task's CR3 in the VMCS.
@@ -4393,14 +4394,18 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 	 */
 	cr3 = __read_cr3();
 	//vmcs_writel(HOST_CR3, cr3);		/* 22.2.3  FIXME: shadow tables */
+	BUG_ON(driver_set_self_core_config(GUEST_CR3, cr3));
 	vmx->loaded_vmcs->host_state.cr3 = cr3;
 
 	/* Save the most likely value for this task's CR4 in the VMCS. */
 	cr4 = cr4_read_shadow();
 	//vmcs_writel(HOST_CR4, cr4);			/* 22.2.3, 22.2.5 */
+	//TODO(aghosn) this triggers a fault upon reentry.
+	//BUG_ON(driver_set_self_core_config(GUEST_CR4, cr4));
 	vmx->loaded_vmcs->host_state.cr4 = cr4;
 
 	//vmcs_write16(HOST_CS_SELECTOR, __KERNEL_CS);  /* 22.2.4 */
+	BUG_ON(driver_set_self_core_config(GUEST_CS_SELECTOR, __KERNEL_CS));
 #ifdef CONFIG_X86_64
 	/*
 	 * Load null selectors, so we can avoid reloading them in
@@ -4408,20 +4413,29 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 	 * the null selectors too (the expected case).
 	 */
 	//vmcs_write16(HOST_DS_SELECTOR, 0);
+	BUG_ON(driver_set_self_core_config(GUEST_DS_SELECTOR, 0));
 	//vmcs_write16(HOST_ES_SELECTOR, 0);
+	BUG_ON(driver_set_self_core_config(GUEST_ES_SELECTOR, 0));
+
 #else
 	//vmcs_write16(HOST_DS_SELECTOR, __KERNEL_DS);  /* 22.2.4 */
+	BUG_ON(driver_set_self_core_config(GUEST_DS_SELECTOR, __KERNEL_DS));
 	//vmcs_write16(HOST_ES_SELECTOR, __KERNEL_DS);  /* 22.2.4 */
+	BUG_ON(driver_set_self_core_config(GUEST_ES_SELECTOR, __KERNEL_DS));
 #endif
 	//vmcs_write16(HOST_SS_SELECTOR, __KERNEL_DS);  /* 22.2.4 */
+	BUG_ON(driver_set_self_core_config(GUEST_SS_SELECTOR, __KERNEL_DS));
 	//vmcs_write16(HOST_TR_SELECTOR, GDT_ENTRY_TSS*8);  /* 22.2.4 */
+	BUG_ON(driver_set_self_core_config(GUEST_TR_SELECTOR,
+					   GDT_ENTRY_TSS * 8));
 
 	//vmcs_writel(HOST_IDTR_BASE, host_idt_base);   /* 22.2.4 */
-
+	BUG_ON(driver_set_self_core_config(GUEST_IDTR_BASE, host_idt_base));
 	//vmcs_writel(HOST_RIP, (unsigned long)vmx_vmexit); /* 22.2.5 */
 
 	rdmsr(MSR_IA32_SYSENTER_CS, low32, high32);
 	//vmcs_write32(HOST_IA32_SYSENTER_CS, low32);
+	BUG_ON(driver_set_self_core_config(GUEST_SYSENTER_CS, low32));
 
 	/*
 	 * SYSENTER is used for 32-bit system calls on either 32-bit or
@@ -4431,20 +4445,25 @@ void vmx_set_constant_host_state(struct vcpu_vmx *vmx)
 	 */
 	if (!IS_ENABLED(CONFIG_IA32_EMULATION) && !IS_ENABLED(CONFIG_X86_32)) {
 		//vmcs_writel(HOST_IA32_SYSENTER_ESP, 0);
+		BUG_ON(driver_set_self_core_config(GUEST_SYSENTER_ESP, 0));
 	}
 
 	rdmsrl(MSR_IA32_SYSENTER_EIP, tmpl);
 	//vmcs_writel(HOST_IA32_SYSENTER_EIP, tmpl);   /* 22.2.3 */
+	BUG_ON(driver_set_self_core_config(GUEST_SYSENTER_EIP, tmpl));
 
 	if (vmcs_config.vmexit_ctrl & VM_EXIT_LOAD_IA32_PAT) {
 		rdmsr(MSR_IA32_CR_PAT, low32, high32);
 		//TODO(@aghosn) what do we do with host state? just skip?
 		//vmcs_write64(HOST_IA32_PAT, low32 | ((u64) high32 << 32));
+		BUG_ON(driver_set_self_core_config(
+			GUEST_IA32_PAT, low32 | ((u64)high32 << 32)));
 	}
 
 	if (cpu_has_load_ia32_efer()) {
 		//TODO(@aghosn) what do we do with host state? just skip?
 		//vmcs_write64(HOST_IA32_EFER, host_efer);
+		BUG_ON(driver_set_self_core_config(GUEST_IA32_EFER, host_efer));
 	}
 }
 
@@ -6323,27 +6342,6 @@ static int handle_notify(struct kvm_vcpu *vcpu)
 
 bool dbg_aghosn = false;
 
-static int hypercall_marker(struct kvm_vcpu *vcpu)
-{
-  unsigned long rax = vcpu->arch.regs[VCPU_REGS_RAX];
-  unsigned long rdi = vcpu->arch.regs[VCPU_REGS_RDI];
-  if (rax != 0x666) {
-    pr_err("Unknown hypercall: %lx\n", rax);
-    goto skip;
-  }
-  pr_err("Marker called %ld\n", rdi);
-  if (rdi == 191) {
-    dbg_aghosn = true; 
-  }
-
-skip:
-  if (!kvm_skip_emulated_instruction(vcpu)) {
-    pr_err("Unable to skip instruction.\n");
-    BUG_ON(1);
-  }
-  return 0;
-}
-
 /*
  * The exit handlers return 1 if the exit was handled fully and guest execution
  * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
@@ -6365,7 +6363,7 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_INVD] = kvm_emulate_invd,
 	[EXIT_REASON_INVLPG] = handle_invlpg,
 	[EXIT_REASON_RDPMC] = kvm_emulate_rdpmc,
-	[EXIT_REASON_VMCALL] = hypercall_marker,
+	[EXIT_REASON_VMCALL] = /*hypercall_marker*/ kvm_emulate_hypercall,
 	[EXIT_REASON_VMCLEAR] = handle_vmx_instruction,
 	[EXIT_REASON_VMLAUNCH] = handle_vmx_instruction,
 	[EXIT_REASON_VMPTRLD] = handle_vmx_instruction,
@@ -6866,13 +6864,17 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 			return 1;
 	}
 
-	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT && dbg_aghosn) {
-		vmx_cache_reg(vcpu, VCPU_REGS_RIP);
-		vmx_cache_reg(vcpu, VCPU_REGS_RSP);
-		pr_err("[0x%lx:0x%lx] -%d-\n",
-				vcpu->arch.regs[VCPU_REGS_RIP],
-				vcpu->arch.regs[VCPU_REGS_RSP],
-				exit_reason.basic);
+	/*if (exit_reason.basic != EXIT_REASON_EXTERNAL_INTERRUPT) {
+    //pr_err("Exit reason: %d\n", exit_reason.basic);
+    if (loopy_loop()) {
+      unsigned long rflags = vmx_get_rflags(vcpu);
+      vmx_cache_reg(vcpu, VCPU_REGS_RIP);
+      vmx_cache_reg(vcpu, VCPU_REGS_RSP);
+      pr_err("[0x%lx:0x%lx] rflags: %lu\n",
+		    vcpu->arch.regs[VCPU_REGS_RIP],
+		    vcpu->arch.regs[VCPU_REGS_RSP],
+		    rflags);
+    }
 	}*/
 
 	/* If guest state is invalid, start emulating.  L2 is handled above. */
@@ -7644,7 +7646,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				   flags);*/
 	//TODO(@aghosn) how do we relate a vcpu to a core for tyche?
-	//This mapping has to be re-designed I think.
+	//This mapping has to be re-designed I think, should be done before disable interrupt.
 	write_all_gp_registers(vmx);
 	vmx->fail = driver_switch_domain(vmx_kvm->domain, vcpu->vcpu_id);
 	read_all_gp_registers(vmx);
@@ -8517,8 +8519,9 @@ static int vmx_set_hv_timer(struct kvm_vcpu *vcpu, u64 guest_deadline_tsc,
 		    kvm_caps.default_tsc_scaling_ratio &&
 	    delta_tsc &&
 	    u64_shl_div_u64(delta_tsc, kvm_caps.tsc_scaling_ratio_frac_bits,
-			    vcpu->arch.l1_tsc_scaling_ratio, &delta_tsc))
+			    vcpu->arch.l1_tsc_scaling_ratio, &delta_tsc)) {
 		return -ERANGE;
+	}
 
 	/*
 	 * If the delta tsc can't fit in the 32 bit after the multi shift,
@@ -8526,8 +8529,10 @@ static int vmx_set_hv_timer(struct kvm_vcpu *vcpu, u64 guest_deadline_tsc,
 	 * It's possible that it fits on later vmentries, but checking
 	 * on every vmentry is costly so we just use an hrtimer.
 	 */
-	if (delta_tsc >> (cpu_preemption_timer_multi + 32))
+	if (delta_tsc >> (cpu_preemption_timer_multi + 32)) {
+		//TODO(aghosn): this is where we fail everytime.
 		return -ERANGE;
+	}
 
 	vmx->hv_deadline_tsc = tscl + delta_tsc;
 	*expired = !delta_tsc;

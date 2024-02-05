@@ -308,8 +308,9 @@ static int __init tsc_setup(char *str)
 
 __setup("tsc=", tsc_setup);
 
+//TODO(aghosn) change back the value of TSC threshold?
 #define MAX_RETRIES		5
-#define TSC_DEFAULT_THRESHOLD	0x20000
+#define TSC_DEFAULT_THRESHOLD	0x200000
 
 /*
  * Read TSC and the reference counters. Take care of any disturbances

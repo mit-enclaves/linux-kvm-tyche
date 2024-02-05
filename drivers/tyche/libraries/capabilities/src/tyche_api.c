@@ -103,6 +103,16 @@ failure:
   return FAILURE;
 }
 
+int tyche_set_self_core_config(usize field, usize value)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SELF_CONFIG,
+    .arg_1 = field,
+    .arg_2 = value,
+  };
+  return tyche_call(&frame);
+}
+
 int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx, usize value)
 {
   vmcall_frame_t frame = {

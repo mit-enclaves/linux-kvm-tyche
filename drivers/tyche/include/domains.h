@@ -145,6 +145,9 @@ int driver_mprotect_domain(driver_domain_t *domain, usize vstart, usize size,
 int driver_set_domain_configuration(driver_domain_t *domain,
 				    driver_domain_config_t tpe, usize value);
 
+/// Sets a self configuration for the core.
+int driver_set_self_core_config(usize field, usize value);
+
 /// Expose the configuration of fields (write).
 int driver_set_domain_core_config(driver_domain_t *dom, usize core, usize idx,
 				  usize value);
