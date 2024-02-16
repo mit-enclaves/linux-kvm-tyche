@@ -34,7 +34,6 @@ kvm-intel-$(CONFIG_X86_SGX_KVM)	+= vmx/sgx.o
 kvm-amd-y		+= svm/svm.o svm/vmenter.o svm/pmu.o svm/nested.o svm/avic.o \
 			   svm/sev.o svm/hyperv.o
 
-kvm-tyche-y             += tyche/tyche.o
 kvm-themis-y	+= themis/vmx.o themis/vmenter.o themis/pmu_intel.o themis/vmcs12.o \
 			   themis/hyperv.o themis/nested.o themis/posted_intr.o themis/tyche.o
 
@@ -46,7 +45,6 @@ endif
 obj-$(CONFIG_KVM)	+= kvm.o
 obj-$(CONFIG_KVM_INTEL)	+= kvm-intel.o
 obj-$(CONFIG_KVM_AMD)	+= kvm-amd.o
-obj-$(CONFIG_KVM_TYCHE) += kvm-tyche.o
 obj-$(CONFIG_KVM_THEMIS) += kvm-themis.o
 
 AFLAGS_svm/vmenter.o    := -iquote $(obj)
