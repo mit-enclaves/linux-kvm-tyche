@@ -9,23 +9,7 @@
 #include <sys/ioctl.h>
 #endif
 
-// ————————————————————————————————— Types —————————————————————————————————— //
-typedef u64 usize;
-
-// ———————————————————— Constants Defined in the Module ————————————————————— //
-#define TE_READ ((uint64_t)MEM_READ)
-#define TE_WRITE ((uint64_t)MEM_WRITE)
-#define TE_EXEC ((uint64_t)MEM_EXEC)
-#define TE_SUPER ((uint64_t)MEM_SUPER)
-#define TE_DEFAULT ((uint64_t)(TE_READ | TE_WRITE | TE_EXEC))
-
-// —————————————————————— Types Exposed by the Library —————————————————————— //
-typedef enum segment_type_t {
-	SHARED = 0,
-	CONFIDENTIAL = 1,
-	SHARED_REPEAT = 2,
-	CONFIDENTIAL_REPEAT = 3,
-} segment_type_t;
+#include "common.h"
 
 // ———————————————————————————————— Messages ———————————————————————————————— //
 

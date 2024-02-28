@@ -81,18 +81,18 @@ static int driver_add_raw_segment(
     usize pa,
     usize size)
 {
-  segment_t *segment = NULL;
+  mmem_t *segment = NULL;
   if (alloc == NULL) {
     ERROR("Provided alloc is null.");
     goto failure;
   }
 
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
+  segment = kmalloc(sizeof(mmem_t), GFP_KERNEL);
   if (segment == NULL) {
     ERROR("Unable to allocate a segment");
     goto failure;
   }
-  memset(segment, 0, sizeof(segment_t));
+  memset(segment, 0, sizeof(mmem_t));
   segment->va = va;
   segment->pa = pa;
   segment->size = size;
@@ -188,7 +188,7 @@ failure:
 
 int driver_delete_alloc(cont_alloc_t *alloc)
 {
-  segment_t* segment = NULL;
+  mmem_t* segment = NULL;
   usize phys_start = 0;
   usize size = 0;
   if (alloc == NULL) {
