@@ -191,3 +191,4 @@ obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
 obj-$(CONFIG_TYCHE_DRIVER)	+= tyche/
+obj-$(CONFIG_CONTALLOC_DRIVER) += contalloc/
