@@ -12,6 +12,11 @@
 #define SUCCESS (0)
 #define FAILURE (-1)
 
+// —————————————————————————————— Common Types —————————————————————————————— //
+
+typedef unsigned long long usize;
+#define UNINIT_USIZE (~((usize)0))
+
 // ————————————————————————————————— Macros ————————————————————————————————— //
 #ifdef TYCHE_USER_SPACE
 #define TEST(cond)                                                          \

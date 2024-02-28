@@ -5,17 +5,16 @@
 #include <linux/mm_types.h>
 
 #include "dll.h"
+#include "common.h"
 #define _IN_MODULE
 #include "contalloc_driver.h"
 #undef _IN_MODULE
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
-#define UNINIT_USIZE (~((usize)0))
-
 typedef struct file *driver_handle_t;
 
-typedef struct segment_t {
+typedef struct mmem_t {
 	/// Start of the virtual memory segment.
 	usize va;
 
@@ -25,12 +24,9 @@ typedef struct segment_t {
 	/// Size of the memory segment.
 	usize size;
 
-	/// Type for the region: {Shared|Confidential}.
-	segment_type_t tpe;
-
 	/// Segments are stored in a double linked list.
-	dll_elem(struct segment_t, list);
-} segment_t;
+	dll_elem(struct mmem_t, list);
+} mmem_t;
 
 /// Describes a continous allocation.
 typedef struct cont_alloc_t {
@@ -42,7 +38,7 @@ typedef struct cont_alloc_t {
 
 	/// The available raw memory segments.
 	/// This is typically allocated during the mmap (from userspace),
-	dll_list(segment_t, raw_segments);
+	dll_list(mmem_t, raw_segments);
 
 	/// Allocations are stored in a global list by the driver.
 	dll_elem(struct cont_alloc_t, list);

@@ -8,8 +8,6 @@
 #include "common.h"
 #include "dll.h"
 
-typedef unsigned long long usize;
-
 #define TYCHE_EXIT_FRAME_SIZE 9
 #define TYCHE_GP_REGS_SIZE 15
 
@@ -59,6 +57,7 @@ typedef enum memory_access_right_t {
 	MEM_WRITE = 1 << 3,
 	MEM_EXEC = 1 << 4,
 	MEM_SUPER = 1 << 5,
+	MEM_HASH = 1 << 6,
 } memory_access_right_t;
 
 /// Access right information for a region capability.
