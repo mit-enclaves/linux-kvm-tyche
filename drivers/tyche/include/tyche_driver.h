@@ -21,13 +21,6 @@
 // —————————————————————— Types Exposed by the Library —————————————————————— //
 typedef struct file *domain_handle_t;
 
-typedef enum segment_type_t {
-	SHARED = 0,
-	CONFIDENTIAL = 1,
-	SHARED_REPEAT = 2,
-	CONFIDENTIAL_REPEAT = 3,
-} segment_type_t;
-
 // ———————————————————————————————— Messages ———————————————————————————————— //
 
 /// Default message used to communicate with the driver.

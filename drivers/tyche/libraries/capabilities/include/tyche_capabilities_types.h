@@ -24,6 +24,13 @@ typedef unsigned long long domain_id_t;
 /// Internal definition of index.
 typedef unsigned long long capa_index_t;
 
+typedef enum segment_type_t {
+	SHARED = 0,
+	CONFIDENTIAL = 1,
+	SHARED_REPEAT = 2,
+	CONFIDENTIAL_REPEAT = 3,
+} segment_type_t;
+
 /// Type of a capability
 typedef enum capa_type_t {
 	Region = 0,
