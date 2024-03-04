@@ -7869,12 +7869,7 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 		ERROR("Unable to set default core for the newly created domain.");
 		return FAILURE;
 	}
-	/// Propagate the config to the monitor.
-	if (driver_commit_domain_configuration(vmx_kvm->domain,
-					       TYCHE_CONFIG_CORES) != SUCCESS) {
-		ERROR("Unable to commit the core configuration");
-		return FAILURE;
-	}
+
 	/// Create a context for this core.
 	if (driver_alloc_core_context(vmx_kvm->domain, vmx->vcpu.vcpu_id) !=
 	    SUCCESS) {
@@ -8019,28 +8014,12 @@ static int vmx_vm_init(struct kvm *kvm)
 		ERROR("Unable to create a domain VM.\n");
 		return FAILURE;
 	}
-	//@aghosn: setup the vcpu type and commit it.
-	if (driver_set_domain_configuration(vmx->domain, TYCHE_CONFIG_SWITCH,
-					    FreshVCPU) != SUCCESS) {
-		ERROR("Unable to set the switch type for the domain.\n");
-		return FAILURE;
-	}
-	if (driver_commit_domain_configuration(
-		    vmx->domain, TYCHE_CONFIG_SWITCH) != SUCCESS) {
-		ERROR("Unable to commit the switch type for the domain.\n");
-		return FAILURE;
-	}
 	//@aghosn: setup the domain's permissions.
 	if (driver_set_domain_configuration(
 		    vmx->domain, TYCHE_CONFIG_PERMISSIONS,
 		    TYCHE_PERM_SPAWN | TYCHE_PERM_SEND |
 			    TYCHE_PERM_DUPLICATE) != SUCCESS) {
 		ERROR("Unable to set the permission type for the domain.");
-		return FAILURE;
-	}
-	if (driver_commit_domain_configuration(
-		    vmx->domain, TYCHE_CONFIG_PERMISSIONS) != SUCCESS) {
-		ERROR("Unable to commit the domain's permissions.");
 		return FAILURE;
 	}
 
@@ -8679,6 +8658,13 @@ static bool vmx_check_apicv_inhibit_reasons(enum kvm_apicv_inhibit reason)
 static void vmx_vm_destroy(struct kvm *kvm)
 {
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
+
+	// Delete the domain.
+	if (driver_delete_domain(kvm_vmx->domain) != SUCCESS) {
+		ERROR("Unable to delete the domain in kvm themis!");
+		BUG_ON(1);
+		;
+	}
 
 	free_pages((unsigned long)kvm_vmx->pid_table,
 		   vmx_get_pid_table_order(kvm));

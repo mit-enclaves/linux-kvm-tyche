@@ -12,6 +12,7 @@
 #include <asm/vmx.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "domains.h"
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
@@ -307,6 +308,11 @@ int driver_set_domain_configuration(driver_domain_t *dom, driver_domain_config_t
     goto failure;
   }
   dom->configs[idx] = value;
+  // Register this directly with tyche.
+  if (set_domain_configuration(dom->domain_id, idx, dom->configs[idx]) != SUCCESS) {
+    ERROR("Capability operation to set configuration");
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;
@@ -414,26 +420,6 @@ failure:
 }
 EXPORT_SYMBOL(driver_get_domain_core_config);
 
-int driver_commit_domain_configuration(driver_domain_t *dom, driver_domain_config_t idx)
-{
-  if (dom == NULL) {
-    ERROR("The domain is null");
-    goto failure;
-  }
-  if (idx < TYCHE_CONFIG_PERMISSIONS || idx >= TYCHE_NR_CONFIGS) {
-    ERROR("Invalid configuration index");
-    goto failure;
-  }
-  if (set_domain_configuration(dom->domain_id, idx, dom->configs[idx]) != SUCCESS) {
-    ERROR("Capability operation to set configuration");
-    goto failure;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-EXPORT_SYMBOL(driver_commit_domain_configuration);
-
 int driver_alloc_core_context(driver_domain_t *dom, usize core) {
   if (dom == NULL) {
     ERROR("The domain is null.");
@@ -465,75 +451,6 @@ failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_alloc_core_context);
-
-int driver_set_entry_on_core(
-    driver_domain_t *dom,
-    usize core,
-    usize cr3,
-    usize rip,
-    usize rsp)
-{
-  if (dom == NULL) {
-    ERROR("The domain is null.");
-    goto failure;
-  }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to set entry point on unallowed core");
-    goto failure;
-  }
-
-  if (core >= ENTRIES_PER_DOMAIN) {
-    ERROR("The supplied core is greater than the number of supported cores");
-    goto failure;
-  }
-
-  dom->entries.entries[core].cr3 = cr3;
-  dom->entries.entries[core].rip = rip;
-  dom->entries.entries[core].rsp = rsp;
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int driver_commit_entry_on_core(driver_domain_t *dom, usize core)
-{
-  if (dom == NULL) {
-    ERROR("The domain is null");
-    goto failure;
-  }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
-    ERROR("Trying to commit entry point on unallowed core");
-    goto failure;
-  }
-  if (core >= ENTRIES_PER_DOMAIN) {
-    ERROR("The supplied core is greater than supported cores.");
-    goto failure;
-  }
-
-  // Set the domain's registers.
-  if (set_domain_core_configuration(
-        dom->domain_id, core, REG_GP_RSP, 
-        dom->entries.entries[core].rsp) != SUCCESS) {
-    ERROR("Unable to set RSP on core %llx", core);
-    goto failure;
-  } 
-  if (set_domain_core_configuration(
-        dom->domain_id, core, REG_GP_RIP,
-        dom->entries.entries[core].rip) != SUCCESS) {
-    ERROR("Unable to set RIP on core %llx", core);
-    goto failure;
-  }
-  if (set_domain_core_configuration(
-        dom->domain_id, core, REG_GP_CR3,
-        dom->entries.entries[core].cr3) != SUCCESS) {
-    ERROR("Unable to set CR3 on core %llx", core);
-    goto failure;
-  }
-
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
 
 int driver_commit_regions(driver_domain_t *dom)
 {
@@ -684,7 +601,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
 
   // We need to commit some of the configuration.
   if (full != 0) {
-    ERROR("Full is not 0");
+    //ERROR("Full is not 0");
     usize core_map = dom->configs[TYCHE_CONFIG_CORES];
     if (driver_commit_regions(dom) != SUCCESS) {
       ERROR("Failed to commit regions.");
@@ -692,7 +609,9 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     }
     
     // The configurations.
-    for (int i = 0; i < TYCHE_NR_CONFIGS; i++) {
+    /*for (int i = 0; i < TYCHE_NR_CONFIGS; i++) {
+      //TODO: fix that we will change the run type.
+      BUG_ON(1);
       if (driver_commit_domain_configuration(dom, i) != SUCCESS) {
         ERROR("Failed to commit config %d", i);
         goto failure;
@@ -714,7 +633,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
         ERROR("Unable to set entry capability for core %d", i); 
         goto failure;
       }
-    } 
+    }*/
   }
   //ERROR("About to seal the domain.");
   //TODO(aghosn) try to flush the cache.

@@ -1,3 +1,4 @@
+#include "tyche_api.h"
 #include <linux/ioctl.h>
 #include <linux/kernel.h>   /* printk() */
 #include <linux/cdev.h> 
@@ -5,6 +6,7 @@
 #include <linux/fs.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "domains.h"
 #define _IN_MODULE
 #include "tyche_driver.h"
@@ -121,9 +123,7 @@ failure:
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
   msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
-  msg_entry_on_core_t commit = {0, 0, 0, 0};
   msg_mprotect_t mprotect = {0, 0, 0, 0};
-  msg_switch_t transition = {0};
   msg_set_perm_t perm = {0};
   driver_domain_t *domain = find_domain(handle);
   if (domain == NULL) {
@@ -158,7 +158,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (perm.idx < TYCHE_CONFIG_PERMISSIONS || perm.idx > TYCHE_CONFIG_SWITCH) {
+      if (perm.idx < TYCHE_CONFIG_PERMISSIONS || perm.idx >= TYCHE_NR_CONFIGS) {
         ERROR("Invalid configuration value.");
         goto failure;
       }
@@ -167,28 +167,23 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       break;
-   case TYCHE_ALLOC_CONTEXT:
-      usize core = (usize) arg;
-      if (driver_alloc_core_context(domain, core) != SUCCESS) {
-        ERROR("Unable to allocate core context!");
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_ENTRY_POINT:
+    case TYCHE_SET_DOMAIN_CORE_CONFIG:
         if (copy_from_user(
-            &commit,
-            (msg_entry_on_core_t*) arg,
-            sizeof(msg_entry_on_core_t))) {
+            &perm,
+            (msg_set_perm_t*) arg,
+            sizeof(msg_set_perm_t))) {
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_entry_on_core(
-            domain,
-            commit.core,
-            commit.page_tables,
-            commit.entry,
-            commit.stack) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
+      if (driver_set_domain_core_config(domain, perm.core, perm.idx, perm.value) != SUCCESS) {
+        ERROR("Setting traps failed for domain %p", handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ALLOC_CONTEXT:
+      usize core = (usize) arg;
+      if (driver_alloc_core_context(domain, core) != SUCCESS) {
+        ERROR("Unable to allocate core context!");
         goto failure;
       }
       break;
@@ -212,21 +207,13 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       break;
     case TYCHE_TRANSITION:
-      if (copy_from_user(
-            &transition,
-            (msg_switch_t*) arg,
-            sizeof(msg_switch_t))) {
-        ERROR("Unable to copy arguments from user.");
-        goto failure;
-      }
-      //TODO(aghosn): fix this.
-      if (driver_switch_domain(domain, /*transition.args, NULL*/ 0) != SUCCESS) {
+      if (driver_switch_domain(domain, 0) != SUCCESS) {
         ERROR("Unable to switch to domain %p", handle);
         goto failure;
       }
       break;
     default:
-      ERROR("The command is not valid!");
+      ERROR("The command is not valid! %d", cmd);
       goto failure;
   }
   return SUCCESS;

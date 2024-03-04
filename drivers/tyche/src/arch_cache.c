@@ -1,5 +1,6 @@
 #include "arch_cache.h"
 #include "common.h"
+#include "common_log.h"
 #include "linux/stddef.h"
 #include "tyche_register_map.h"
 

@@ -1,5 +1,6 @@
 #include "tyche_api.h"
 #include "common.h"
+#include "common_log.h"
 #include "tyche_capabilities_types.h"
 
 /// Simple generic vmcall implementation.
@@ -330,7 +331,7 @@ failure:
 int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
 		usize alias, usize size) {
   vmcall_frame_t frame = {
-    .vmcall = TYCHE_SEND_ALIASED,
+    .vmcall = TYCHE_SEND_REGION,
     .arg_1 = capa,
     .arg_2 = dest,
     .arg_3 = alias,

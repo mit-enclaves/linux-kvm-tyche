@@ -3,6 +3,7 @@
 #include "tyche_capabilities_types.h"
 #define TYCHE_DEBUG 1
 #include "common.h"
+#include "common_log.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -548,7 +549,7 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
       m = end;
       e = capa->info.region.end;
       to_grant = &left;
-      ops_left = access;
+      ops_left = (is_shared)? capa->info.region.flags :  access;
       ops_right = capa->info.region.flags;
     } else {
       // Right case.
@@ -561,7 +562,7 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
       e = capa->info.region.end;
       to_grant = &right;
       ops_left = capa->info.region.flags;
-      ops_right = access;
+      ops_right = (is_shared)? capa->info.region.flags : access;
     }
 
     // Do the duplicate.
@@ -588,7 +589,7 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
     if (segment_region_capa(
           to_send, &left_copy, &right_copy, 
           to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2,
-          to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2) != SUCCESS) {
+          to_send->info.region.start, to_send->info.region.end, access >> 2) != SUCCESS) {
       ERROR("For shared, unable to duplicate capability.");
       goto failure;
     }
@@ -611,7 +612,8 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
 
     // Send the capa to the target.
     if (alias == NO_ALIAS
-        && (tyche_send(child->management->local_id, to_send->local_id) != SUCCESS)) {
+        && (tyche_send_aliased(
+            child->management->local_id, to_send->local_id, 0, start, size) != SUCCESS)) {
       ERROR("Unable to send the capability!");
       goto failure;
     } 

@@ -2,6 +2,7 @@
 #define __KVM_X86_THEMIS_TYCHE_H
 
 #include "common.h"
+#include "common_log.h"
 #include "tyche_capabilities_types.h"
 
 #include "vmx.h"

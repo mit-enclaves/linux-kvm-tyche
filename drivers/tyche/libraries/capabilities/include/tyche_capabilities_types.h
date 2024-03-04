@@ -46,16 +46,6 @@ typedef enum domain_status_t {
 	Sealed = 2,
 } domain_status_t;
 
-/// Define what should be private to a domain.
-typedef enum switch_save_t {
-	/// Reference the same vcpu.
-	SharedVCPU = 1,
-	/// New VCPU, copy state.
-	CopyVCPU = 2,
-	/// New VCPU, raw (for VMs).
-	FreshVCPU = 3,
-} switch_save_t;
-
 /// Region Access Rights
 typedef enum memory_access_right_t {
 	MEM_ACTIVE = 1 << 0,
