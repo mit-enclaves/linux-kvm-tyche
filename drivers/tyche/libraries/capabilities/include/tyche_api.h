@@ -17,7 +17,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_SWITCH = 9,
 	TYCHE_EXIT = 10,
 	TYCHE_CONFIGURE = 12,
-	TYCHE_SEND_ALIASED = 13,
+	TYCHE_SEND_REGION = 13,
 	TYCHE_CONFIGURE_CORE = 14,
 	TYCHE_GET_CONFIG_CORE = 15,
 	TYCHE_ALLOC_CORE_CONTEXT = 16,
@@ -25,14 +25,14 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_WRITE_ALL = 18,
 	TYCHE_WRITE_FIELDS = 19,
 	TYCHE_SELF_CONFIG = 20,
+	TYCHE_ENCLAVE_ATTESTATION = 21,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
 	TYCHE_CONFIG_PERMISSIONS = 0,
 	TYCHE_CONFIG_TRAPS = 1,
 	TYCHE_CONFIG_CORES = 2,
-	TYCHE_CONFIG_SWITCH = 3,
-	TYCHE_NR_CONFIGS = 4,
+	TYCHE_NR_CONFIGS = 3,
 } tyche_configurations_t;
 
 typedef enum tyche_perm_value_t {

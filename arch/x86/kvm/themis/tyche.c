@@ -4,6 +4,7 @@
 #include "linux/kvm_host.h"
 #include "vmx.h"
 #include "../mmu/mmu_internal.h"
+#include "common_kvm.h"
 
 // ———————————————————————— Static helper functions ————————————————————————— //
 
@@ -263,6 +264,37 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 	return SUCCESS;
 }
 
+static int parse_kvm_flags(u32 flags, memory_access_right_t *rights,
+			   segment_type_t *tpe)
+{
+	if (rights == NULL || tpe == NULL) {
+		ERROR("Rights or tpe is NULL");
+		goto failure;
+	}
+	// Default behaviour when no encoding.
+	if ((flags & KVM_FLAGS_ENCODING_PRESENT) == 0) {
+		*tpe = SHARED;
+		*rights = MEM_READ | MEM_EXEC | MEM_SUPER | MEM_ACTIVE;
+		if (!(flags & KVM_MEM_READONLY)) {
+			*rights |= MEM_WRITE;
+		}
+		return SUCCESS;
+	}
+	// When we have an encoding.
+	*tpe = (flags & KVM_FLAGS_SEGMENT_TYPE_MASK) >>
+	       KVM_FLAGS_SEGMENT_TYPE_IDX;
+	*rights = (flags & KVM_FLAGS_MEM_ACCESS_RIGHTS_MASK) >>
+		  KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX;
+	// Quick check for consistency between mem readonly and mem access rights.
+	if (((flags & KVM_MEM_READONLY) != 0) && ((*rights & MEM_WRITE) != 0)) {
+		ERROR("KVM mem readonly but mem access right has write access");
+		goto failure;
+	}
+	return SUCCESS;
+failure:
+	return FAILURE;
+}
+
 static int map_eager(driver_domain_t *dom, struct kvm_memory_slot *slot,
 		     bool write)
 {
@@ -272,13 +304,12 @@ static int map_eager(driver_domain_t *dom, struct kvm_memory_slot *slot,
 		slot, slot->base_gfn, false, false, NULL, write, NULL, NULL);
 	gfn_t base_gfn = slot->base_gfn;
 	usize nb_pages = 1;
-	segment_type_t tpe = SHARED;
-	memory_access_right_t rights = MEM_READ | MEM_EXEC | MEM_SUPER |
-				       MEM_ACTIVE;
+	segment_type_t tpe = 0;
+	memory_access_right_t rights = 0;
 
-	// KVM_MEM_READONLY only disables writes, not execute.
-	if (!(slot->flags & KVM_MEM_READONLY)) {
-		rights |= MEM_WRITE;
+	if (parse_kvm_flags(slot->flags, &rights, &tpe) != SUCCESS) {
+		ERROR("Unable to parse the flags...");
+		return FAILURE;
 	}
 
 	for (i = 1; i <= slot->npages; i++) {
@@ -335,11 +366,11 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
 	struct kvm *kvm = vcpu->kvm;
-	segment_type_t seg_tpe = SHARED;
 	int ret = RET_PF_FIXED;
 	kvm_pfn_t pfn = 0;
-	memory_access_right_t rights = MEM_READ | MEM_EXEC | MEM_SUPER |
-				       MEM_ACTIVE;
+	int is_repeat = 0;
+	segment_type_t tpe = 0;
+	memory_access_right_t rights = 0;
 
 	//TODO(aghosn) Not sure we need this.
 	//kvm_mmu_hugepage_adjust(vcpu, fault);
@@ -366,7 +397,8 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	}
 	if (mmu_pages_all_the_same(fault->slot, fault->write)) {
 		// Might be mmio as a repeated entry.
-		seg_tpe = SHARED_REPEAT;
+		is_repeat = 1;
+		//seg_tpe = SHARED_REPEAT;
 		goto map_segment;
 	}
 	//ERROR("Pages are distinct, attempt eager mapper.\n");
@@ -377,14 +409,31 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	goto unlock;
 
 map_segment:
-	// KVM_MEM_READONLY only disables writes, not execute.
-	if (!(fault->slot->flags & KVM_MEM_READONLY)) {
-		rights |= MEM_WRITE;
+	if (parse_kvm_flags(fault->slot->flags, &rights, &tpe) != SUCCESS) {
+		ERROR("Unable to parse the kvm flags");
+		ret = RET_PF_INVALID;
+		goto unlock;
+	}
+	// Handle the repeat case.
+	if (is_repeat) {
+		switch (tpe) {
+		case SHARED:
+			tpe = SHARED_REPEAT;
+			break;
+		case CONFIDENTIAL:
+			tpe = CONFIDENTIAL_REPEAT;
+			break;
+		default:
+			ERROR("We detected a repeat but base type is already repeat %d",
+			      tpe);
+			ret = RET_PF_INVALID;
+			goto unlock;
+		}
 	}
 	pfn = __gfn_to_pfn_memslot(fault->slot, fault->slot->base_gfn, false,
 				   false, NULL, fault->write, NULL, NULL);
 	if (map_segment(vmx->domain, fault->slot->userspace_addr, pfn,
-			fault->slot->base_gfn, fault->slot->npages, seg_tpe,
+			fault->slot->base_gfn, fault->slot->npages, tpe,
 			rights) != SUCCESS) {
 		pr_err("Map segment failed.\n");
 		ret = RET_PF_INVALID;

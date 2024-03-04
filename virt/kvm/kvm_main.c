@@ -1518,7 +1518,8 @@ static void kvm_replace_memslot(struct kvm *kvm,
 
 static int check_memory_region_flags(const struct kvm_userspace_memory_region *mem)
 {
-	u32 valid_flags = KVM_MEM_LOG_DIRTY_PAGES;
+  //@aghosn: extend the set of valid flags.
+	u32 valid_flags = /*KVM_MEM_LOG_DIRTY_PAGES*/ KVM_FLAGS_VALID_MASK;
 
 #ifdef __KVM_HAVE_READONLY_MEM
 	valid_flags |= KVM_MEM_READONLY;

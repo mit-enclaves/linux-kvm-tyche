@@ -44,21 +44,6 @@ typedef struct {
 	segment_type_t tpe;
 } msg_mprotect_t;
 
-/// Structure of the commit message.
-typedef struct {
-	/// The core
-	usize core;
-
-	/// The pointer to the stack.
-	usize stack;
-
-	/// The entry point.
-	usize entry;
-
-	/// The page tables.
-	usize page_tables;
-} msg_entry_on_core_t;
-
 /// Structure to perform a transition.
 typedef struct {
 	/// The args, will end up in r11 on x86.
@@ -67,6 +52,8 @@ typedef struct {
 
 /// Structure to set permissions, i.e., traps or cores.
 typedef struct {
+	// Core for the config.
+	usize core;
 	// Configuration type.
 	usize idx;
 	// Configuration values.
@@ -80,8 +67,8 @@ typedef struct {
 #define TYCHE_MPROTECT _IOW('a', 'e', msg_mprotect_t *)
 #define TYCHE_TRANSITION _IOR('a', 'f', msg_switch_t *)
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_info_t *)
-#define TYCHE_SET_DOMAIN_CONFIGURATION _IOWR('a', 'i', msg_set_perm_t)
-#define TYCHE_SET_ENTRY_POINT _IOWR('a', 'm', msg_entry_on_core_t *)
+#define TYCHE_SET_DOMAIN_CORE_CONFIG _IOR('a', 'g', msg_set_perm_t *)
+#define TYCHE_SET_DOMAIN_CONFIGURATION _IOR('a', 'i', msg_set_perm_t *)
 #define TYCHE_ALLOC_CONTEXT _IOW('a', 'n', usize)
 
 #endif

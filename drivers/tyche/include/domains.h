@@ -52,20 +52,7 @@ typedef struct segment_t {
 	dll_elem(struct segment_t, list);
 } segment_t;
 
-/// An entry point on a core for the domain.
-typedef struct entry_t {
-	usize cr3;
-	usize rip;
-	usize rsp;
-} entry_t;
-
 #define ENTRIES_PER_DOMAIN (16)
-
-/// Entries per core for the domain.
-typedef struct entries_t {
-	/// One entry per core, total number of entries.
-	entry_t entries[ENTRIES_PER_DOMAIN];
-} entries_t;
 
 /// Indicies in the domain config array.
 typedef tyche_configurations_t driver_domain_config_t;
@@ -86,9 +73,6 @@ typedef struct driver_domain_t {
 
 	/// The domain's configuration.
 	usize configs[TYCHE_NR_CONFIGS];
-
-	/// The domain's entry points per core.
-	entries_t entries;
 
 	/// Cached contexts for domains.
 	arch_cache_t *contexts[ENTRIES_PER_DOMAIN];

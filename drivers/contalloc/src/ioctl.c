@@ -5,6 +5,7 @@
 #include <linux/fs.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "allocs.h"
 #define _IN_MODULE
 #include "contalloc_driver.h"

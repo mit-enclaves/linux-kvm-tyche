@@ -10,6 +10,7 @@
 #include <asm/vmx.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "allocs.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
