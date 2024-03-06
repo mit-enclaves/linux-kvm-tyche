@@ -7,7 +7,6 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
-#include <asm/vmx.h>
 
 #include "common.h"
 #include "common_log.h"

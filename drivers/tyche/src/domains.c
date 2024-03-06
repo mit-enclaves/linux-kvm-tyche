@@ -9,7 +9,12 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
+
+#if defined(CONFIG_X86) || defined(__x86_64__)
 #include <asm/vmx.h>
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+#include "tyche_register_map.h"
+#endif
 
 #include "common.h"
 #include "common_log.h"
@@ -663,6 +668,8 @@ failure:
 }
 EXPORT_SYMBOL(driver_commit_domain);
 
+
+#if defined(CONFIG_X86) || defined(__x86_64__)
 /// The format of the exit frame.
 const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
   GUEST_RIP,
@@ -675,7 +682,15 @@ const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
   VM_EXIT_INSTRUCTION_LEN,
   VM_INSTRUCTION_ERROR,
 };
-
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+/// The format of the exit frame.
+const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
+  GUEST_RIP,
+  GUEST_RSP,
+  GUEST_CR3,
+  EXCEPTION_BITMAP,
+};
+#endif
 // Flush the exit frame.
 // This is called internally and corner cases should have been checked.
 static int update_set_exit(driver_domain_t *dom, usize core, usize exit[TYCHE_EXIT_FRAME_SIZE]) {

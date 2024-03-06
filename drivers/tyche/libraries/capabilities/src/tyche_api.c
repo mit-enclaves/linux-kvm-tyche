@@ -30,8 +30,46 @@ int tyche_call(vmcall_frame_t* frame)
     : "rm" (frame->vmcall), "rm" (frame->arg_1), "rm" (frame->arg_2), "rm" (frame->arg_3), "rm" (frame->arg_4), "rm" (frame->arg_5), "rm" (frame->arg_6) 
     : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "memory");
 #elif defined(CONFIG_RISCV) || defined(__riscv)
-  //TODO(neelu)
-  TEST(0);
+    asm volatile(
+        "addi sp, sp, -9*8\n\t"
+        "sd a0, 0*8(sp)\n\t"
+        "sd a1, 1*8(sp)\n\t"
+        "sd a2, 2*8(sp)\n\t"
+        "sd a3, 3*8(sp)\n\t"
+        "sd a4, 4*8(sp)\n\t"
+        "sd a5, 5*8(sp)\n\t"
+        "sd a6, 6*8(sp)\n\t"
+        "sd a7, 7*8(sp)\n\t"
+        "mv a0, %[sa0]\n\t"
+        "mv a1, %[sa1]\n\t"
+        "mv a2, %[sa2]\n\t"
+        "mv a3, %[sa3]\n\t"
+        "mv a4, %[sa4]\n\t"
+        "mv a5, %[sa5]\n\t" 
+        "mv a6, %[sa6]\n\t"
+	    "li a7, 0x5479636865\n\t"
+        "ecall\n\t"
+        "mv %[da0], a0\n\t"
+        "mv %[da1], a1\n\t"
+        "mv %[da2], a2\n\t"
+        "mv %[da3], a3\n\t"
+        "mv %[da4], a4\n\t" 
+        "mv %[da5], a5\n\t"
+        "mv %[da6], a6\n\t"
+        "ld a0, 0*8(sp)\n\t"
+        "ld a1, 1*8(sp)\n\t"
+        "ld a2, 2*8(sp)\n\t"
+        "ld a3, 3*8(sp)\n\t"
+        "ld a4, 4*8(sp)\n\t"
+        "ld a5, 5*8(sp)\n\t"
+        "ld a6, 6*8(sp)\n\t"
+        "ld a7, 7*8(sp)\n\t"
+        "addi sp, sp, 9*8\n\t"
+
+        : [da0]"=r" (result), [da1]"=r" (frame->value_1), [da2]"=r" (frame->value_2), [da3]"=r" (frame->value_3), [da4]"=r" (frame->value_4), [da5]"=r" (frame->value_5), [da6]"=r" (frame->value_6)
+        :  [sa0]"r" (frame->vmcall), [sa1]"r" (frame->arg_1), [sa2]"r" (frame->arg_2), [sa3]"r" (frame->arg_3), [sa4]"r" (frame->arg_4), [sa5]"r" (frame->arg_5), [sa6]"r" (frame->arg_6)   
+	    : "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"
+    );
 #endif
   return (int)result;
 } 
@@ -65,8 +103,46 @@ int tyche_call_cli(vmcall_frame_t* frame)
     : "rm" (frame->vmcall), "rm" (frame->arg_1), "rm" (frame->arg_2), "rm" (frame->arg_3), "rm" (frame->arg_4), "rm" (frame->arg_5), "rm" (frame->arg_6) 
     : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "memory");
 #elif defined(CONFIG_RISCV) || defined(__riscv)
-  //TODO(neelu)
-  TEST(0);
+  asm volatile(
+        "addi sp, sp, -9*8\n\t"
+        "sd a0, 0*8(sp)\n\t"
+        "sd a1, 1*8(sp)\n\t"
+        "sd a2, 2*8(sp)\n\t"
+        "sd a3, 3*8(sp)\n\t"
+        "sd a4, 4*8(sp)\n\t"
+        "sd a5, 5*8(sp)\n\t"
+        "sd a6, 6*8(sp)\n\t"
+        "sd a7, 7*8(sp)\n\t"
+        "mv a0, %[sa0]\n\t"
+        "mv a1, %[sa1]\n\t"
+        "mv a2, %[sa2]\n\t"
+        "mv a3, %[sa3]\n\t"
+        "mv a4, %[sa4]\n\t"
+        "mv a5, %[sa5]\n\t" 
+        "mv a6, %[sa6]\n\t"
+	    "li a7, 0x5479636865\n\t"
+        "ecall\n\t"
+        "mv %[da0], a0\n\t"
+        "mv %[da1], a1\n\t"
+        "mv %[da2], a2\n\t"
+        "mv %[da3], a3\n\t"
+        "mv %[da4], a4\n\t" 
+        "mv %[da5], a5\n\t"
+        "mv %[da6], a6\n\t"
+        "ld a0, 0*8(sp)\n\t"
+        "ld a1, 1*8(sp)\n\t"
+        "ld a2, 2*8(sp)\n\t"
+        "ld a3, 3*8(sp)\n\t"
+        "ld a4, 4*8(sp)\n\t"
+        "ld a5, 5*8(sp)\n\t"
+        "ld a6, 6*8(sp)\n\t"
+        "ld a7, 7*8(sp)\n\t"
+        "addi sp, sp, 9*8\n\t"
+
+        : [da0]"=r" (result), [da1]"=r" (frame->value_1), [da2]"=r" (frame->value_2), [da3]"=r" (frame->value_3), [da4]"=r" (frame->value_4), [da5]"=r" (frame->value_5), [da6]"=r" (frame->value_6)
+        :  [sa0]"r" (frame->vmcall), [sa1]"r" (frame->arg_1), [sa2]"r" (frame->arg_2), [sa3]"r" (frame->arg_3), [sa4]"r" (frame->arg_4), [sa5]"r" (frame->arg_5), [sa6]"r" (frame->arg_6)   
+	    : "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"
+    );
 #endif
   return (int)result;
 } 
@@ -132,6 +208,7 @@ failure:
 }
 
 int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize* values, int size) {
+#if defined(CONFIG_X86) || defined(__x86_64__)
   usize frame[3] = {TYCHE_WRITE_FIELDS, management, core};
   if (size > 6) {
     ERROR("Wrong size for tyche write fields.");
@@ -222,6 +299,23 @@ int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize
     : "rax", "rdi", "memory"
       );
   return frame[0];
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+  int i = 0;
+  // On risc-v we don't care about performance, we write one field at the time.
+  for (i = 0; i < size; i++) {
+    vmcall_frame_t frame = {
+      .vmcall = TYCHE_WRITE_FIELDS,
+      .arg_1 = management,
+      .arg_2 = core,
+      .arg_3 = fields[i],
+      .arg_4 = values[i],
+    };
+    if (tyche_call(&frame) != SUCCESS) {
+      goto failure;
+    }
+  }
+  return SUCCESS;
+#endif
 failure:
   return FAILURE;
 }
@@ -405,6 +499,7 @@ failure:
 }
 
 int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
+#if defined(CONFIG_X86) || defined(__x86_64__)
   vmcall_frame_t frame = {
     .vmcall = TYCHE_READ_ALL,
     .arg_1 = management,
@@ -483,6 +578,9 @@ int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCH
    : "rm" (frame.vmcall), "rm" (frame.arg_1), "rm" (frame.arg_2), "rm" (regs)
    : "rax", "rdi"
       );
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+  //TODO ignored on riscv for the moment.
+#endif
   return SUCCESS;
 }
 
@@ -491,6 +589,7 @@ int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCH
 /// That could be part of a write registers if we need it.
 int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
 {
+#if defined(CONFIG_X86) || defined(__x86_64__)
   int result = FAILURE;
   usize results[2] = {TYCHE_SWITCH, 0};
   if (transition_handle == NULL) {
@@ -499,7 +598,6 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   }
   results[1] = *transition_handle;
 
-#if defined(CONFIG_X86) || defined(__x86_64__)
   asm volatile(
     // Push all the registers on the stack.
     // Start with rax, that we globber several times.
@@ -581,8 +679,24 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   result = results[0];
   *transition_handle = results[1];
 #elif defined(CONFIG_RISCV) || defined(__riscv)
-  //TODO(neelu)
-  TEST(0);
+  usize result = FAILURE;
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SWITCH,
+    .arg_1 = 0,
+  };
+  if (transition_handle == NULL) {
+    ERROR("Received null handle");
+    return FAILURE;
+  }
+  frame.arg_1 = *transition_handle;
+  if (tyche_call(&frame) != SUCCESS) {
+    return FAILURE;
+  } 
+  *transition_handle = frame.value_1;
+  exit_frame[0] = frame.value_2;
+  exit_frame[1] = frame.value_3;
+  exit_frame[2] = frame.value_4;
+  exit_frame[3] = frame.value_5;
 #endif
   return result;
 }
