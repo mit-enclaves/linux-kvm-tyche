@@ -6,7 +6,12 @@
 
 #define WARN_ON_ONCE(cond) {};
 
+
+#if defined(CONFIG_X86) || defined(__x86_64__)
 #include <asm/vmx.h>
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+// The definition of the fields is imported from the register map above.
+#endif
 #include<linux/string.h>
 
 // Maps vmcs fields width.

@@ -27,7 +27,7 @@ typedef enum reg_gp_t {
 	REG_GP_CR3 = 0x00006802,
 } reg_gp_t;
 
-#ifdef TYCHE_USER_SPACE
+#if defined(TYCHE_USER_SPACE) || defined(CONFIG_RISCV) || defined(__riscv)
 /* VMCS Encodings */
 typedef enum vmcs_field_t {
 	VIRTUAL_PROCESSOR_ID = 0x00000000,
