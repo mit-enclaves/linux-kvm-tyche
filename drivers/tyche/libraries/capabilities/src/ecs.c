@@ -27,7 +27,9 @@ int enumerate_capa(capa_index_t idx, capa_index_t *next, capability_t *capa) {
 
   // Parse the information encoded from AccessRights.as_bits().
   switch (capa->capa_type) {
-  case Region:
+  case _Region:
+  case NewRegion:
+  case RegionRevoke:
     capa->info.region.start = frame.value_1;
     capa->info.region.end = frame.value_2;
     capa->info.region.flags = frame.value_3 >> 8;

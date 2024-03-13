@@ -89,9 +89,9 @@ int tyche_alloc_core_context(capa_index_t management, usize core);
 
 int tyche_seal(capa_index_t *transition, capa_index_t management);
 
-int tyche_segment_region(capa_index_t capa, capa_index_t *left,
-			 capa_index_t *right, usize a1_1, usize a1_2,
-			 usize a1_3, usize a2_1, usize a2_2, usize a2_3);
+int tyche_segment_region(usize is_shared, capa_index_t capa,
+			 capa_index_t *to_send, capa_index_t *revoke,
+			 usize start, usize end, usize prot);
 
 int tyche_send(capa_index_t dest, capa_index_t capa);
 

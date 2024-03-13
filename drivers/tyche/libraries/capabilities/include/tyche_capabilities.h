@@ -28,9 +28,9 @@ int create_domain(domain_id_t *id, int aliased);
 int seal_domain(domain_id_t id);
 
 /// Duplicate capability.
-int segment_region_capa(capability_t *capa, capability_t **left,
-			capability_t **right, usize a1_1, usize a1_2,
-			usize a1_3, usize a2_1, usize a2_2, usize a2_3);
+int segment_region_capa(int is_shared, capability_t *capa,
+			capability_t **to_send, capability_t **revoke,
+			usize start, usize end, usize prot);
 
 /// Grant a memory region.
 /// Finds the correct capability and grants the region to the target domain.
