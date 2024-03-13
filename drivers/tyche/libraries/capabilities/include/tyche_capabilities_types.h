@@ -37,10 +37,12 @@ typedef enum segment_type_t {
 
 /// Type of a capability
 typedef enum capa_type_t {
-	Region = 0,
+	_Region = 0,
 	Management = 1,
 	Channel = 2,
 	Switch = 3,
+	NewRegion = 4,
+	RegionRevoke = 5,
 } capa_type_t;
 
 /// Status of a domain capability.
@@ -99,12 +101,6 @@ typedef struct capability_t {
 	capa_index_t local_id;
 	capa_type_t capa_type;
 	capa_descriptor_t info;
-
-	// Tree structure.
-	// TODO: do we still need this?
-	struct capability_t *parent;
-	struct capability_t *left;
-	struct capability_t *right;
 
 	// This structure can be put in a double-linked list
 	dll_elem(struct capability_t, list);

@@ -372,33 +372,30 @@ failure:
 }
 
 int tyche_segment_region(
+    usize is_shared,
     capa_index_t capa,
-    capa_index_t* left,
-    capa_index_t* right,
-    usize start1,
-    usize end1,
-    usize prot1,
-    usize start2,
-    usize end2,
-    usize prot2)
+    capa_index_t* to_send,
+    capa_index_t* revoke,
+    usize start,
+    usize end,
+    usize prot)
 {
   vmcall_frame_t frame = {
     TYCHE_SEGMENT_REGION,
     capa,
-    start1,
-    end1,
-    start2,
-    end2,
-    (prot1 << 32 | prot2),
+    is_shared,
+    start,
+    end,
+    prot,
   };
-  if (left == NULL || right == NULL) {
+  if (to_send == NULL || revoke == NULL) {
     goto failure;
   }
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   } 
-  *left = frame.value_1;
-  *right = frame.value_2;
+  *to_send = frame.value_1;
+  *revoke = frame.value_2;
   return SUCCESS;
 failure:
   return FAILURE;
