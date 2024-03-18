@@ -460,6 +460,11 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }
+  // Set the revocation information on the capability.
+  // This is useful for to maintain a coherent remapper.
+  revoke->info.revoke_region.alias_start = aliased_start;
+  revoke->info.revoke_region.alias_size = size; 
+  revoke->info.revoke_region.is_repeat = is_repeat;
   // Sort things out in the different lists.
   dll_remove(&(local_domain.capabilities), to_send, list);
   dll_remove(&(local_domain.capabilities), revoke, list);
@@ -493,17 +498,26 @@ int share_repeat_region(domain_id_t id, paddr_t start, usize size,
 
 // @warning the handle should be deallocated by the caller!!!!
 int internal_revoke(child_domain_t *child, capability_t *capa) {
+  paddr_t size = 0;
   if (child == NULL || capa == NULL) {
     ERROR("null args.");
     goto failure;
   }
 
   if (capa->capa_type != RegionRevoke) {
-    ERROR("Error[internal revoke] supplied capability is not a revocation");
+    ERROR("Supplied capability is not a revocation");
     goto failure;
   }
 
+  /*
   if (tyche_revoke(capa->local_id) != SUCCESS) {
+    goto failure;
+  }
+  */
+  if (tyche_revoke_region(capa->local_id, child->management->local_id,
+        capa->info.revoke_region.alias_start,
+        capa->info.revoke_region.alias_size) != SUCCESS) {
+    ERROR("Unable to revoke the region!");
     goto failure;
   }
 

@@ -69,6 +69,18 @@ typedef struct capa_region_t {
 	memory_access_right_t flags;
 } capa_region_t;
 
+/// Access right information for a revoke region capability.
+// The alias is set locally within the library.
+typedef struct capa_revoke_region_t {
+	paddr_t start;
+	paddr_t end;
+	memory_access_right_t flags;
+	/// Alias information.
+	paddr_t alias_start;
+	paddr_t alias_size;
+	int is_repeat;
+} capa_revoke_region_t;
+
 /// Information about a domain management capability.
 typedef struct capa_management_t {
 	domain_status_t status;
@@ -89,6 +101,7 @@ typedef struct capa_switch_t {
 /// A capability can be any of these three types.
 typedef union capa_descriptor_t {
 	capa_region_t region;
+	capa_revoke_region_t revoke_region;
 	capa_management_t management;
 	capa_channel_t channel;
 	capa_switch_t transition;
