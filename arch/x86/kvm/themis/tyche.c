@@ -222,6 +222,7 @@ static int mmu_pages_all_the_same(struct kvm_memory_slot *slot, bool write)
 	return 1;
 }
 
+/*
 static void mmu_pages_dump(struct kvm_memory_slot *slot, bool write)
 {
 	int i = 0;
@@ -234,7 +235,7 @@ static void mmu_pages_dump(struct kvm_memory_slot *slot, bool write)
 		pr_err("[Mapping] gpa: %llx, hpa: %llx, i: %d\n", gfn, pfn, i);
 	}
 	BUG_ON(1);
-}
+}*/
 
 static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		       usize gfn, usize npages, segment_type_t tpe,
@@ -364,7 +365,7 @@ perform_mapping:
 /// Inspired by kvm_tdp_mmu_map.
 int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
-	struct kvm_mmu *mmu = vcpu->arch.mmu;
+	//struct kvm_mmu *mmu = vcpu->arch.mmu;
 	struct kvm *kvm = vcpu->kvm;
 	int ret = RET_PF_FIXED;
 	kvm_pfn_t pfn = 0;
