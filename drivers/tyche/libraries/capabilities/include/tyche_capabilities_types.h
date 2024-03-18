@@ -37,11 +37,10 @@ typedef enum segment_type_t {
 
 /// Type of a capability
 typedef enum capa_type_t {
-	_Region = 0,
 	Management = 1,
 	Channel = 2,
 	Switch = 3,
-	NewRegion = 4,
+	Region = 4,
 	RegionRevoke = 5,
 } capa_type_t;
 

@@ -442,32 +442,6 @@ failure:
   return FAILURE;
 }
 
-// TODO: do not exist anymore in v3!
-int tyche_share(
-    capa_index_t* left,
-    capa_index_t dest,
-    capa_index_t capa,
-    usize a1,
-    usize a2,
-    usize a3)
-{
-  vmcall_frame_t frame = {
-    .vmcall = TYCHE_SHARE,
-    .arg_1 = dest,
-    .arg_2 = capa,
-    .arg_3 = a1,
-    .arg_4 = a2,
-    .arg_5 = a3
-  };
-  if (left == NULL || tyche_call(&frame) != SUCCESS) {
-    goto failure;
-  }
-  *left = frame.value_1; 
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
 int tyche_duplicate(capa_index_t* new_capa, capa_index_t capa) {
   vmcall_frame_t frame = {
    .vmcall = TYCHE_DUPLICATE, 

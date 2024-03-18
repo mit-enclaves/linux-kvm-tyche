@@ -422,7 +422,7 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
 
   // Now attempt to find the capability.
   dll_foreach(&(local_domain.capabilities), capa, list) {
-    if (capa->capa_type != NewRegion || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
       continue;
     }
     if ((dll_contains(
@@ -544,7 +544,7 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end) {
 
   // Try to find the region.
   dll_foreach(&(child->revocations), capa, list) {
-    if (capa->capa_type == NewRegion && capa->info.region.start == start &&
+    if (capa->capa_type == Region && capa->info.region.start == start &&
         capa->info.region.end == end) {
       // Found it!
       break;
