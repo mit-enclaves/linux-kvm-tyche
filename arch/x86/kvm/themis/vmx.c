@@ -1390,7 +1390,7 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu,
 	}
 
 	if (!already_loaded) {
-		void *gdt = get_current_gdt_ro();
+		//void *gdt = get_current_gdt_ro();
 
 		/*
 		 * Flush all EPTP/VPID contexts, the new pCPU may have stale
