@@ -470,6 +470,23 @@ failure:
   return FAILURE;
 }
 
+int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_t size)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_REVOKE_ALIASED_REGION,
+    .arg_1 = id,
+    .arg_2 = child,
+    .arg_3 = gpa,
+    .arg_4 = size,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
 #if defined(CONFIG_X86) || defined(__x86_64__)
   vmcall_frame_t frame = {
