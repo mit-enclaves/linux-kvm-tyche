@@ -1,4 +1,5 @@
 #include "arch_cache.h"
+#include "linux/rwsem.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -23,16 +24,83 @@
 #include "tyche_capabilities_types.h"
 #include "arch_cache.h"
 
+// ————————————————————————— Helpers for lock state ————————————————————————— //
+
+// For the moment we disable the lock-checks for domains managed by KVM.
+// This is done by first checking the handle is not null.
+
+#define CHECK_RLOCK(dom, failure_label) \
+    if (dom->handle != NULL && down_write_trylock(&(dom->rwlock)) == 1) { \
+      ERROR("The domain should be R-locked."); \
+      up_write(&(dom->rwlock)); \
+      goto failure_label; \
+    }
+
+#define CHECK_WLOCK(dom, failure_label) \
+    if (dom->handle != NULL && down_read_trylock(&(dom->rwlock)) == 1) { \
+      ERROR("The domain should be W-locked."); \
+      up_read(&(dom->rwlock)); \
+      goto failure_label; \
+    }
+
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
-static dll_list(driver_domain_t, domains);
+typedef struct global_state_t {
+  // R/W-lock to access domains.
+  struct rw_semaphore rwlock;
+  // The list of domains managed by the driver.
+  // Accesses should acquire the appropriate R/W-lock.
+  dll_list(driver_domain_t, domains);
+} global_state_t;
+
+static global_state_t state;
+
+
+static int state_add_domain(driver_domain_t* dom) {
+  if (dom == NULL) {
+    ERROR("The supplied domain is null.");
+    goto failure;
+  }
+
+  if (dom->list.next != NULL || dom->list.prev != NULL) {
+    ERROR("The domain is already in a list?");
+    goto failure;
+  }
+
+  // W-lock the list.
+  down_write(&(state.rwlock));
+  dll_add(&(state.domains), dom, list);
+  up_write(&(state.rwlock)); 
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+static int state_remove_domain(driver_domain_t * dom) {
+  if (dom == NULL) {
+    ERROR("The supplied domain is null.");
+    goto failure;
+  }
+  if (dom->handle == NULL) {
+    ERROR("Trying to remove a domain with null handle.");
+    goto failure;
+  }
+  CHECK_WLOCK(dom, failure);
+  down_write(&(state.rwlock)); 
+  dll_remove(&(state.domains), dom, list);
+  up_write(&(state.rwlock));
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //
 
-driver_domain_t* find_domain(domain_handle_t handle)
+driver_domain_t* find_domain(domain_handle_t handle, bool write)
 {
   driver_domain_t* dom = NULL;
-  dll_foreach((&domains), dom, list) {
+  down_read(&(state.rwlock));
+  dll_foreach((&(state.domains)), dom, list) {
     if (dom->handle == handle) {
       break;
     }
@@ -45,8 +113,16 @@ driver_domain_t* find_domain(domain_handle_t handle)
     ERROR("Expected pid: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
+  // Acquire the lock on the domain.
+  if (write) {
+    down_write(&(dom->rwlock));
+  } else {
+    down_read(&(dom->rwlock));
+  }
+  up_read(&(state.rwlock));
   return dom;
 failure:
+  up_read(&(state.rwlock));
   return NULL;
 }
 
@@ -55,7 +131,8 @@ failure:
 
 void driver_init_domains(void)
 {
-  dll_init_list((&domains));
+  init_rwsem(&(state.rwlock));
+  dll_init_list((&(state.domains)));
   driver_init_capabilities();
 }
 
@@ -65,9 +142,15 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   driver_domain_t* dom = NULL;
   // This function can be called from the kvm backend as well.
   // In such cases, the domain handle will be null.
-  dom = (handle != NULL)? find_domain(handle) : NULL;
+  if (handle == NULL && ptr == NULL) {
+    ERROR("Domain without a handle should provide a non-null ptr.");
+    goto failure;
+  }
+  dom = (handle != NULL)? find_domain(handle, false) : NULL;
   if (dom != NULL) {
     ERROR("The domain with handle %p already exists.", handle);
+    // Unlock the domain.
+    up_read(&(dom->rwlock));
     goto failure;
   }
   dom = kmalloc(sizeof(driver_domain_t), GFP_KERNEL);
@@ -81,6 +164,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   dom->handle = handle;
   dom->domain_id = UNINIT_DOM_ID;
   dom->state = DRIVER_NOT_COMMITED;
+  init_rwsem(&(dom->rwlock));
   dll_init_list(&(dom->raw_segments));
   dll_init_list(&(dom->segments));
   dll_init_elem(dom, list);
@@ -91,8 +175,11 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
     goto failure_free;
   }
 
-  // Add the domain to the list.
-  dll_add((&domains), dom, list);
+  // Add the domain to the list if it has a handle.
+  // Domains without handles come from KVM.
+  if (handle != NULL || ptr == NULL) {
+    state_add_domain(dom);
+  }
 
   // If the pointer is non null, forward a reference.
   if (ptr != NULL) {
@@ -116,6 +203,9 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     ERROR("The provided vma is null or handle is null.");
     goto failure;
   }
+  // Expect the domain to be w-locked.
+  CHECK_WLOCK(dom, failure);
+
   // Checks on the vma.
   if (vma->vm_end <= vma->vm_start) {
     ERROR("End is smaller than start");
@@ -178,6 +268,8 @@ int driver_add_raw_segment(
     ERROR("Provided domain is null.");
     goto failure;
   }
+  // Expects to be w-locked.
+  CHECK_WLOCK(dom, failure);
 
   segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
   if (segment == NULL) {
@@ -207,6 +299,9 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
     ERROR("The provided domain is NULL.");
     goto failure;
   }
+  // We expect to have a r-lock on the domain.
+  CHECK_RLOCK(dom, failure);
+
   if (dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
@@ -235,6 +330,9 @@ int driver_mprotect_domain(
     ERROR("The domain is null.");
     goto failure;
   } 
+
+  /// Expects the domain to be write-locked.
+  CHECK_WLOCK(dom, failure);
 
   if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for domain");
@@ -308,6 +406,9 @@ int driver_set_domain_configuration(driver_domain_t *dom, driver_domain_config_t
     ERROR("The domain is null");
     goto failure;
   }
+  // Expects the domain to be W-locked.
+  CHECK_WLOCK(dom, failure);
+
   if (idx < TYCHE_CONFIG_PERMISSIONS || idx >= TYCHE_NR_CONFIGS) {
     ERROR("Invalid configuration index");
     goto failure;
@@ -337,6 +438,10 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
     ERROR("The domain is null");
     goto failure;
   }
+
+  // Expects the domain to be R-locked.
+  CHECK_RLOCK(dom, failure);
+
   /*if (dom->state != DRIVER_NOT_COMMITED) {
     ERROR("The domain is already committed or dead: %d", dom->state);
     goto failure;
@@ -350,11 +455,16 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
     ERROR("Trying to set config on unallowed/unallocated core: %u", (unsigned int) core);
     goto failure;
   }
-  if (cache_write_any(dom->contexts[core], idx, value) != SUCCESS) {
-    ERROR("Unable to write the value in the cache %llx.\n", idx);     
+  
+  // Lock the core context.
+  down_write(&(dom->contexts[core]->rwlock));
+
+  if (cache_write_any(&(dom->contexts[core]->cache), idx, value) != SUCCESS) {
+    ERROR("Unable to write the value in the cache %llx.\n", idx);  
+    up_write(&(dom->contexts[core]->rwlock));
     goto failure;
   }
-
+  up_write(&(dom->contexts[core]->rwlock));
   //TODO(aghosn): we need to flush later.
   /*if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
@@ -381,6 +491,10 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, u
     ERROR("The domain is null");
     goto failure;
   } 
+
+  // Expects the domain to be R-locked.
+  CHECK_RLOCK(dom, failure);
+
   if (value == NULL) {
     ERROR("The provided value is null.");
     goto failure;
@@ -398,27 +512,39 @@ int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx, u
     ERROR("The domain is already committed or dead");
     goto failure;
   }*/
+
+  // First try a read-lock.
+  down_read(&(dom->contexts[core]->rwlock));
   // The value was in the cache.
-  if (cache_read_any(dom->contexts[core], idx, &v) == 0) {
+  if (cache_read_any(&(dom->contexts[core]->cache), idx, &v) == 0) {
       *value = v;
+      up_read(&(dom->contexts[core]->rwlock));
       return SUCCESS;
   }
+  // Unlock, we will have to get a write lock on the context.
+  up_read(&(dom->contexts[core]->rwlock));
   // The value is not in the cache.
   if (dom->domain_id == UNINIT_DOM_ID) {
     ERROR("The domain is not initialized with tyche");
     goto failure;
   }
+
+  // acquire the write lock on the context.
+  down_write(&(dom->contexts[core]->rwlock));
   if (get_domain_core_configuration(dom->domain_id, core, idx, value)
       != SUCCESS) {
     ERROR("Unable to get core configuration");
+    up_write(&(dom->contexts[core]->rwlock));
     goto failure;
   }
   // Update the cache.
-  res = cache_set_any(dom->contexts[core], idx, *value);
+  res = cache_set_any(&(dom->contexts[core]->cache), idx, *value);
   if (res != 0) {
     ERROR("Unable to update the cache value %llx, %d\n", idx, res);
+    up_write(&(dom->contexts[core]->rwlock));
     return FAILURE;
   }
+  up_write(&(dom->contexts[core]->rwlock));
   return SUCCESS;
 failure:
   return FAILURE;
@@ -430,6 +556,9 @@ int driver_alloc_core_context(driver_domain_t *dom, usize core) {
     ERROR("The domain is null.");
     goto failure;
   }
+  // The domain must be W-locked.
+  CHECK_WLOCK(dom, failure);
+
   if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
       dom->contexts[core] != NULL) {
     ERROR("Trying to commit entry point on unallowed/allocated core");
@@ -451,6 +580,7 @@ int driver_alloc_core_context(driver_domain_t *dom, usize core) {
   }
   // Set everything to 0.
   memset(dom->contexts[core], 0, sizeof(arch_cache_t));
+  init_rwsem(&(dom->contexts[core]->rwlock));
   return SUCCESS;
 failure:
   return FAILURE;
@@ -464,6 +594,9 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("The domain is null");
     goto failure;
   }
+  // Expect the domain to be W-locked.
+  CHECK_WLOCK(dom, failure);
+
   if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for dom");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
@@ -501,7 +634,7 @@ int driver_commit_regions(driver_domain_t *dom)
               segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
-          goto delete_fail;
+          goto failure;
         }
         break;
       case CONFIDENTIAL:
@@ -512,7 +645,7 @@ int driver_commit_regions(driver_domain_t *dom)
               segment->flags, segment->alias) != SUCCESS) {
           ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
-          goto delete_fail;
+          goto failure;
         }
         break;
 	case SHARED_REPEAT:
@@ -523,23 +656,18 @@ int driver_commit_regions(driver_domain_t *dom)
 					segment->alias) != SUCCESS) {
 			ERROR("Unable to share repeat segment %llx -- %llx {%x}",
 					segment->va, segment->size, segment->flags);
-			goto delete_fail;
+			goto failure;
 		}
 		break;
       default:
         ERROR("Invalid tpe for segment!");
-        goto delete_fail;
+        goto failure;
     }
     segment->state = DRIVER_COMMITED;
     DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
         segment->pa, segment->pa + segment->size, segment->tpe);
   }
   return SUCCESS;
-delete_fail:
-  if (revoke_domain(dom->domain_id) != SUCCESS) {
-    ERROR("Failed to revoke the domain %lld for domain %p.", dom->domain_id, dom);
-  }
-  dom->domain_id = UNINIT_DOM_ID;
 failure:
   return FAILURE;
 }
@@ -554,9 +682,9 @@ static int flush_caches(driver_domain_t *dom, usize core) {
   int to_write = 0;
   memset(values, 0xFF, sizeof(values));
   memset(fields, 0xFF, sizeof(fields));
-  to_write = cache_collect_dirties(dom->contexts[core], values, fields, 114);
+  to_write = cache_collect_dirties(&(dom->contexts[core]->cache), values, fields, 114);
   if (to_write < 0) {
-    ERROR("Our buffer is too small, need: %d", cache_dirty_count(dom->contexts[core]));
+    ERROR("Our buffer is too small, need: %d", cache_dirty_count(&(dom->contexts[core]->cache)));
     return -1;
   }
   // Write the registers.
@@ -580,6 +708,9 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     ERROR("The domain is null.");
     goto failure;
   } 
+  // The domain must be W-locked.
+  CHECK_WLOCK(dom, failure);
+
   if (dom->handle != NULL && dom->pid != current->pid) {
     ERROR("Wrong pid for dom");
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
@@ -644,11 +775,14 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   //TODO(aghosn) try to flush the cache.
   for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
     if (dom->contexts[i] != NULL) {
+      down_write(&(dom->contexts[i]->rwlock));
       if (flush_caches(dom, i) != SUCCESS) {
         ERROR("Unable to flush the cache.");
+        up_write(&(dom->contexts[i]->rwlock));
         goto failure;
       }
-      cache_clear(dom->contexts[i], 0);
+      cache_clear(&(dom->contexts[i]->cache), 0);
+      up_write(&(dom->contexts[i]->rwlock));
     }
   }
   // Commit the domain.
@@ -695,7 +829,7 @@ const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
 // This is called internally and corner cases should have been checked.
 static int update_set_exit(driver_domain_t *dom, usize core, usize exit[TYCHE_EXIT_FRAME_SIZE]) {
   int i = 0;
-  arch_cache_t* cache = dom->contexts[core];
+  arch_cache_t* cache = &(dom->contexts[core]->cache);
   for (i = 0; i < TYCHE_EXIT_FRAME_SIZE; i++) {
     if (cache_set_any(cache, EXIT_FRAME_FIELDS[i], exit[i]) != SUCCESS) {
       ERROR("Unable to set a cache values?");
@@ -727,7 +861,7 @@ const usize GP_REGS_FIELDS[TYCHE_GP_REGS_SIZE] = {
 
 static int update_set_gp(driver_domain_t *dom, usize core, usize regs[TYCHE_GP_REGS_SIZE])  {
   int i = 0;
-  arch_cache_t *cache = dom->contexts[core];
+  arch_cache_t *cache = &(dom->contexts[core]->cache);
   for (i = 0; i < TYCHE_GP_REGS_SIZE; i++) {
     if (cache_set_any(cache, GP_REGS_FIELDS[i], regs[i]) != SUCCESS) {
       ERROR("Unable to set a gp cache value?");
@@ -746,6 +880,9 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     ERROR("The domain is null.");
     goto failure;
   } 
+  // Expects the domain to be R-locked.
+  CHECK_RLOCK(dom, failure);
+
   if (core >= ENTRIES_PER_DOMAIN) {
     ERROR("Invalid core.");
     goto failure;
@@ -756,37 +893,46 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     goto failure;
   }
 
+  // LOCK THE CORE CONTEXT.
+  // Hold the lock until we return from the switch.
+  down_write(&(dom->contexts[core]->rwlock));
+  
   // Let's flush the caches.
   if (flush_caches(dom, core) != SUCCESS) {
     ERROR("Unable to flush caches.");
-    goto failure;
+    goto failure_unlock;
   }
 
   // We can clear the cache now.
-  cache_clear(dom->contexts[core], 1);
+  cache_clear(&(dom->contexts[core]->cache), 1);
 
   DEBUG("About to try to switch to domain %lld| dom %lld",
       dom->domain_id, dom->handle);
   if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {
     ERROR("Unable to switch to domain %p", dom->handle);
-    goto failure;
+    goto failure_unlock;
   }
   // Update the exit frame.
   if (update_set_exit(dom, core, exit_frame) != SUCCESS) {
     ERROR("Unable to update the exit frame.");
-    goto failure;
+    goto failure_unlock;
   }
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
   if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) {
     ERROR("Unable to read the domain's general purpose registers.");
-    goto failure;
+    goto failure_unlock;
   }
   if (update_set_gp(dom, core, gp_frame) != SUCCESS) {
     ERROR("Unable to set the domain's general purpose registers.");
-    goto failure;
+    goto failure_unlock;
   }
+
+  // UNLOCK THE CORE CONTEXT.
+  up_write(&(dom->contexts[core]->rwlock));
   return SUCCESS;
+failure_unlock:
+  up_write(&(dom->contexts[core]->rwlock));
 failure:
   return FAILURE;
 }
@@ -801,6 +947,9 @@ int driver_delete_domain(driver_domain_t *dom)
     ERROR("The domain is null.");
     goto failure;
   }
+
+  /// We cannot delete if we do not have exclusive access to the domain.
+  CHECK_WLOCK(dom, failure);
   if (dom->domain_id == UNINIT_DOM_ID) {
     goto delete_dom_struct;
   }
@@ -835,7 +984,10 @@ delete_dom_struct:
       kfree(dom->contexts[i]);
     }
   } 
-  dll_remove(&domains, dom, list);
+  if (dom->handle != NULL && state_remove_domain(dom) != SUCCESS) {
+    ERROR("Unable to remove the domain from the state list.");
+    goto failure;
+  }
   kfree(dom);
   return SUCCESS;
 failure:
@@ -853,6 +1005,10 @@ int driver_delete_domain_regions(driver_domain_t *dom)
 		ERROR("The domain is null.");
 		goto failure;
 	}
+
+  // The domain should be W-locked.
+  CHECK_WLOCK(dom, failure);
+
 	if (dom->domain_id == UNINIT_DOM_ID) {
 		goto delete_dom_struct;
 	}
