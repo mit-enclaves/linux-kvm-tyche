@@ -1,6 +1,7 @@
 #ifndef __SRC_DOMAINS_H__
 #define __SRC_DOMAINS_H__
 
+#include "linux/rwsem.h"
 #include <linux/fs.h>
 #include <linux/mm_types.h>
 
@@ -57,6 +58,15 @@ typedef struct segment_t {
 /// Indicies in the domain config array.
 typedef tyche_configurations_t driver_domain_config_t;
 
+/// A domain's core context.
+typedef struct context_t {
+	/// Locking mechanism for the context.
+	struct rw_semaphore rwlock;
+
+	/// The context data.
+	arch_cache_t cache;
+} context_t;
+
 /// Describes an domain.
 typedef struct driver_domain_t {
 	/// The creator task's pid.
@@ -75,7 +85,7 @@ typedef struct driver_domain_t {
 	usize configs[TYCHE_NR_CONFIGS];
 
 	/// Cached contexts for domains.
-	arch_cache_t *contexts[ENTRIES_PER_DOMAIN];
+	context_t *contexts[ENTRIES_PER_DOMAIN];
 
 	/// The available raw memory segments.
 	/// This is typically allocated during the mmap (from userspace),
@@ -88,12 +98,18 @@ typedef struct driver_domain_t {
 
 	/// Domains are stored in a global list by the driver.
 	dll_elem(struct driver_domain_t, list);
+
+	/// R/W-lock: multiple readers when working on contexts, one writer when
+	/// modifying the domain itself.
+	struct rw_semaphore rwlock;
 } driver_domain_t;
 
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 
 // Find a currently active domain from a file descriptor.
-driver_domain_t *find_domain(domain_handle_t handle);
+// This function acquires the state's readlock. It returns a locked
+// domain (write lock if `write` is true, read lock otherwise).
+driver_domain_t *find_domain(domain_handle_t handle, bool write);
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
@@ -110,22 +126,27 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr,
 /// Handles an mmap call to the driver.
 /// This reserves a contiguous region and registers it until a domain claims
 /// it.
+/// @warning: expects the domain to be w-locked.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
 /// Add a raw memory segment to the domain.
+/// @warning: expects the domain to be w-locked.
 int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
 			   usize size);
 
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
+/// @warning: expects the domain to be R-locked.
 int driver_get_physoffset_domain(driver_domain_t *domain, usize *phys_offset);
 
 /// Sets up access rights and conf|share for the segment.
+/// @warning: expects the domain to be W-locked.
 int driver_mprotect_domain(driver_domain_t *domain, usize vstart, usize size,
 			   memory_access_right_t flags, segment_type_t tpe,
 			   usize alias);
 
 /// Sets the domain's configuration (cores, traps, switch type).
+/// @warning: expects the domain to be W-locked.
 int driver_set_domain_configuration(driver_domain_t *domain,
 				    driver_domain_config_t tpe, usize value);
 
@@ -133,40 +154,44 @@ int driver_set_domain_configuration(driver_domain_t *domain,
 int driver_set_self_core_config(usize field, usize value);
 
 /// Expose the configuration of fields (write).
+/// @warning: expects the domain to be R-locked and will W-lock the context.
 int driver_set_domain_core_config(driver_domain_t *dom, usize core, usize idx,
 				  usize value);
 
 /// Allocate a core context for the specified core.
+/// @warning: expects the domain to be W-locked.
 int driver_alloc_core_context(driver_domain_t *dom, usize core);
 
 /// Expose the configuration of fields (read).
+/// @warning: expects a R-lock on the domain, will acquire a R-lock on the core.
+/// If the value is not in the cache, it will acquire a W-lock on the core.
 int driver_get_domain_core_config(driver_domain_t *dom, usize core, usize idx,
 				  usize *value);
 
-/// Set the entry point on a core.
-int driver_set_entry_on_core(driver_domain_t *domain, usize core, usize cr3,
-			     usize rip, usize rsp);
-
 /// Performs the calls to tyche monitor for the selected regions.
+/// @warning: requires a W-lock on the domain.
 int driver_commit_regions(driver_domain_t *dom);
 
 /// Commit the configuration, i.e., call the capabilities.
+/// @warning: requires a W-lock on the domain.
 int driver_commit_domain_configuration(driver_domain_t *dom,
 				       driver_domain_config_t idx);
 
-/// Commit the entry on a core, i.e., call the capabilities.
-int driver_commit_entry_on_core(driver_domain_t *dom, usize core);
-
 /// Commits the domain. This is where the capability operations are mostly
 /// done.
+/// @warning: requires a write lock on the domain.
 int driver_commit_domain(driver_domain_t *domain, int full);
 
 /// Implements the transition into a domain on specified core.
+/// @warning: requires a R-lock on the domain. Will acquire a W-lock on the core
+/// we switch to.
 int driver_switch_domain(driver_domain_t *domain, usize core);
 
 /// Delete the domain and revoke the capabilities.
+/// @warning: requires a W-lock on the domain.
 int driver_delete_domain(driver_domain_t *domain);
 
 /// Delete the domain's regions.
+/// @warning: requires a W-lock on the domain.
 int driver_delete_domain_regions(driver_domain_t *dom);
 #endif /*__SRC_DOMAINS_H__*/
