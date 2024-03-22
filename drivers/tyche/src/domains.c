@@ -738,7 +738,6 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   // We need to commit some of the configuration.
   if (full != 0) {
     //ERROR("Full is not 0");
-    usize core_map = dom->configs[TYCHE_CONFIG_CORES];
     if (driver_commit_regions(dom) != SUCCESS) {
       ERROR("Failed to commit regions.");
       goto failure;
@@ -876,10 +875,11 @@ failure:
 int driver_switch_domain(driver_domain_t * dom, usize core) {
   usize exit_frame[TYCHE_EXIT_FRAME_SIZE] = {0};
   usize gp_frame[TYCHE_GP_REGS_SIZE] = {0};
+  int local_cpuid = 0;
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
-  } 
+  }
   // Expects the domain to be R-locked.
   CHECK_RLOCK(dom, failure);
 
@@ -893,10 +893,21 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     goto failure;
   }
 
+  // Lock the core.
+  down_write(&(dom->contexts[core]->rwlock));
+
+  // This disables preemption to guarantee we remain on the same core after the
+  // check.
+  local_cpuid = get_cpu();
+  // Check we are on the right core.
+  if (core != local_cpuid) {
+    ERROR("Attempt to switch on core %lld from cpu %d", core, local_cpuid);
+    goto failure_unlock;
+  }
+
   // LOCK THE CORE CONTEXT.
   // Hold the lock until we return from the switch.
-  down_write(&(dom->contexts[core]->rwlock));
-  
+
   // Let's flush the caches.
   if (flush_caches(dom, core) != SUCCESS) {
     ERROR("Unable to flush caches.");
@@ -906,12 +917,12 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
   // We can clear the cache now.
   cache_clear(&(dom->contexts[core]->cache), 1);
 
-  DEBUG("About to try to switch to domain %lld| dom %lld",
-      dom->domain_id, dom->handle);
+  DEBUG("About to try to switch to domain %lld", dom->domain_id);
   if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {
     ERROR("Unable to switch to domain %p", dom->handle);
     goto failure_unlock;
   }
+
   // Update the exit frame.
   if (update_set_exit(dom, core, exit_frame) != SUCCESS) {
     ERROR("Unable to update the exit frame.");
@@ -928,10 +939,13 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     goto failure_unlock;
   }
 
+  // Reenable the preemption.
+  put_cpu();
   // UNLOCK THE CORE CONTEXT.
   up_write(&(dom->contexts[core]->rwlock));
   return SUCCESS;
 failure_unlock:
+  put_cpu();
   up_write(&(dom->contexts[core]->rwlock));
 failure:
   return FAILURE;
