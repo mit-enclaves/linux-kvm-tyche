@@ -239,7 +239,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       break;
     case TYCHE_TRANSITION:
       ACQUIRE_DOM(false);
-      if (driver_switch_domain(domain, 0) != SUCCESS) {
+      if (driver_switch_domain(domain, arg) != SUCCESS) {
         ERROR("Unable to switch to domain %p", handle);
         RELEASE_DOM(false);
         goto failure;

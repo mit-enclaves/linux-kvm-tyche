@@ -12188,8 +12188,10 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	int ret;
 	unsigned long flags;
 
-	if (type)
+	if ((!kvm_is_tyche_enabled()) && type)
 		return -EINVAL;
+
+  kvm->type = type;
 
 	ret = kvm_page_track_init(kvm);
 	if (ret)

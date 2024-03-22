@@ -5900,6 +5900,12 @@ void kvm_enable_tyche_mmu(int (*pf)(struct kvm_vcpu *, struct kvm_page_fault *),
 }
 EXPORT_SYMBOL_GPL(kvm_enable_tyche_mmu);
 
+bool kvm_is_tyche_enabled(void)
+{
+  return tyche_enabled;
+}
+EXPORT_SYMBOL_GPL(kvm_is_tyche_enabled);
+
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 		       int tdp_max_root_level, int tdp_huge_page_level)
 {

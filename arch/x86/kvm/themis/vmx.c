@@ -7860,15 +7860,6 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 	err = -ENOMEM;
 
 	vmx->vpid = allocate_vpid();
-	vmx_kvm->coremap |= (1 << vmx->vcpu.vcpu_id);
-
-	///@aghosn: setup cores here.
-	///TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
-	if (driver_set_domain_configuration(vmx_kvm->domain, TYCHE_CONFIG_CORES,
-					    vmx_kvm->coremap) != SUCCESS) {
-		ERROR("Unable to set default core for the newly created domain.");
-		return FAILURE;
-	}
 
 	/// Create a context for this core.
 	if (driver_alloc_core_context(vmx_kvm->domain, vmx->vcpu.vcpu_id) !=
@@ -7983,6 +7974,8 @@ free_vpid:
 static int vmx_vm_init(struct kvm *kvm)
 {
 	struct kvm_vmx *vmx = to_kvm_vmx(kvm);
+	unsigned long perms = 0;
+	unsigned long core_map = 0;
 	if (!ple_gap)
 		kvm->arch.pause_in_guest = true;
 
@@ -8015,11 +8008,29 @@ static int vmx_vm_init(struct kvm *kvm)
 		return FAILURE;
 	}
 	//@aghosn: setup the domain's permissions.
+	if (kvm->type != 0)
+		perms = ((kvm->type) >> 32) << 32;
+	else {
+		perms = TYCHE_PERM_SPAWN | TYCHE_PERM_SEND |
+			TYCHE_PERM_DUPLICATE;
+	}
 	if (driver_set_domain_configuration(
-		    vmx->domain, TYCHE_CONFIG_PERMISSIONS,
-		    TYCHE_PERM_SPAWN | TYCHE_PERM_SEND |
-			    TYCHE_PERM_DUPLICATE) != SUCCESS) {
+		    vmx->domain, TYCHE_CONFIG_PERMISSIONS, perms) != SUCCESS) {
 		ERROR("Unable to set the permission type for the domain.");
+		return FAILURE;
+	}
+
+	if (kvm->type != 0) {
+		core_map = ((kvm->type) << 32) >> 32;
+	} else {
+		core_map = (1UL << num_possible_cpus()) - 1;
+	}
+	vmx->coremap = core_map;
+	///@aghosn: setup cores here.
+	///TODO(@aghosn): should we expose this differently? or add it to the vcpu create?
+	if (driver_set_domain_configuration(vmx->domain, TYCHE_CONFIG_CORES,
+					    vmx->coremap) != SUCCESS) {
+		ERROR("Unable to set default core for the newly created domain.");
 		return FAILURE;
 	}
 
