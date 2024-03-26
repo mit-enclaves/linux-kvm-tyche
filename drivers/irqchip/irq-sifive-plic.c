@@ -19,6 +19,8 @@
 #include <linux/spinlock.h>
 #include <asm/smp.h>
 
+#define TYCHE_PLIC_PATCH
+
 /*
  * This driver implements a version of the RISC-V PLIC with the actual layout
  * specified in chapter 8 of the SiFive U5 Coreplex Series Manual:
@@ -297,7 +299,37 @@ static void plic_handle_irq(struct irq_desc *desc)
 	WARN_ON_ONCE(!handler->present);
 
 	chained_irq_enter(chip, desc);
+#ifdef TYCHE_PLIC_PATCH 
+    hwirq = readl(claim);
+    while (hwirq) {
+        int err = generic_handle_domain_irq(handler->priv->irqdomain,
+                                                    hwirq);
+        if (unlikely(err)) {
+            pr_warn_ratelimited("can't find mapping for hwirq %lu\n", hwirq);
+        }
 
+        uint64_t sip = csr_read(CSR_SIP);
+        hwirq = readl(claim);
+
+        if (sip & 0x200 && !hwirq) {
+            //Ecall to Tyche to clear SIP.SEIP
+            asm volatile(
+                "addi sp, sp, -2*8\n\t"
+                "sd a0, 0*8(sp)\n\t"
+                "sd a7, 1*8(sp)\n\t"
+                "li a7, 0x5479636865\n\t"
+                "li a0, 0x5479636865\n\t"
+                "ecall\n\t"
+                "ld a0, 0*8(sp)\n\t"
+                "ld a7, 1*8(sp)\n\t"
+                "addi sp, sp, 2*8\n\t"
+                :
+                :
+                : "a0", "a7"
+            );
+        }
+    }
+#else
 	while ((hwirq = readl(claim))) {
 		int err = generic_handle_domain_irq(handler->priv->irqdomain,
 						    hwirq);
@@ -305,6 +337,7 @@ static void plic_handle_irq(struct irq_desc *desc)
 			pr_warn_ratelimited("can't find mapping for hwirq %lu\n",
 					hwirq);
 	}
+#endif
 
 	chained_irq_exit(chip, desc);
 }

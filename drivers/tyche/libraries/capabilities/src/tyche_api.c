@@ -310,6 +310,7 @@ int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize
       .arg_3 = fields[i],
       .arg_4 = values[i],
     };
+    ERROR("Tyche call write fields: %lx : %lx",fields[i], values[i]);
     if (tyche_call(&frame) != SUCCESS) {
       goto failure;
     }
@@ -686,9 +687,11 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
     return FAILURE;
   }
   frame.arg_1 = *transition_handle;
-  if (tyche_call(&frame) != SUCCESS) {
+  result = tyche_call(&frame);
+  if (result != SUCCESS) {
     return FAILURE;
-  } 
+  }
+  ERROR("FRAME VALUE 1 - new transition handle: %lx", frame.value_1);
   *transition_handle = frame.value_1;
   exit_frame[0] = frame.value_2;
   exit_frame[1] = frame.value_3;

@@ -561,13 +561,15 @@ static int flush_caches(driver_domain_t *dom, usize core) {
   }
   // Write the registers.
   while (i < to_write) {
-    int end = ((i + 6) <= to_write)? i+6 : to_write; 
+    int end = ((i + 6) <= to_write)? i+6 : to_write;
     if (write_fields(dom->domain_id, core, fields+i, values+i, end - i) != SUCCESS) {
+#if defined(CONFIG_X86) || defined(__x86_64__)
       ERROR("Trouble writting the values to domain.");
       for (int j = 0; j < end -i; j++) {
         ERROR("field: %llx, value: %llx", fields[i+j], values[i+j]);
       }
       return -1;
+#endif
     }
     i = end;
   }
@@ -824,6 +826,15 @@ delete_dom_struct:
   }
 
   // Delete the domain memory region.
+  
+#if defined(CONFIG_RISCV) || defined(__riscv)
+  void * allocation = phys_to_virt((phys_addr_t)(phys_start)); 
+  for (int i = 0; i < (size/PAGE_SIZE); i++) {
+    char* mem = ((char*)allocation) + i * PAGE_SIZE;
+    ClearPageReserved(virt_to_page((unsigned long)mem));
+  }
+#endif
+
   // If the memory was allocated with mmap, we need to free the pages.
   if (dom->handle != NULL) {
     free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
