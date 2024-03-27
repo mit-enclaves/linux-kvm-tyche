@@ -137,7 +137,8 @@ int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
 /// @warning: expects the domain to be R-locked.
-int driver_get_physoffset_domain(driver_domain_t *domain, usize *phys_offset);
+int driver_get_physoffset_domain(driver_domain_t *domain, usize slot_id,
+				 usize *phys_offset);
 
 /// Sets up access rights and conf|share for the segment.
 /// @warning: expects the domain to be W-locked.

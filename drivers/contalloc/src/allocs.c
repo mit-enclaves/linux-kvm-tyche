@@ -107,6 +107,7 @@ int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
+  int order = 0;
   if (vma == NULL || alloc->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
@@ -124,16 +125,17 @@ int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
     ERROR("Unable to find the right alloc.");
     goto failure;
   }
-  if (!dll_is_empty(&(alloc->raw_segments))) {
-    ERROR("The alloc has already been initialized.");
-    goto failure;
-  }
 
   // Allocate a contiguous memory region.
   size = vma->vm_end - vma->vm_start;
+  order = get_order(size);
+  if (order >= MAX_ORDER) {
+    ERROR("The requested size of: %llx has order %d while max order is %d",
+        size, order, MAX_ORDER);
+  }
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
   if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages.");
+    ERROR("Alloca pages exact failed to allocate the pages %llx.", size);
     goto failure;
   }
   memset(allocation, 0, size);
@@ -162,8 +164,10 @@ failure:
   return FAILURE;
 }
 
-int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize* phys_offset)
+int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize slot_id, usize* phys_offset)
 {
+  mmem_t *seg = NULL;
+  usize slot_counter = 0;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -176,12 +180,14 @@ int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize* phys_offset)
     ERROR("The alloc %p has not been initialized, call mmap first!", alloc);
     goto failure;
   }
-  if (alloc->raw_segments.head->list.next != NULL) {
-    ERROR("An mmap-based alloc should not have more than one raw segment.\n");
-    goto failure;
+  dll_foreach(&(alloc->raw_segments), seg, list) {
+    if (slot_counter == slot_id) {
+      *phys_offset = seg->pa;
+      return SUCCESS;
+    }
+    slot_counter++;
   }
-  *phys_offset = dll_head(&(alloc->raw_segments))->pa;
-  return SUCCESS;
+  ERROR("Failure to find the right memslot %lld.\n", slot_id);
 failure:
   return FAILURE;
 }
@@ -189,7 +195,6 @@ failure:
 int driver_delete_alloc(cont_alloc_t *alloc)
 {
   mmem_t* segment = NULL;
-  usize phys_start = 0;
   usize size = 0;
   if (alloc == NULL) {
     ERROR("The alloc is null.");
@@ -198,20 +203,17 @@ int driver_delete_alloc(cont_alloc_t *alloc)
   // Delete all segments;
   while(!dll_is_empty(&(alloc->raw_segments))) {
     segment = dll_head(&(alloc->raw_segments));
-    if (phys_start == 0) {
-      phys_start = segment->pa;
-    }
     size += segment->size;
     dll_remove(&(alloc->raw_segments), segment, list);
+    //TODO: this creates a bug if munmap was called from userspace.
+    //Let's just skip it for now.
+    /*if (alloc->handle != NULL) {
+      free_pages_exact(phys_to_virt((phys_addr_t)(segment->pa)), size);
+    }*/
     kfree(segment);
     segment = NULL;
   }
 
-  // Delete the alloc memory region.
-  // If the memory was allocated with mmap, we need to free the pages.
-  if (alloc->handle != NULL) {
-    free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
-  }
   dll_remove(&allocs, alloc, list);
   kfree(alloc);
   return SUCCESS;

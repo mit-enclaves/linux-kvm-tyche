@@ -21,6 +21,6 @@ typedef struct {
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
-#define CONTALLOC_GET_PHYSOFFSET _IOR('a', 'c', msg_info_t *)
+#define CONTALLOC_GET_PHYSOFFSET _IOWR('a', 'c', msg_info_t *)
 
 #endif

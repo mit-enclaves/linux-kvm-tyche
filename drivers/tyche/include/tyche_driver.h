@@ -62,7 +62,7 @@ typedef struct {
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
-#define TYCHE_GET_PHYSOFFSET _IOR('a', 'c', msg_info_t *)
+#define TYCHE_GET_PHYSOFFSET _IOWR('a', 'c', msg_info_t *)
 #define TYCHE_COMMIT _IOWR('a', 'd', void *)
 #define TYCHE_MPROTECT _IOW('a', 'e', msg_mprotect_t *)
 #define TYCHE_TRANSITION _IOR('a', 'f', msg_switch_t *)

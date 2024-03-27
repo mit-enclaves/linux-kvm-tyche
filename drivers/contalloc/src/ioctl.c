@@ -129,7 +129,11 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   }
   switch(cmd) {
     case CONTALLOC_GET_PHYSOFFSET:
-      if (driver_get_physoffset_alloc(alloc, &info.physoffset) != SUCCESS) {
+      if (copy_from_user(&info, (msg_info_t*)arg, sizeof(msg_info_t))) {
+        ERROR("Unable to copy from user.");
+        goto failure;
+      }
+      if (driver_get_physoffset_alloc(alloc, info.virtaddr, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for alloc %p", handle);
         goto failure;
       }
