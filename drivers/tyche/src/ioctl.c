@@ -143,8 +143,15 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   driver_domain_t *domain = NULL;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
+      if (copy_from_user(
+            &info,
+            (msg_info_t*) arg,
+            sizeof(msg_info_t))) {
+        ERROR("Unable to copy info arguments from user.");
+        goto failure;
+      }
       ACQUIRE_DOM(false);
-      if (driver_get_physoffset_domain(domain, &info.physoffset) != SUCCESS) {
+      if (driver_get_physoffset_domain(domain, info.virtaddr, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for domain %p", handle);
         RELEASE_DOM(false);
         goto failure;

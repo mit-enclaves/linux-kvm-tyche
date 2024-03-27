@@ -199,6 +199,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
+  int order;
   if (vma == NULL || dom->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
@@ -219,16 +220,24 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     ERROR("Unable to find the right domain.");
     goto failure;
   }
-  if (!dll_is_empty(&(dom->raw_segments)) || !dll_is_empty(&(dom->segments))) {
+  if (!dll_is_empty(&(dom->segments))) {
     ERROR("The domain has already been initialized.");
     goto failure;
   }
 
   // Allocate a contiguous memory region.
+  // If the order of the size requested is too big, fail.
+  // This should be handled inside the loader, not the driver.
   size = vma->vm_end - vma->vm_start;
+  order = get_order(size);
+  if (order >= MAX_ORDER) {
+    ERROR("The requested size of: %llx has order %d while max order is %d",
+        size, order, MAX_ORDER);
+    goto failure;
+  }
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
   if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages.");
+    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", size);
     goto failure;
   }
   memset(allocation, 0, size);
@@ -289,8 +298,10 @@ failure:
 }
 EXPORT_SYMBOL(driver_add_raw_segment);
 
-int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
+int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phys_offset)
 {
+  segment_t *seg = NULL;
+  usize slot_counter = 0;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -306,12 +317,14 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize* phys_offset)
     ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
   }
-  if (dom->raw_segments.head->list.next != NULL) {
-    ERROR("An mmap-based domain should not have more than one raw segment.\n");
-    goto failure;
+  dll_foreach(&(dom->raw_segments), seg, list) {
+    if (slot_counter == slot_id) {
+      *phys_offset = seg->pa;
+      return SUCCESS;
+    }
+    slot_counter++;
   }
-  *phys_offset = dll_head(&(dom->raw_segments))->pa;
-  return SUCCESS;
+  ERROR("Failure to find the right memslot %lld.\n", slot_id);
 failure:
   return FAILURE;
 }
@@ -648,17 +661,17 @@ int driver_commit_regions(driver_domain_t *dom)
           goto failure;
         }
         break;
-	case SHARED_REPEAT:
-		if (share_repeat_region(dom->domain_id,
-					segment->pa,
-					segment->size,
-					segment->flags,
-					segment->alias) != SUCCESS) {
-			ERROR("Unable to share repeat segment %llx -- %llx {%x}",
-					segment->va, segment->size, segment->flags);
-			goto failure;
-		}
-		break;
+  case SHARED_REPEAT:
+    if (share_repeat_region(dom->domain_id,
+          segment->pa,
+          segment->size,
+          segment->flags,
+          segment->alias) != SUCCESS) {
+      ERROR("Unable to share repeat segment %llx -- %llx {%x}",
+          segment->va, segment->size, segment->flags);
+      goto failure;
+    }
+    break;
       default:
         ERROR("Invalid tpe for segment!");
         goto failure;
@@ -957,7 +970,6 @@ EXPORT_SYMBOL(driver_switch_domain);
 int driver_delete_domain(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
-  usize phys_start = 0;
   usize size = 0;
   if (dom == NULL) {
     ERROR("The domain is null.");
@@ -979,17 +991,19 @@ delete_dom_struct:
   // Delete all segments;
   while(!dll_is_empty(&(dom->segments))) {
     segment = dll_head(&(dom->segments));
-    if (phys_start == 0) {
-      phys_start = segment->pa;
-    }
     size += segment->size;
     dll_remove(&(dom->segments), segment, list);
+    //TODO: this creates a bug if user code calls munmap.
+    /*if (dom->handle != NULL) {
+      free_pages_exact(phys_to_virt((phys_addr_t)(segment->pa)), size);
+    }*/
     kfree(segment);
     segment = NULL;
   }
 
   // Delete the domain memory region.
-  
+  // Neelu Todo: Check if ClearPageReserved is still needed for RISC-V. 
+ /*  
 #if defined(CONFIG_RISCV) || defined(__riscv)
   void * allocation = phys_to_virt((phys_addr_t)(phys_start)); 
   for (int i = 0; i < (size/PAGE_SIZE); i++) {
@@ -1002,7 +1016,7 @@ delete_dom_struct:
   if (dom->handle != NULL) {
     free_pages_exact(phys_to_virt((phys_addr_t)(phys_start)), size);
   }
-
+*/
   // Delete the contexts.
   for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
     if (dom->contexts[i] != NULL) {
@@ -1023,38 +1037,34 @@ EXPORT_SYMBOL(driver_delete_domain);
 
 int driver_delete_domain_regions(driver_domain_t *dom)
 {
-	segment_t* segment = NULL;
-	usize phys_start = 0;
-	usize size = 0;
-	if (dom == NULL) {
-		ERROR("The domain is null.");
-		goto failure;
-	}
+  segment_t* segment = NULL;
+  usize size = 0;
+  if (dom == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  }
 
   // The domain should be W-locked.
   CHECK_WLOCK(dom, failure);
 
-	if (dom->domain_id == UNINIT_DOM_ID) {
-		goto delete_dom_struct;
-	}
-	if (revoke_domain_regions(dom->domain_id) != SUCCESS) {
-		ERROR("Unable to delete the domain %lld for domain %p", dom->domain_id, dom);
-		goto failure;
-	}
+  if (dom->domain_id == UNINIT_DOM_ID) {
+    goto delete_dom_struct;
+  }
+  if (revoke_domain_regions(dom->domain_id) != SUCCESS) {
+    ERROR("Unable to delete the domain %lld for domain %p", dom->domain_id, dom);
+    goto failure;
+  }
 delete_dom_struct:
-	// Delete all segments;
-	while(!dll_is_empty(&(dom->segments))) {
-		segment = dll_head(&(dom->segments));
-		if (phys_start == 0) {
-			phys_start = segment->pa;
-		}
-		size += segment->size;
-		dll_remove(&(dom->segments), segment, list);
-		kfree(segment);
-		segment = NULL;
-	}
-	return SUCCESS;
+  // Delete all segments;
+  while(!dll_is_empty(&(dom->segments))) {
+    segment = dll_head(&(dom->segments));
+    size += segment->size;
+    dll_remove(&(dom->segments), segment, list);
+    kfree(segment);
+    segment = NULL;
+  }
+  return SUCCESS;
 failure:
-	return FAILURE;
+  return FAILURE;
 }
 EXPORT_SYMBOL(driver_delete_domain_regions);

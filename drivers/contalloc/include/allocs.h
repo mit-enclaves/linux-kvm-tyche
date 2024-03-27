@@ -60,7 +60,8 @@ int driver_create_alloc(driver_handle_t handle);
 int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma);
 /// Returns the alloc's physoffset.
 /// We expect the handle to be valid.
-int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize *phys_offset);
+int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize slot_id,
+				usize *phys_offset);
 /// Delete the allocation.
 int driver_delete_alloc(cont_alloc_t *alloc);
 #endif /*__SRC_ALLOCS_H__*/
