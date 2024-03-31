@@ -17,10 +17,10 @@
 typedef struct {
 	usize virtaddr;
 	usize physoffset;
-} msg_info_t;
+} msg_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
-#define CONTALLOC_GET_PHYSOFFSET _IOWR('a', 'c', msg_info_t *)
+#define CONTALLOC_GET_PHYSOFFSET _IOWR('a', 'c', msg_t *)
 
 #endif

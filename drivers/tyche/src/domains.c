@@ -1,4 +1,5 @@
 #include "arch_cache.h"
+#include "dll.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
@@ -51,6 +52,12 @@ typedef struct global_state_t {
   // The list of domains managed by the driver.
   // Accesses should acquire the appropriate R/W-lock.
   dll_list(driver_domain_t, domains);
+  // R/W-lock to access pipes.
+  struct rw_semaphore rwlock_pipes;
+  // The next pipe id.
+  usize next_pipe_id;
+  // The list of pipes.
+  dll_list(driver_pipe_t, pipes);
 } global_state_t;
 
 static global_state_t state;
@@ -133,6 +140,9 @@ void driver_init_domains(void)
 {
   init_rwsem(&(state.rwlock));
   dll_init_list((&(state.domains)));
+  state.next_pipe_id = 0;
+  init_rwsem(&(state.rwlock));
+  dll_init_list(&(state.pipes));
   driver_init_capabilities();
 }
 
@@ -177,7 +187,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
 
   // Add the domain to the list if it has a handle.
   // Domains without handles come from KVM.
-  if (handle != NULL || ptr == NULL) {
+  if (handle != NULL && ptr == NULL) {
     state_add_domain(dom);
   }
 
@@ -1068,3 +1078,134 @@ failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_delete_domain_regions);
+
+int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
+           memory_access_right_t flags, usize width) {
+  capability_t* orig = NULL;
+  capability_t* orig_revoke = NULL;
+  driver_pipe_t* pipe = NULL;
+  usize i = 0;
+  if (pipe_id == NULL || width == 0) {
+    ERROR("Supplied pipe id is null");
+    goto failure;
+  }
+  pipe = kmalloc(sizeof(driver_pipe_t), GFP_KERNEL);
+  if (pipe == NULL) {
+    ERROR("Unable to allocate pipe");
+    goto failure;
+  }
+  pipe->id = 0;
+  pipe->phys_start = phys_addr;
+  pipe->size = size;
+  dll_init_list(&(pipe->actives));
+  dll_init_list(&(pipe->revokes));
+  dll_init_elem(pipe, list);
+  if (cut_region(phys_addr, size, flags, &orig, &orig_revoke) != SUCCESS) {
+    ERROR("Unable to carve out the original pipe region.");
+    goto failure_free;
+  }
+  dll_add(&(pipe->actives), orig, list);
+  dll_add(&(pipe->revokes), orig_revoke, list);
+
+  for (i = 0; i < width -1; i++) {
+    capability_t* dup = NULL;
+    capability_t* dup_revoke = NULL;
+    if (dup_region(orig, &dup, &dup_revoke) != SUCCESS) {
+      ERROR("Could not duplicate pipe");
+      // TODO we should clean the state.
+      goto failure;
+    }
+    dll_add(&(pipe->actives), dup, list);
+    dll_add(&(pipe->revokes), dup_revoke, list);
+  }
+
+  // Now add the pipe to the driver.
+  down_write(&(state.rwlock_pipes));
+  pipe->id = state.next_pipe_id++;
+  dll_add(&(state.pipes), pipe, list);
+  up_write(&(state.rwlock_pipes));
+  *pipe_id = pipe->id;
+  return SUCCESS;
+failure_free:
+  kfree(pipe);
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_create_pipe);
+
+int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
+  driver_pipe_t *pipe = NULL;
+  capability_t* to_send = NULL;
+  capability_t* to_revoke = NULL;
+  if (domain == NULL) {
+    goto failure;
+  }
+  CHECK_WLOCK(domain, failure);
+  down_write(&(state.rwlock_pipes));
+  dll_foreach(&(state.pipes), pipe, list) {
+    if (pipe->id == pipe_id) {
+      // Found it!
+      break;
+    }
+  }
+  if (pipe == NULL) {
+    ERROR("Could not find the pipe to acquire.");
+    goto fail_unlock;
+  }
+  if (dll_is_empty(&(pipe->actives)) || dll_is_empty(&(pipe->revokes))) {
+    ERROR("No width left on that pipe");
+    goto fail_unlock;
+  }
+  // Remove the capas from the pipe.
+  to_send = pipe->actives.head;
+  to_revoke = pipe->revokes.head;
+  dll_remove(&(pipe->actives), to_send, list);
+  dll_remove(&(pipe->revokes), to_revoke, list);
+
+  // We can free the pipe.
+  if (dll_is_empty(&(pipe->actives)) && dll_is_empty(&(pipe->revokes))) {
+    dll_remove(&(state.pipes), pipe, list);
+    kfree(pipe);
+    pipe = NULL;
+  }
+
+  if (send_region(domain->domain_id, to_send, to_revoke) != SUCCESS) {
+    ERROR("failed to send the pipes");
+    goto fail_unlock;
+  }
+  up_write(&(state.rwlock_pipes));
+  // All went well we're done!
+  return SUCCESS;
+fail_unlock:
+  up_write(&(state.rwlock_pipes));
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_acquire_pipe);
+
+int driver_find_pipe_from_hpa(usize *pipe_id, usize addr, usize size) {
+  driver_pipe_t *pipe = NULL;
+  if (pipe_id == NULL) {
+    goto failure;
+  }
+  down_write(&(state.rwlock_pipes));
+  dll_foreach(&(state.pipes), pipe, list) {
+    if (pipe->phys_start == addr && pipe->size == size) {
+      // Found it.
+      break;
+    }
+  }
+  if (pipe == NULL) {
+    ERROR("Unable to find the pipe from address and size");
+    goto fail_unlock;
+  }
+  *pipe_id = pipe->id;
+  pipe = NULL;
+  up_write(&(state.rwlock_pipes));
+  return SUCCESS;
+fail_unlock:
+  up_write(&(state.rwlock_pipes));
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_find_pipe_from_hpa);

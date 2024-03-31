@@ -104,6 +104,22 @@ typedef struct driver_domain_t {
 	struct rw_semaphore rwlock;
 } driver_domain_t;
 
+typedef struct driver_pipe_t {
+	// The next available pipe id.
+	usize id;
+	// The phys start of the pipe.
+	usize phys_start;
+	// The size of the pipe;
+	usize size;
+	// This is stored in a list inside the global driver state.
+	dll_elem(struct driver_pipe_t, list);
+
+	/// The list of active regions to serve on acquire.
+	dll_list(capability_t, actives);
+	/// The list of revocations for the above region. Maintain order!
+	dll_list(capability_t, revokes);
+} driver_pipe_t;
+
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 
 // Find a currently active domain from a file descriptor.
@@ -195,4 +211,18 @@ int driver_delete_domain(driver_domain_t *domain);
 /// Delete the domain's regions.
 /// @warning: requires a W-lock on the domain.
 int driver_delete_domain_regions(driver_domain_t *dom);
+
+/// Create a pipe.
+/// The pipe starts at phys_addr for size bytes, will be carved with flags
+/// and duplicated width times.
+/// If everything goes well, the result pipe id is put inside pipe_id.
+int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
+		       memory_access_right_t flags, usize width);
+
+/// Acquires an end of pipe and adds it to the domain.
+/// @warning: requires a W-lock on the domain.
+int driver_acquire_pipe(driver_domain_t *domain, usize pipe);
+
+/// Find the pipe_id from a physical address.
+int driver_find_pipe_from_hpa(usize *pipe_id, usize addr, usize size);
 #endif /*__SRC_DOMAINS_H__*/
