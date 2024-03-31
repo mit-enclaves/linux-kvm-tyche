@@ -121,7 +121,7 @@ failure:
 
 long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
+  msg_t info = {UNINIT_USIZE, UNINIT_USIZE};
   cont_alloc_t *alloc = find_alloc(handle);
   if (alloc == NULL) {
     ERROR("Unable to find the alloc %p!\n", handle);
@@ -129,7 +129,7 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   }
   switch(cmd) {
     case CONTALLOC_GET_PHYSOFFSET:
-      if (copy_from_user(&info, (msg_info_t*)arg, sizeof(msg_info_t))) {
+      if (copy_from_user(&info, (msg_t*)arg, sizeof(msg_t))) {
         ERROR("Unable to copy from user.");
         goto failure;
       }
@@ -138,9 +138,9 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       if (copy_to_user(
-            (msg_info_t*) arg, 
-            &info, 
-            sizeof(msg_info_t))) {
+            (msg_t*) arg,
+            &info,
+            sizeof(msg_t))) {
         ERROR("Unable to copy alloc physoffset for %p", handle);
         goto failure;
       }

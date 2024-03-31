@@ -60,6 +60,20 @@ typedef struct {
 	usize value;
 } msg_set_perm_t;
 
+/// A message to create a pipe
+typedef struct {
+	/// The id for the pipe.
+	usize id;
+	/// The start phys_addr;
+	usize phys_addr;
+	/// The size.
+	usize size;
+	/// memory flags
+	memory_access_right_t flags;
+	/// The number of acquirable pipes.
+	usize width;
+} msg_create_pipe_t;
+
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
 #define TYCHE_GET_PHYSOFFSET _IOWR('a', 'c', msg_info_t *)
@@ -70,5 +84,7 @@ typedef struct {
 #define TYCHE_SET_DOMAIN_CORE_CONFIG _IOR('a', 'g', msg_set_perm_t *)
 #define TYCHE_SET_DOMAIN_CONFIGURATION _IOR('a', 'i', msg_set_perm_t *)
 #define TYCHE_ALLOC_CONTEXT _IOW('a', 'n', usize)
+#define TYCHE_CREATE_PIPE _IOWR('a', 'o', msg_create_pipe_t)
+#define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
 
 #endif

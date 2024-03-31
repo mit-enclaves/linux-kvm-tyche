@@ -141,6 +141,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_mprotect_t mprotect = {0, 0, 0, 0};
   msg_set_perm_t perm = {0};
   driver_domain_t *domain = NULL;
+  msg_create_pipe_t pipe = {0};
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
       if (copy_from_user(
@@ -252,6 +253,31 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       RELEASE_DOM(false);
+      break;
+    case TYCHE_CREATE_PIPE:
+      if (copy_from_user(&pipe, (msg_create_pipe_t*) arg,
+            sizeof(msg_create_pipe_t))) {
+        ERROR("Unable to copy the create pipe message");
+        goto failure;
+      }
+      if (driver_create_pipe(&(pipe.id), pipe.phys_addr, pipe.size, pipe.flags,
+            pipe.width) != SUCCESS) {
+        ERROR("Failed to create a pipe.");
+        goto failure;
+      }
+      if (copy_to_user((msg_create_pipe_t*) arg, &pipe,
+            sizeof(msg_create_pipe_t))) {
+        ERROR("Unable to copy result from create pipe.");
+        goto failure;
+      }
+      break;
+    case TYCHE_ACQUIRE_PIPE:
+      ACQUIRE_DOM(true);
+      if (driver_acquire_pipe(domain, (usize)arg) != SUCCESS) {\
+        ERROR("Unable to acquire pipe");
+        goto failure;
+      }
+      RELEASE_DOM(true);
       break;
     default:
       ERROR("The command is not valid! %d", cmd);

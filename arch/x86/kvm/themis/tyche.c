@@ -241,6 +241,21 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		       usize gfn, usize npages, segment_type_t tpe,
 		       memory_access_right_t rights)
 {
+
+	// Special case for PIPEs.
+	if (tpe == PIPE) {
+		usize pipe_id = 0;
+		if (driver_find_pipe_from_hpa(&pipe_id, hfn << PAGE_SHIFT, npages << PAGE_SHIFT) != SUCCESS) {
+			ERROR("KVM failed to get the pipe id.");
+			return FAILURE;
+		}
+		if (driver_acquire_pipe(dom, pipe_id) != SUCCESS) {
+			ERROR("Failed to acquire the pipe.");
+			return FAILURE;
+		}
+		return SUCCESS;
+	}
+
 	if (driver_add_raw_segment(dom, user_addr, hfn << PAGE_SHIFT,
 				   npages << PAGE_SHIFT) != SUCCESS) {
 		ERROR("Unable to addr raw segment");

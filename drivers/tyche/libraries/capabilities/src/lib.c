@@ -1,3 +1,4 @@
+#include "dll.h"
 #include "tyche_api.h"
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
@@ -394,9 +395,104 @@ failure:
   return FAILURE;
 }
 
-int carve_region(domain_id_t id, paddr_t start, usize size, 
-		memory_access_right_t access, int is_shared, int is_repeat,
-		 usize alias) {
+int cut_region(paddr_t start, usize size, memory_access_right_t access,
+    capability_t **to_send, capability_t **revoke) {
+  capability_t *capa = NULL;
+  usize end = start + size;
+  if (to_send == NULL || revoke == NULL) {
+    goto failure;
+  }
+  // Now attempt to find the capability.
+  dll_foreach(&(local_domain.capabilities), capa, list) {
+    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+      continue;
+    }
+    if ((dll_contains(
+            capa->info.region.start,
+            capa->info.region.end, start)) &&
+        (capa->info.region.start <= end && capa->info.region.end >= end)
+        && has_access_rights(capa->info.region.flags, access)) {
+      // Found the capability.
+      break;
+    }
+  }
+
+  // We were not able to find the capability.
+  if (capa == NULL) {
+    LOG("The access rights we want: %x", access);
+    ERROR("Unable to find the containing capa: %llx -- %llx",
+        start, end);
+    asm volatile (
+      "movq $11, %%rax\n\t"
+      "vmcall\n\t"
+      :
+      :
+      : "rax", "memory"
+        );
+    goto failure;
+  }
+
+  //@aghosn: this is the new capa interface for regions.
+  if (segment_region_capa(0, capa, to_send, revoke, start, end, access >> 2) != SUCCESS) {
+    ERROR("Unable to segment the region !");
+    goto failure;
+  }
+  dll_remove(&(local_domain.capabilities), *to_send, list);
+  dll_remove(&(local_domain.capabilities), *revoke, list);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke) {
+  if (dup == NULL || revoke == NULL || capa == NULL) {
+    goto failure;
+  }
+  if (capa->capa_type != Region) {
+    ERROR("The capa is not a region");
+    goto failure;
+  }
+  if (segment_region_capa(1, capa, dup, revoke, capa->info.region.start,
+        capa->info.region.end, capa->info.region.flags >> 2) != SUCCESS) {
+    ERROR("Unable to duplicate the capability");
+    goto failure;
+  }
+  // Remove both from the local domain.
+  dll_remove(&(local_domain.capabilities), *dup, list);
+  dll_remove(&(local_domain.capabilities), *revoke, list);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int send_region(domain_id_t id, capability_t *capa, capability_t *revoke) {
+  child_domain_t *child = NULL;
+  if (capa == NULL || revoke == NULL) {
+    goto failure;
+  }
+  child = find_child(id);
+  if (child == NULL) {
+    ERROR("Unable to find the child");
+    goto failure;
+  }
+  if (tyche_send_aliased(child->management->local_id, capa->local_id,
+      0, capa->info.region.start, capa->info.region.end - capa->info.region.start) != SUCCESS) {
+      ERROR("Unable to send an aliased capability!");
+      goto failure;
+  }
+  revoke->info.revoke_region.alias_start = capa->info.region.start;
+  revoke->info.revoke_region.alias_size = capa->info.region.end - capa->info.region.start;
+  revoke->info.revoke_region.is_repeat = 0;
+  dll_add(&(child->revocations), revoke, list);
+  local_domain.dealloc(capa);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int internal_carve_region(domain_id_t id, paddr_t start, usize size,
+    memory_access_right_t access, int is_shared, int is_repeat,
+     usize alias) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
   capability_t* to_send = NULL;
@@ -404,7 +500,6 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
   usize aliased_start = (alias == NO_ALIAS)? start : alias;
   paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
-  DEBUG("[carve_region] start");
   // Quick checks.
   if (start >= end) {
     ERROR("Start is greater or equal to end.\n");
@@ -439,7 +534,7 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
   if (capa == NULL) {
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
-		    start, end, is_repeat);
+        start, end, is_repeat);
     asm volatile (
       "movq $11, %%rax\n\t"
       "vmcall\n\t"
@@ -456,12 +551,12 @@ int carve_region(domain_id_t id, paddr_t start, usize size,
     goto failure;
   }
   if (tyche_send_aliased(child->management->local_id, to_send->local_id,
-			is_repeat, aliased_start, size) != SUCCESS) {
+      is_repeat, aliased_start, size) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }
   // Set the revocation information on the capability.
-  // This is useful for to maintain a coherent remapper.
+  // This is useful to maintain a coherent remapper.
   revoke->info.revoke_region.alias_start = aliased_start;
   revoke->info.revoke_region.alias_size = size; 
   revoke->info.revoke_region.is_repeat = is_repeat;
@@ -478,27 +573,26 @@ failure:
 int grant_region(domain_id_t id, paddr_t start, usize size,
                  memory_access_right_t access, usize alias)
 {
-  return carve_region(id, start, size, access, 0, 0, alias);
+  return internal_carve_region(id, start, size, access, 0, 0, alias);
 } 
 
 int share_region(domain_id_t id, paddr_t start, usize size,
                  memory_access_right_t access, usize alias) {
-  return carve_region(id, start, size, access, 1, 0, alias); 
+  return internal_carve_region(id, start, size, access, 1, 0, alias);
 } 
 
 int share_repeat_region(domain_id_t id, paddr_t start, usize size,
-		memory_access_right_t access, usize alias)
+    memory_access_right_t access, usize alias)
 {
-	if(alias == NO_ALIAS) {
-		ERROR("Called share_repeat_region with no alias");
-		return FAILURE;
-	}
-	return carve_region(id, start, size, access, 1, 1, alias);
+  if(alias == NO_ALIAS) {
+    ERROR("Called share_repeat_region with no alias");
+    return FAILURE;
+  }
+  return internal_carve_region(id, start, size, access, 1, 1, alias);
 }
 
 // @warning the handle should be deallocated by the caller!!!!
 int internal_revoke(child_domain_t *child, capability_t *capa) {
-  paddr_t size = 0;
   if (child == NULL || capa == NULL) {
     ERROR("null args.");
     goto failure;
@@ -715,26 +809,26 @@ failure:
 
 int revoke_domain_regions(domain_id_t id)
 {
-	child_domain_t *child = find_child(id);
+  child_domain_t *child = find_child(id);
   capability_t *capa = NULL;
 
-	if (child == NULL) {
-		ERROR("Unable to find child with id %lld\n", id);
-		goto failure;
-	}
+  if (child == NULL) {
+    ERROR("Unable to find child with id %lld\n", id);
+    goto failure;
+  }
 
-	// First go through all the revocations.
-	while (!dll_is_empty(&(child->revocations))) {
-		capa = child->revocations.head;
-		//ERROR("revoke domain regions of type %d\n", capa->capa_type);
-		if (internal_revoke(child, capa) != SUCCESS) {
-			ERROR("unable to revoke a capability.");
-			goto failure;
-		}
+  // First go through all the revocations.
+  while (!dll_is_empty(&(child->revocations))) {
+    capa = child->revocations.head;
+    //ERROR("revoke domain regions of type %d\n", capa->capa_type);
+    if (internal_revoke(child, capa) != SUCCESS) {
+      ERROR("unable to revoke a capability.");
+      goto failure;
+    }
     // Dealloc the structure.
     local_domain.dealloc(capa);
-	}
-	return SUCCESS;
+  }
+  return SUCCESS;
 failure:
-	return FAILURE;
+  return FAILURE;
 }

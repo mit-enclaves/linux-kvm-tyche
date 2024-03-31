@@ -33,6 +33,7 @@ typedef enum segment_type_t {
 	CONFIDENTIAL = 1,
 	SHARED_REPEAT = 2,
 	CONFIDENTIAL_REPEAT = 3,
+	PIPE = 4,
 } segment_type_t;
 
 /// Type of a capability

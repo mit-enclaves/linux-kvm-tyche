@@ -37,6 +37,21 @@ int segment_region_capa(int is_shared, capability_t *capa,
 int grant_region(domain_id_t id, paddr_t start, usize size,
 		 memory_access_right_t access, usize alias);
 
+/// Carve a memory region without sending it to anyone.
+/// @warning: it removes the capabilities from the local domain,
+/// Don't lose them!
+int cut_region(paddr_t start, usize size, memory_access_right_t access,
+	       capability_t **to_send, capability_t **revoke);
+
+/// Duplicates the capability and creates a revocation handle for it.
+/// @warning: removes the capabilities from the local domain so don't lose them.
+int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke);
+
+/// Send a pre-computed capa to a domain.
+/// This will free the capa in the capa engine and add the revoke to it.
+/// Make sure none of these is inside a list.
+int send_region(domain_id_t id, capability_t *capa, capability_t *revoke);
+
 /// Share a memory region.
 /// Finds the correct capability and shares the region with the target domain.
 int share_region(domain_id_t id, paddr_t start, usize size,
