@@ -8966,7 +8966,8 @@ static __init int hardware_setup(void)
 	}
 #endif
 
-	if (!cpu_has_vmx_ple()) {
+    // NOTE: PLE is not yet supported by Tyche
+	if (true /*!cpu_has_vmx_ple()*/) {
 		ple_gap = 0;
 		ple_window = 0;
 		ple_window_grow = 0;
