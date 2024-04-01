@@ -115,9 +115,9 @@ driver_domain_t* find_domain(domain_handle_t handle, bool write)
   if (dom == NULL) {
     goto failure;
   }
-  if (dom->pid != current->pid) {
+  if (dom->pid != current->tgid) {
     ERROR("Attempt to access dom %p from wrong pid", handle);
-    ERROR("Expected pid: %d, got: %d", dom->pid, current->pid);
+    ERROR("Expected pid: %d, got: %d", dom->pid, current->tgid);
     goto failure;
   }
   // Acquire the lock on the domain.
@@ -170,7 +170,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   }
   memset(dom, 0, sizeof(driver_domain_t));
   // Set up the structure.
-  dom->pid = current->pid;
+  dom->pid = current->tgid;
   dom->handle = handle;
   dom->domain_id = UNINIT_DOM_ID;
   dom->state = DRIVER_NOT_COMMITED;
