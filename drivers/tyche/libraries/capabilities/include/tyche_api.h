@@ -27,6 +27,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_SELF_CONFIG = 19,
 	TYCHE_ENCLAVE_ATTESTATION = 20,
 	TYCHE_REVOKE_ALIASED_REGION = 21,
+	TYCHE_SERIALIZE_ATTESTATION = 22,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -108,6 +109,8 @@ int tyche_revoke(capa_index_t id);
 
 int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa,
 			paddr_t size);
+
+int tyche_serialize_attestation(usize addr, usize size, usize *written);
 
 int tyche_switch(capa_index_t *transition_handle,
 		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
