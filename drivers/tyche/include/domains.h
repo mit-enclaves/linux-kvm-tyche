@@ -225,4 +225,8 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe);
 
 /// Find the pipe_id from a physical address.
 int driver_find_pipe_from_hpa(usize *pipe_id, usize addr, usize size);
+
+/// Request tyche to serialize an atestation of the current state of the system
+/// into the provided buffer.
+int driver_serialize_attestation(char *addr, usize size, usize *written);
 #endif /*__SRC_DOMAINS_H__*/

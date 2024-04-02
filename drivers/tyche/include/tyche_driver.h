@@ -74,6 +74,18 @@ typedef struct {
 	usize width;
 } msg_create_pipe_t;
 
+/// Information about the attestation buffer.
+typedef struct {
+    /// Virtual address of the start of the buffer.
+    usize start;
+
+    /// Size of the buffer.
+    usize size;
+
+    /// How many bytes were written by Tyche.
+    usize written;
+} attest_buffer_t;
+
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
 // @deprecated, use open.
 #define TYCHE_GET_PHYSOFFSET _IOWR('a', 'c', msg_info_t *)
@@ -86,5 +98,6 @@ typedef struct {
 #define TYCHE_ALLOC_CONTEXT _IOW('a', 'n', usize)
 #define TYCHE_CREATE_PIPE _IOWR('a', 'o', msg_create_pipe_t)
 #define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
+#define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
 
 #endif

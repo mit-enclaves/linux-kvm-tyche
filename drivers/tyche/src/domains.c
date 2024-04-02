@@ -1191,3 +1191,9 @@ failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_find_pipe_from_hpa);
+
+int driver_serialize_attestation(char *addr, usize size, usize *written) {
+    usize phys = virt_to_phys(addr);
+    return tyche_serialize_attestation(phys, size, written);
+}
+EXPORT_SYMBOL(driver_serialize_attestation);

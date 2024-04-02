@@ -486,6 +486,23 @@ failure:
   return FAILURE;
 }
 
+int tyche_serialize_attestation(usize addr, usize size, usize *written)
+{
+    vmcall_frame_t frame = {
+        .vmcall = TYCHE_SERIALIZE_ATTESTATION,
+        .arg_1 = addr,
+        .arg_2 = size,
+    };
+    if (tyche_call(&frame) != SUCCESS) {
+        goto failure;
+    }
+    *written = frame.value_1;
+    return SUCCESS;
+failure:
+    *written = 0;
+    return FAILURE;
+}
+
 int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
 #if defined(CONFIG_X86) || defined(__x86_64__)
   vmcall_frame_t frame = {
