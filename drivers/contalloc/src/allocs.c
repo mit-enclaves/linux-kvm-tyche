@@ -29,9 +29,9 @@ cont_alloc_t* find_alloc(driver_handle_t handle)
   if (alloc == NULL) {
     goto failure;
   }
-  if (alloc->pid != current->pid) {
+  if (alloc->pid != current->tgid) {
     ERROR("Attempt to access alloc %p from wrong pid", handle);
-    ERROR("Expected pid: %d, got: %d", alloc->pid, current->pid);
+    ERROR("Expected pid: %d, got: %d", alloc->pid, current->tgid);
     goto failure;
   }
   return alloc;
@@ -62,7 +62,7 @@ int driver_create_alloc(driver_handle_t handle)
   }
   memset(alloc, 0, sizeof(cont_alloc_t));
   // Set up the structure.
-  alloc->pid = current->pid;
+  alloc->pid = current->tgid;
   alloc->handle = handle;
   dll_init_list(&(alloc->raw_segments));
   dll_init_elem(alloc, list);
