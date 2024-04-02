@@ -422,6 +422,7 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx",
         start, end);
+#if defined(CONFIG_X86) || defined(__x86_64__) 
     asm volatile (
       "movq $11, %%rax\n\t"
       "vmcall\n\t"
@@ -429,6 +430,15 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
       :
       : "rax", "memory"
         );
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+    asm volatile (
+        "li a0, 0xb\n\t"
+        "li a7, 0x5479636865\n\t"
+        :
+        :
+        : "a0", "a7"
+    );
+#endif 
     goto failure;
   }
 

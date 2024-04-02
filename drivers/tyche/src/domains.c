@@ -257,7 +257,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
 
-  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
+  ERROR("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
   if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
     ERROR("Unable to map the memory...");
     goto fail_free_pages;
