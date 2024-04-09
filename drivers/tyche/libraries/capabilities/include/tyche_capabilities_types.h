@@ -61,6 +61,8 @@ typedef enum memory_access_right_t {
 	MEM_EXEC = 1 << 4,
 	MEM_SUPER = 1 << 5,
 	MEM_HASH = 1 << 6,
+	MEM_CLEANUP = 1 << 6,
+	MEM_VITAL = 1 << 7,
 } memory_access_right_t;
 
 /// Access right information for a region capability.
