@@ -1,8 +1,10 @@
+#include "dll.h"
 #include "tyche_api.h"
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
 #define TYCHE_DEBUG 1
 #include "common.h"
+#include "common_log.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -92,7 +94,7 @@ fail:
   return FAILURE;
 }
 
-int create_domain(domain_id_t *id) {
+int create_domain(domain_id_t *id, int aliased) {
   capa_index_t child_idx = -1;
   capability_t *child_capa = NULL;
   child_domain_t *child = NULL;
@@ -117,7 +119,7 @@ int create_domain(domain_id_t *id) {
   }
 
   // Create the domain.
-  if (tyche_create_domain(&child_idx) != SUCCESS) {
+  if (tyche_create_domain(&child_idx, aliased) != SUCCESS) {
     ERROR("Failed to create domain.");
     goto fail_child_capa;
   }
@@ -138,9 +140,6 @@ int create_domain(domain_id_t *id) {
   }
 
   // Initialize the other capa fields.
-  child_capa->parent = NULL;
-  child_capa->left = NULL;
-  child_capa->right = NULL;
   dll_init_elem(child_capa, list);
 
   // Initialize the child domain.
@@ -167,15 +166,15 @@ fail:
   return FAILURE;
 }
 
-int set_domain_traps(domain_id_t id, usize traps)
+int set_domain_configuration(domain_id_t id, tyche_configurations_t idx, usize value)
 {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found");
     goto failure;
   }
-  if (tyche_set_traps(child->management->local_id, traps) != SUCCESS) {
-    ERROR("Unable to set the traps with a vmcall.");
+  if (tyche_set_domain_config(child->management->local_id, idx, value) != SUCCESS) {
+    ERROR("Unable to set config %d for dom %lld", idx, id);
     goto failure;
   }
   return SUCCESS;
@@ -183,15 +182,15 @@ failure:
   return FAILURE;
 }
 
-int set_domain_cores(domain_id_t id, usize cores)
+int set_domain_core_configuration(domain_id_t id, usize core, usize idx, usize value)
 {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
-    ERROR("Child not found");
+    ERROR("Child not found.");
     goto failure;
   }
-  if (tyche_set_cores(child->management->local_id, cores) != SUCCESS) {
-    ERROR("Unable to set the cores with a vmcall.");
+  if (tyche_set_domain_core_config(child->management->local_id, core, idx, value) != SUCCESS) {
+    ERROR("Unable to set core config %lld for dom %llx", idx, id);
     goto failure;
   }
   return SUCCESS;
@@ -199,15 +198,14 @@ failure:
   return FAILURE;
 }
 
-int set_domain_perm(domain_id_t id, usize perm)
-{
+int write_fields(domain_id_t id, usize core, usize* fields, usize* values, int size) {
   child_domain_t *child = find_child(id);
-  if (child == NULL) {
-    ERROR("Child not found");
+  if (child == NULL || size > 7) {
+    ERROR("Child not found or size too big.");
     goto failure;
   }
-  if (tyche_set_perm(child->management->local_id, perm) != SUCCESS) {
-    ERROR("Unable to set the perm with a vmcall.");
+  if (tyche_write_fields(child->management->local_id, core, fields, values, size) != SUCCESS) {
+    ERROR("Unable to write the fields with tyche.");
     goto failure;
   }
   return SUCCESS;
@@ -215,15 +213,15 @@ failure:
   return FAILURE;
 }
 
-int set_domain_switch(domain_id_t id, usize swtype)
-{
+int alloc_core_context(domain_id_t id, usize core) {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found");
     goto failure;
   }
-  if (tyche_set_switch(child->management->local_id, swtype) != SUCCESS) {
-    ERROR("Unable to set the switch with a vmcall.");
+
+  if (tyche_alloc_core_context(child->management->local_id, core) != SUCCESS) {
+    ERROR("Unable to allocate the core context.");
     goto failure;
   }
   return SUCCESS;
@@ -231,21 +229,18 @@ failure:
   return FAILURE;
 }
 
-
-int set_domain_entry_on_core(
-    domain_id_t id,
-    usize core,
-    usize cr3,
-    usize rip,
-    usize rsp)
-{
+int get_domain_core_configuration(domain_id_t id, usize core, usize idx, usize *value) {
   child_domain_t *child = find_child(id);
   if (child == NULL) {
-    ERROR("Child not found");
+    ERROR("Child not found.");
     goto failure;
   }
-  if (tyche_set_entry(child->management->local_id, core, cr3, rip, rsp) != SUCCESS) {
-    ERROR("Unable to set the entry point with a vmcall.");
+  if (value == NULL) {
+    ERROR("Value provided is null.");
+    goto failure;
+  }
+  if (tyche_get_domain_core_config(child->management->local_id, core, idx, value) != SUCCESS) {
+    ERROR("Unable to get core config %lld for dom %lld", idx, id);
     goto failure;
   }
   return SUCCESS;
@@ -330,152 +325,191 @@ failure:
   return FAILURE;
 }
 
+
 int segment_region_capa(
+    int is_shared,
     capability_t *capa,
-    capability_t **left,
-    capability_t **right,
-    usize start1,
-    usize end1,
-    usize prot1,
-    usize start2,
-    usize end2,
-    usize prot2) {
-  if (left == NULL || right == NULL || capa == NULL) {
+    capability_t **to_send,
+    capability_t **revoke,
+    usize start,
+    usize end,
+    usize prot) {
+  if (to_send == NULL || revoke == NULL || capa == NULL) {
     goto failure;
   }
 
-  // Attempt to allocate left and right.
-  *left = (capability_t *)local_domain.alloc(sizeof(capability_t));
-  if (*left == NULL) {
-    ERROR("Left alloc failed.");
+  // Attempt to allocate the two capabilities.
+  *to_send = (capability_t *)local_domain.alloc(sizeof(capability_t));
+  if (*to_send == NULL) {
+    ERROR("to_send alloc failed.");
     goto failure;
   }
-  *right = (capability_t *)local_domain.alloc(sizeof(capability_t));
-  if (*right == NULL) {
-    ERROR("Right alloc failed.");
-    goto fail_left;
+  *revoke = (capability_t *)local_domain.alloc(sizeof(capability_t));
+  if (*revoke == NULL) {
+    ERROR("Revoke alloc failed.");
+    goto fail_to_send;
   }
 
   // Call duplicate.
   if (tyche_segment_region(
+        (usize) (is_shared != 0),
         capa->local_id,
-        &((*left)->local_id),
-        &((*right)->local_id),
-        start1, end1, prot1,
-        start2, end2, prot2) != SUCCESS) {
+        &((*to_send)->local_id),
+        &((*revoke)->local_id),
+        start, end, prot) != SUCCESS) {
     ERROR("Duplicate rejected.");
-    goto fail_right;
+    goto fail_revoke;
   }
 
   // Update the capability.
   if (enumerate_capa(capa->local_id, NULL, capa) != SUCCESS) {
     ERROR("We failed to enumerate the root of a duplicate!");
-    goto fail_right;
+    goto fail_revoke;
   }
-  capa->left = *left;
-  capa->right = *right;
 
-  // Initialize the left.
-  if (enumerate_capa((*left)->local_id, NULL, *left) != SUCCESS) {
-    ERROR("We failed to enumerate the left of duplicate!");
-    goto fail_right;
+  // Initialize the to_send.
+  if (enumerate_capa((*to_send)->local_id, NULL, *to_send) != SUCCESS) {
+    ERROR("We failed to enumerate the to_send of duplicate!");
+    goto fail_revoke;
   }
-  dll_init_elem((*left), list);
-  dll_add(&(local_domain.capabilities), (*left), list);
-  (*left)->parent = capa;
-  (*left)->left = NULL;
-  (*left)->right = NULL;
+  dll_init_elem((*to_send), list);
+  dll_add(&(local_domain.capabilities), (*to_send), list);
 
-  // Initialize the right.
-  if (enumerate_capa((*right)->local_id, NULL, (*right)) != SUCCESS) {
-    ERROR("We failed to enumerate the right of duplicate!");
-    goto fail_right;
+  // Initialize the revoke.
+  if (enumerate_capa((*revoke)->local_id, NULL, (*revoke)) != SUCCESS) {
+    ERROR("We failed to enumerate the revoke!");
+    goto fail_revoke;
   }
-  dll_init_elem((*right), list);
-  dll_add(&(local_domain.capabilities), (*right), list);
-  (*right)->parent = capa;
-  (*right)->left = NULL;
-  (*right)->right = NULL;
+  dll_init_elem((*revoke), list);
+  dll_add(&(local_domain.capabilities), (*revoke), list);
 
   // All done!
   return SUCCESS;
 
   // Failure paths.
-fail_right:
-  local_domain.dealloc(*right);
-fail_left:
-  local_domain.dealloc(*left);
+fail_revoke:
+  local_domain.dealloc(*revoke);
+fail_to_send:
+  local_domain.dealloc(*to_send);
 failure:
   return FAILURE;
 }
 
+int cut_region(paddr_t start, usize size, memory_access_right_t access,
+    capability_t **to_send, capability_t **revoke) {
+  capability_t *capa = NULL;
+  usize end = start + size;
+  if (to_send == NULL || revoke == NULL) {
+    goto failure;
+  }
+  // Now attempt to find the capability.
+  dll_foreach(&(local_domain.capabilities), capa, list) {
+    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+      continue;
+    }
+    if ((dll_contains(
+            capa->info.region.start,
+            capa->info.region.end, start)) &&
+        (capa->info.region.start <= end && capa->info.region.end >= end)
+        && has_access_rights(capa->info.region.flags, access)) {
+      // Found the capability.
+      break;
+    }
+  }
 
-/* This function takes a capability and performs a split such that:
-*       capa
-*       / \
-*   NULL    copy(capa)
-* This is used to facilitate revocation in share and grant.
-* It returns the copy(capa) and makes sure to update capa to be a revocation.
-* The returned value is not part of any list and can be freed with local_domain.dealloc.
-*/
-static capability_t* trick_segment_null_copy(capability_t* capa)
-{
-  capability_t *left = NULL, *right = NULL;
+  // We were not able to find the capability.
   if (capa == NULL) {
-    ERROR("Provided capability is NULL.");
+    LOG("The access rights we want: %x", access);
+    ERROR("Unable to find the containing capa: %llx -- %llx",
+        start, end);
+#if defined(CONFIG_X86) || defined(__x86_64__)
+    asm volatile (
+      "movq $11, %%rax\n\t"
+      "vmcall\n\t"
+      :
+      :
+      : "rax", "memory"
+        );
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+    asm volatile (
+        "li a0, 0xb\n\t"
+        "li a7, 0x5479636865\n\t"
+        :
+        :
+        : "a0", "a7"
+    );
+#endif
     goto failure;
   }
 
-  // This function only makes sense on region capabilities that are active.
-  if (capa->capa_type != Region ||
-      (capa->info.region.flags & MEM_ACTIVE) != MEM_ACTIVE) {
-    ERROR("Wrong type of capability");
+  //@aghosn: this is the new capa interface for regions.
+  if (segment_region_capa(0, capa, to_send, revoke, start, end, access >> 2) != SUCCESS) {
+    ERROR("Unable to segment the region !");
     goto failure;
   }
-
-  // Perform the split.
-  if (segment_region_capa(
-        capa, &left, &right,
-        // This is NULL
-        capa->info.region.start, capa->info.region.start, capa->info.region.flags >> 2,
-        // This is copy(capa)
-        capa->info.region.start, capa->info.region.end, capa->info.region.flags >> 2
-        ) != SUCCESS) {
-    ERROR("Unable to perform the duplicate");
-    goto failure;
-  }
-
-  // Delete the left.
-  if (left == NULL) {
-    ERROR("Left is null.");
-    goto failure;
-  }
-  dll_remove(&(local_domain.capabilities), left, list);
-  capa->left = NULL;
-  local_domain.dealloc(left);
-  left = NULL;
-
-  // Remove the right.
-  dll_remove(&(local_domain.capabilities), right, list);
-  capa->right = NULL;
-
-  // We're done.
-  right->parent = NULL;
-  right->left = NULL;
-  right->right = NULL;
-  return right;
+  dll_remove(&(local_domain.capabilities), *to_send, list);
+  dll_remove(&(local_domain.capabilities), *revoke, list);
+  return SUCCESS;
 failure:
-  return NULL;
+  return FAILURE;
 }
 
-// TODO: for the moment only handle the case where the region is fully contained
-// within one capability.
-int carve_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access, int is_shared) {
+int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke) {
+  if (dup == NULL || revoke == NULL || capa == NULL) {
+    goto failure;
+  }
+  if (capa->capa_type != Region) {
+    ERROR("The capa is not a region");
+    goto failure;
+  }
+  if (segment_region_capa(1, capa, dup, revoke, capa->info.region.start,
+        capa->info.region.end, capa->info.region.flags >> 2) != SUCCESS) {
+    ERROR("Unable to duplicate the capability");
+    goto failure;
+  }
+  // Remove both from the local domain.
+  dll_remove(&(local_domain.capabilities), *dup, list);
+  dll_remove(&(local_domain.capabilities), *revoke, list);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int send_region(domain_id_t id, capability_t *capa, capability_t *revoke) {
+  child_domain_t *child = NULL;
+  if (capa == NULL || revoke == NULL) {
+    goto failure;
+  }
+  child = find_child(id);
+  if (child == NULL) {
+    ERROR("Unable to find the child");
+    goto failure;
+  }
+  if (tyche_send_aliased(child->management->local_id, capa->local_id,
+      0, capa->info.region.start, capa->info.region.end - capa->info.region.start) != SUCCESS) {
+      ERROR("Unable to send an aliased capability!");
+      goto failure;
+  }
+  revoke->info.revoke_region.alias_start = capa->info.region.start;
+  revoke->info.revoke_region.alias_size = capa->info.region.end - capa->info.region.start;
+  revoke->info.revoke_region.is_repeat = 0;
+  dll_add(&(child->revocations), revoke, list);
+  local_domain.dealloc(capa);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int internal_carve_region(domain_id_t id, paddr_t start, usize size,
+    memory_access_right_t access, int is_shared, int is_repeat,
+     usize alias) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
+  capability_t* to_send = NULL;
+  capability_t* revoke = NULL;
+  usize aliased_start = (alias == NO_ALIAS)? start : alias;
+  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
-  DEBUG("[grant_region] start");
   // Quick checks.
   if (start >= end) {
     ERROR("Start is greater or equal to end.\n");
@@ -509,189 +543,100 @@ int carve_region(domain_id_t id, paddr_t start, paddr_t end,
   // We were not able to find the capability.
   if (capa == NULL) {
     LOG("The access rights we want: %x", access);
-    ERROR("Unable to find the containing capa.");
+    ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
+		    start, end, is_repeat);
+#if defined(CONFIG_X86) || defined(__x86_64__)
+    asm volatile (
+      "movq $11, %%rax\n\t"
+      "vmcall\n\t"
+      :
+      :
+      : "rax", "memory"
+        );
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+    asm volatile (
+        "li a0, 0xb\n\t"
+        "li a7, 0x5479636865\n\t"
+        :
+        :
+        : "a0", "a7"
+    );
+#endif
     goto failure;
   }
 
-  // The region is in the middle, requires two splits.
-  if (capa->info.region.start < start && capa->info.region.end > end) {
-    // Middle case.
-    // capa: [s.......................e]
-    // grant:     [m.....me]
-    // Duplicate such that we have [s..m] [m..me..e]
-    // And then update capa to be equal to the right
-    capability_t *left = NULL, *right = NULL;
-    if (segment_region_capa(
-          capa, &left, &right,
-          capa->info.region.start, start, capa->info.region.flags >> 2,
-          start, capa->info.region.end, capa->info.region.flags >> 2) != SUCCESS) {
-      ERROR("Middle case duplicate failed.");
-      goto failure;
-    }
-    // Update the capa to point to the right.
-    capa = right;
-  }
-
-  // Requires a duplicate.
-  if ((capa->info.region.start == start && capa->info.region.end > end) ||
-      (capa->info.region.start < start && capa->info.region.end == end)) {
-    paddr_t s = 0, m = 0, e = 0;
-    capability_t *left = NULL, *right = NULL;
-    memory_access_right_t ops_left = 0, ops_right = 0;
-    capability_t **to_grant = NULL;
-
-    if (capa->info.region.start == start && capa->info.region.end > end) {
-      // Left case.
-      // capa: [s ............e].
-      // grant:[s.......m].
-      // duplicate: [s..m] - [m..e]
-      // Grant the first portion.
-      s = capa->info.region.start;
-      m = end;
-      e = capa->info.region.end;
-      to_grant = &left;
-      ops_left = access;
-      ops_right = capa->info.region.flags;
-    } else {
-      // Right case.
-      // capa: [s ............e].
-      // grant:      [m.......e].
-      // duplicate: [s..m] - [m..e]
-      // Grant the second portion.
-      s = capa->info.region.start;
-      m = start;
-      e = capa->info.region.end;
-      to_grant = &right;
-      ops_left = capa->info.region.flags;
-      ops_right = access;
-    }
-
-    // Do the duplicate.
-    if (segment_region_capa(capa, &left, &right,
-          s, m, ops_left >> 2,
-          m, e, ops_right >> 2) != SUCCESS) {
-      ERROR("Left or right duplicate case failed.");
-      goto failure;
-    }
-
-    // Now just update the capa to grant.
-    capa = *to_grant;
-  }
-
-  // At this point, capa should be a perfect overlap.
-  if (capa == NULL ||
-      !(capa->info.region.start == start && capa->info.region.end == end)) {
+  //@aghosn: this is the new capa interface for regions.
+  if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, access >> 2) != SUCCESS) {
+    ERROR("Unable to segment the region !");
     goto failure;
   }
-
-  // If we have a share, we want to keep access to the region.
-  if (is_shared) {
-    capability_t* left_copy = NULL, *right_copy = NULL, *to_send = capa;
-    if (segment_region_capa(
-          to_send, &left_copy, &right_copy,
-          to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2,
-          to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2) != SUCCESS) {
-      ERROR("For shared, unable to duplicate capability.");
+  if (tyche_send_aliased(child->management->local_id, to_send->local_id,
+      is_repeat, aliased_start, size) != SUCCESS) {
+      ERROR("Unable to send an aliased capability!");
       goto failure;
-    }
-    capa = right_copy;
   }
-
-  // One last duplicate to have a revocation {NULL, to_send}.
-  do {
-    capability_t *to_send = trick_segment_null_copy(capa);
-    if (to_send == NULL) {
-      ERROR("To send is null.");
-      goto failure;
-    }
-
-    // Check we have a revocation capa.
-    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) != 0) {
-      ERROR("This should be a revocation capability.");
-      goto failure;
-    }
-
-    // Send the capa to the target.
-    if (tyche_send(child->management->local_id, to_send->local_id) != SUCCESS) {
-      ERROR("Unable to send the capability!");
-      goto failure;
-    }
-
-    // Cleanup to send.
-    local_domain.dealloc(to_send);
-  } while(0);
-
-  // Remove it from the capabilities and put it in the revocation list..
-  dll_remove(&(local_domain.capabilities), capa, list);
-  dll_add(&(child->revocations), capa, list);
-
-  // We are done!
-  DEBUG("Success");
+  // Set the revocation information on the capability.
+  // This is useful to maintain a coherent remapper.
+  revoke->info.revoke_region.alias_start = aliased_start;
+  revoke->info.revoke_region.alias_size = size;
+  revoke->info.revoke_region.is_repeat = is_repeat;
+  // Sort things out in the different lists.
+  dll_remove(&(local_domain.capabilities), to_send, list);
+  dll_remove(&(local_domain.capabilities), revoke, list);
+  dll_add(&(child->revocations), revoke, list);
+  local_domain.dealloc(to_send);
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
-int grant_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access)
+int grant_region(domain_id_t id, paddr_t start, usize size,
+                 memory_access_right_t access, usize alias)
 {
-  return carve_region(id, start, end, access, 0);
+  return internal_carve_region(id, start, size, access, 0, 0, alias);
 }
 
-int share_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access) {
-  return carve_region(id, start, end, access, 1);
+int share_region(domain_id_t id, paddr_t start, usize size,
+                 memory_access_right_t access, usize alias) {
+  return internal_carve_region(id, start, size, access, 1, 0, alias);
 }
 
-// TODO for now we only handle exact matches.
+int share_repeat_region(domain_id_t id, paddr_t start, usize size,
+    memory_access_right_t access, usize alias)
+{
+  if(alias == NO_ALIAS) {
+    ERROR("Called share_repeat_region with no alias");
+    return FAILURE;
+  }
+  return internal_carve_region(id, start, size, access, 1, 1, alias);
+}
+
+// @warning the handle should be deallocated by the caller!!!!
 int internal_revoke(child_domain_t *child, capability_t *capa) {
   if (child == NULL || capa == NULL) {
     ERROR("null args.");
     goto failure;
   }
 
-  if (capa->capa_type != Region) {
-    ERROR("Error[internal revoke] supplied capability is not a revocation");
+  if (capa->capa_type != RegionRevoke) {
+    ERROR("Supplied capability is not a revocation");
     goto failure;
   }
 
+  /*
   if (tyche_revoke(capa->local_id) != SUCCESS) {
     goto failure;
   }
-
-  if (enumerate_capa(capa->local_id, NULL, capa) != SUCCESS) {
-    ERROR("Error[internal_revoke]: unable to enumerate the revoked capa");
+  */
+  if (tyche_revoke_region(capa->local_id, child->management->local_id,
+        capa->info.revoke_region.alias_start,
+        capa->info.revoke_region.alias_size) != SUCCESS) {
+    ERROR("Unable to revoke the region!");
     goto failure;
   }
 
-  // Remove the capability and add it back to the local domain.
+  // Remove the capability from the child.
   dll_remove(&(child->revocations), capa, list);
-  dll_add(&(local_domain.capabilities), capa, list);
-
-  // Check if we can merge everything back.
-  while (capa->parent != NULL &&
-         ((capa->parent->right == capa && capa->parent->left != NULL &&
-           capa->parent->left->capa_type == Region &&
-           (capa->parent->left->info.region.flags & MEM_ACTIVE) == MEM_ACTIVE) ||
-          (capa->parent->left == capa && capa->parent->right != NULL &&
-           capa->parent->right->capa_type == Region &&
-           (capa->parent->right->info.region.flags & MEM_ACTIVE) == MEM_ACTIVE))) {
-    capability_t *parent = capa->parent;
-    if (tyche_revoke(parent->local_id) != SUCCESS) {
-      goto failure;
-    }
-    dll_remove(&(local_domain.capabilities), (parent->right), list);
-    dll_remove(&(local_domain.capabilities), (parent->left), list);
-    local_domain.dealloc(parent->left);
-    local_domain.dealloc(parent->right);
-    parent->left = NULL;
-    parent->right = NULL;
-    if (enumerate_capa(parent->local_id, NULL, parent) != SUCCESS) {
-      ERROR("Error[internal_revoke]: unable to enumerate after the merge.");
-      goto failure;
-    }
-    capa = parent;
-  }
 
   // All done!
   DEBUG("success");
@@ -730,6 +675,8 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end) {
   if (internal_revoke(child, capa) != SUCCESS) {
     goto failure;
   }
+  // Deallocate the capa.
+  local_domain.dealloc(capa);
   DEBUG("success");
   return SUCCESS;
 failure:
@@ -737,11 +684,32 @@ failure:
   return FAILURE;
 }
 
+int read_gp_domain(domain_id_t id, usize core, usize regs[TYCHE_GP_REGS_SIZE]) {
+  child_domain_t *child = NULL;
+  child = find_child(id);
+  if (child == NULL || regs == NULL) {
+    ERROR("Child is null or regs is null.");
+    goto failure;
+  }
+  if (tyche_read_gp_registers(child->management->local_id, core, regs) != SUCCESS) {
+    ERROR("Failed to read gp registers from tyche.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 // TODO nothing thread safe in this implementation for the moment.
-int switch_domain(domain_id_t id, void *args) {
+int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
+
+  if (exit_frame == NULL) {
+    ERROR("Exit frame is null.");
+    goto failure;
+  }
 
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
@@ -775,13 +743,23 @@ int switch_domain(domain_id_t id, void *args) {
   DEBUG("Found a handle for domain %lld, id %lld", id,
         wrapper->transition->local_id);
 
-  if (tyche_switch(&(wrapper->transition->local_id), args) !=
+  //TODO remove the tyche_write_gp_registers.
+  /*if (args != NULL && tyche_write_gp_registers(child->management->local_id, args) != SUCCESS) {
+    ERROR("failed to write all the registers.");
+    goto failure;
+  }*/
+  if (tyche_switch(&(wrapper->transition->local_id), exit_frame) !=
       SUCCESS) {
     ERROR("failed to perform a switch on capa %lld",
           wrapper->transition->local_id);
     goto failure;
   }
   DEBUG("[switch_domain] Came back from the switch");
+  //TODO(aghosn) remove this from capabilities.
+  /*if (args != NULL && tyche_read_gp_registers(child->management->local_id, args) != SUCCESS) {
+    ERROR("Unable to read gp registers.");
+    goto failure;
+  }*/
   // We are back from the switch, unlock the wrapper.
   wrapper->lock = TRANSITION_UNLOCKED;
   return SUCCESS;
@@ -814,20 +792,12 @@ int revoke_domain(domain_id_t id) {
   // First go through all the revocations.
   while (!dll_is_empty(&(child->revocations))) {
     capa = child->revocations.head;
-    if (capa->left != NULL) {
-      // By construction this should never happen.
-      ERROR("The revoked capa has non empty left.");
-      goto failure;
-    }
-    if (capa->right != NULL) {
-      // By construction this should never happen.
-      ERROR("The revoked capa has non empty right.");
-      goto failure;
-    }
+
     if (internal_revoke(child, capa) != SUCCESS) {
       ERROR("unable to revoke a capability.");
       goto failure;
     }
+    local_domain.dealloc(capa);
   }
   // Take care of the transitions + manipulate.
   // No need to call revoke, they should be handled by the cascading revocation.
@@ -853,5 +823,32 @@ int revoke_domain(domain_id_t id) {
   return SUCCESS;
 failure:
   ERROR("[revoke_domain] failure");
+  return FAILURE;
+}
+
+
+int revoke_domain_regions(domain_id_t id)
+{
+  child_domain_t *child = find_child(id);
+  capability_t *capa = NULL;
+
+  if (child == NULL) {
+    ERROR("Unable to find child with id %lld\n", id);
+    goto failure;
+  }
+
+  // First go through all the revocations.
+  while (!dll_is_empty(&(child->revocations))) {
+    capa = child->revocations.head;
+    //ERROR("revoke domain regions of type %d\n", capa->capa_type);
+    if (internal_revoke(child, capa) != SUCCESS) {
+      ERROR("unable to revoke a capability.");
+      goto failure;
+    }
+    // Dealloc the structure.
+    local_domain.dealloc(capa);
+  }
+  return SUCCESS;
+failure:
   return FAILURE;
 }

@@ -1,4 +1,4 @@
-#include "tyche_ioctl.h"
+#include "contalloc_ioctl.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -8,36 +8,27 @@
 // —————————————————————————————— Module Info ——————————————————————————————— //
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Tyche team");
-MODULE_DESCRIPTION("Tyche Driver");
+MODULE_AUTHOR("aghosn");
+MODULE_DESCRIPTION("Continuous memory allocator");
 MODULE_VERSION("0.01");
 
 
 // —————————————————————— Loading/Unloading  functions —————————————————————— //
-static int __init tyche_init(void)
+static int __init contalloc_init(void)
 {
   int result = 0;
-  printk(KERN_INFO "Loading Tyche driver.");
-  result = tyche_register();
+  printk(KERN_INFO "Loading contalloc driver.");
+  result = contalloc_register();
   return result;
 }
 
-static void __exit tyche_exit(void)
+static void __exit contalloc_exit(void)
 {
-  printk(KERN_INFO "Removing Tyche driver.");
-  tyche_unregister();
+  printk(KERN_INFO "Removing contalloc driver.");
+  contalloc_unregister();
 }
 
 // ————————————————————————— Module's Registration —————————————————————————— //
 
-module_init(tyche_init);
-module_exit(tyche_exit);
-
-// ———————————————————————— Exported symbol attempt ————————————————————————— //
-
-void tyche_debug_print(void)
-{
-  trace_printk("This is a print from tyche.\n");
-}
-
-EXPORT_SYMBOL(tyche_debug_print);
+module_init(contalloc_init);
+module_exit(contalloc_exit);

@@ -111,6 +111,12 @@ struct kvm_userspace_memory_region {
 #define KVM_MEM_LOG_DIRTY_PAGES	(1UL << 0)
 #define KVM_MEM_READONLY	(1UL << 1)
 
+/*
+ * @aghosn: Added defines to abuse the KVM flags.
+ */
+/*Valid mask*/
+#define KVM_FLAGS_VALID_MASK (0b111111111111U)
+
 /* for KVM_IRQ_LINE */
 struct kvm_irq_level {
 	/*

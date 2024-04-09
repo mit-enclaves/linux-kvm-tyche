@@ -1,3 +1,5 @@
+#include "linux/rwsem.h"
+#include "tyche_api.h"
 #include <linux/ioctl.h>
 #include <linux/kernel.h>   /* printk() */
 #include <linux/cdev.h>
@@ -5,6 +7,7 @@
 #include <linux/fs.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "domains.h"
 #define _IN_MODULE
 #include "tyche_driver.h"
@@ -69,6 +72,7 @@ int tyche_register(void)
 
   driver_init_domains();
   LOG("Tyche driver registered!\n");
+  trace_printk("Tyche driver initialized\n");
   return SUCCESS;
 
 r_device:
@@ -95,7 +99,7 @@ int tyche_open(struct inode* inode, struct file* file)
     ERROR("We received a Null file descriptor.");
     goto failure;
   }
-  if (driver_create_domain(file) != SUCCESS) {
+  if (driver_create_domain(file, NULL, 0) != SUCCESS) {
     ERROR("Unable to create a new domain");
     goto failure;
   }
@@ -106,7 +110,8 @@ failure:
 
 int tyche_close(struct inode* inode, struct file* handle)
 {
-   if (driver_delete_domain(handle) != SUCCESS) {
+  driver_domain_t * dom = find_domain(handle, true);
+   if (dom == NULL || driver_delete_domain(dom) != SUCCESS) {
         ERROR("Unable to delete the domain %p", handle);
         goto failure;
     }
@@ -115,18 +120,41 @@ failure:
   return FAILURE;
 }
 
+#define ACQUIRE_DOM(write) \
+    domain = find_domain(handle, write); \
+    if (domain == NULL) { \
+      ERROR("Unable to find domain %p", handle); \
+      goto failure; \
+    }
+
+#define RELEASE_DOM(write) \
+  if (write) { \
+    up_write(&(domain->rwlock)); \
+  } else { \
+    up_read(&(domain->rwlock)); \
+  }
+
 
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
   msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE};
-  msg_entry_on_core_t commit = {0, 0, 0, 0};
   msg_mprotect_t mprotect = {0, 0, 0, 0};
-  msg_switch_t transition = {0};
   msg_set_perm_t perm = {0};
+  driver_domain_t *domain = NULL;
+  msg_create_pipe_t pipe = {0};
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
-      if (driver_get_physoffset_domain(handle, &info.physoffset) != SUCCESS) {
+      if (copy_from_user(
+            &info,
+            (msg_info_t*) arg,
+            sizeof(msg_info_t))) {
+        ERROR("Unable to copy info arguments from user.");
+        goto failure;
+      }
+      ACQUIRE_DOM(false);
+      if (driver_get_physoffset_domain(domain, info.virtaddr, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for domain %p", handle);
+        RELEASE_DOM(false);
         goto failure;
       }
       if (copy_to_user(
@@ -134,84 +162,66 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
             &info,
             sizeof(msg_info_t))) {
         ERROR("Unable to copy domain physoffset for %p", handle);
+        RELEASE_DOM(false);
         goto failure;
       }
+      RELEASE_DOM(false);
       break;
     case TYCHE_COMMIT:
-      if (driver_commit_domain(handle) != SUCCESS) {
+      ACQUIRE_DOM(true);
+      if (driver_commit_domain(domain, 1) != SUCCESS) {
         ERROR("Commit failed for domain %p", handle);
+        RELEASE_DOM(true);
         goto failure;
       }
+      RELEASE_DOM(true);
       break;
-    case TYCHE_SET_TRAPS:
-        if (copy_from_user(
+    case TYCHE_SET_DOMAIN_CONFIGURATION:
+      if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
             sizeof(msg_set_perm_t))) {
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_traps(handle, perm.value) != SUCCESS) {
+      if (perm.idx < TYCHE_CONFIG_PERMISSIONS || perm.idx >= TYCHE_NR_CONFIGS) {
+        ERROR("Invalid configuration value.");
+        goto failure;
+      }
+
+      ACQUIRE_DOM(true);
+      if (driver_set_domain_configuration(domain, perm.idx, perm.value) != SUCCESS) {
         ERROR("Setting traps failed for domain %p", handle);
+        RELEASE_DOM(true);
         goto failure;
       }
+      RELEASE_DOM(true);
       break;
-   case TYCHE_SET_CORES:
-        if (copy_from_user(
+    case TYCHE_SET_DOMAIN_CORE_CONFIG:
+      if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
             sizeof(msg_set_perm_t))) {
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (driver_set_cores(handle, perm.value) != SUCCESS) {
-        ERROR("Setting cores failed for domain %p", handle);
+      ACQUIRE_DOM(false);
+      if (driver_set_domain_core_config(domain, perm.core, perm.idx, perm.value) != SUCCESS) {
+        ERROR("Setting traps failed for domain %p", handle);
+        RELEASE_DOM(false);
         goto failure;
       }
+      RELEASE_DOM(false);
       break;
-   case TYCHE_SET_PERM:
-        if (copy_from_user(
-            &perm,
-            (msg_set_perm_t*) arg,
-            sizeof(msg_set_perm_t))) {
-        ERROR("Unable to copy perm arguments from user.");
+    case TYCHE_ALLOC_CONTEXT:
+      usize core = (usize) arg;
+      ACQUIRE_DOM(true);
+      if (driver_alloc_core_context(domain, core) != SUCCESS) {
+        ERROR("Unable to allocate core context!");
+        RELEASE_DOM(true);
         goto failure;
       }
-      if (driver_set_perm(handle, perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_SWITCH:
-        if (copy_from_user(
-            &perm,
-            (msg_set_perm_t*) arg,
-            sizeof(msg_set_perm_t))) {
-        ERROR("Unable to copy perm arguments from user.");
-        goto failure;
-      }
-      if (driver_set_switch(handle, perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
-        goto failure;
-      }
-      break;
-   case TYCHE_SET_ENTRY_POINT:
-        if (copy_from_user(
-            &commit,
-            (msg_entry_on_core_t*) arg,
-            sizeof(msg_entry_on_core_t))) {
-        ERROR("Unable to copy perm arguments from user.");
-        goto failure;
-      }
-      if (driver_set_entry_on_core(
-            handle,
-            commit.core,
-            commit.page_tables,
-            commit.entry,
-            commit.stack) != SUCCESS) {
-        ERROR("Setting perm failed for domain %p", handle);
-        goto failure;
-      }
+      RELEASE_DOM(true);
       break;
     case TYCHE_MPROTECT:
       if (copy_from_user(
@@ -221,31 +231,56 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
+      ACQUIRE_DOM(true);
       if (driver_mprotect_domain(
-            handle,
+            domain,
             mprotect.start,
             mprotect.size,
             mprotect.flags,
-            mprotect.tpe) != SUCCESS) {
+            mprotect.tpe,
+            NO_ALIAS) != SUCCESS) {
         ERROR("Unable to mprotect he region for domain %p", handle);
+        RELEASE_DOM(true);
         goto failure;
       }
+      RELEASE_DOM(true);
       break;
     case TYCHE_TRANSITION:
-      if (copy_from_user(
-            &transition,
-            (msg_switch_t*) arg,
-            sizeof(msg_switch_t))) {
-        ERROR("Unable to copy arguments from user.");
+      ACQUIRE_DOM(false);
+      if (driver_switch_domain(domain, arg) != SUCCESS) {
+        ERROR("Unable to switch to domain %p", handle);
+        RELEASE_DOM(false);
         goto failure;
       }
-      if (driver_switch_domain(handle, transition.args) != SUCCESS) {
-        ERROR("Unable to switch to domain %p", handle);
+      RELEASE_DOM(false);
+      break;
+    case TYCHE_CREATE_PIPE:
+      if (copy_from_user(&pipe, (msg_create_pipe_t*) arg,
+            sizeof(msg_create_pipe_t))) {
+        ERROR("Unable to copy the create pipe message");
+        goto failure;
+      }
+      if (driver_create_pipe(&(pipe.id), pipe.phys_addr, pipe.size, pipe.flags,
+            pipe.width) != SUCCESS) {
+        ERROR("Failed to create a pipe.");
+        goto failure;
+      }
+      if (copy_to_user((msg_create_pipe_t*) arg, &pipe,
+            sizeof(msg_create_pipe_t))) {
+        ERROR("Unable to copy result from create pipe.");
         goto failure;
       }
       break;
+    case TYCHE_ACQUIRE_PIPE:
+      ACQUIRE_DOM(true);
+      if (driver_acquire_pipe(domain, (usize)arg) != SUCCESS) {\
+        ERROR("Unable to acquire pipe");
+        goto failure;
+      }
+      RELEASE_DOM(true);
+      break;
     default:
-      ERROR("The command is not valid!");
+      ERROR("The command is not valid! %d", cmd);
       goto failure;
   }
   return SUCCESS;
@@ -255,5 +290,14 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  return driver_mmap_segment(file, vma);
+  int res = FAILURE;
+  driver_domain_t *dom = find_domain(file, true);
+  if (dom == NULL) {
+    ERROR("Unable to find domain for handle %p", file);
+    return FAILURE;
+  }
+  res = driver_mmap_segment(dom, vma);
+  // Unlock the domain.
+  up_write(&(dom->rwlock));
+  return res;
 }

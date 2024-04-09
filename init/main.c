@@ -724,7 +724,6 @@ noinline void __ref rest_init(void)
 	system_state = SYSTEM_SCHEDULING;
 
 	complete(&kthreadd_done);
-
 	/*
 	 * The boot idle thread must execute schedule()
 	 * at least once to get things moving:
@@ -999,7 +998,6 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
-
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
 		local_irq_disable();
@@ -1010,7 +1008,6 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * workqueue to take non-housekeeping into account.
 	 */
 	housekeeping_init();
-
 	/*
 	 * Allow workqueue creation and work item queueing/cancelling
 	 * early.  Work item execution depends on kthreads and starts after
@@ -1058,6 +1055,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 
+
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
 
@@ -1102,8 +1100,9 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	setup_per_cpu_pageset();
 	numa_policy_init();
 	acpi_early_init();
-	if (late_time_init)
+	if (late_time_init) {
 		late_time_init();
+  	}
 	sched_clock_init();
 	calibrate_delay();
 	pid_idr_init();

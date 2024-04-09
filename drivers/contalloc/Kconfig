@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Virtualization support drivers
+#
+
+config CONTALLOC_DRIVER
+	tristate "Continuous allocator for physical memory."
+	help
+	  Say Y here to allow the driver to allocate continuous memory.

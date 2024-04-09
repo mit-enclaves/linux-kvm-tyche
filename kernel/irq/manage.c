@@ -1773,7 +1773,6 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		desc->istate &= ~IRQS_SPURIOUS_DISABLED;
 		__enable_irq(desc);
 	}
-
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 	chip_bus_sync_unlock(desc);
 	mutex_unlock(&desc->request_mutex);
@@ -2170,7 +2169,6 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	}
 
 	retval = __setup_irq(irq, desc, action);
-
 	if (retval) {
 		irq_chip_pm_put(&desc->irq_data);
 		kfree(action->secondary);
