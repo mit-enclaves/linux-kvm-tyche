@@ -20,6 +20,8 @@
 #include <linux/syscore_ops.h>
 #include <asm/smp.h>
 
+#define TYCHE_PLIC_PATCH
+
 /*
  * This driver implements a version of the RISC-V PLIC with the actual layout
  * specified in chapter 8 of the SiFive U5 Coreplex Series Manual:
@@ -315,16 +317,64 @@ static void plic_handle_irq(struct irq_desc *desc)
 	WARN_ON_ONCE(!handler->present);
 
 	chained_irq_enter(chip, desc);
+	//printk("%s enter",__func__);
+#ifdef TYCHE_PLIC_PATCH
+	hwirq = readl(claim);
+	//printk("Read hwirq: %x",hwirq);
+    	while (hwirq) {
+		int err = generic_handle_domain_irq(handler->priv->irqdomain,
+							    hwirq);
+		if (unlikely(err)) {
+		    pr_warn_ratelimited("can't find mapping for hwirq %lu\n", hwirq);
+		}
 
+		uint64_t sip = csr_read(CSR_SIP);
+		hwirq = readl(claim);
+		//printk("Read hwirq: %x and sip: %lx", hwirq, sip);
+		if (sip & 0x200 && !hwirq) {
+		    //Ecall to Tyche to clear SIP.SEIP
+		    asm volatile(
+			"addi sp, sp, -2*8\n\t"
+			"sd a0, 0*8(sp)\n\t"
+			"sd a7, 1*8(sp)\n\t"
+			"li a7, 0x5479636865\n\t"
+			"li a0, 0x5479636865\n\t"
+			"ecall\n\t"
+			"ld a0, 0*8(sp)\n\t"
+			"ld a7, 1*8(sp)\n\t"
+			"addi sp, sp, 2*8\n\t"
+			:
+			:
+			: "a0", "a7"
+		    );
+		    //sip = csr_read(CSR_SIP);
+		    //if(sip & 0x200 == 0) {
+		    //printk("Tyche cleared SIP to %lx",sip);
+		    //} else {
+		//	hwirq = readl(claim);
+		//	printk("SIP is set even after Tyche cleared it sip: %lx and hwirq = %x",sip, hwirq);
+		  //  	BUG_ON((sip & 0x200) && !hwirq);
+		    //} 
+
+		    
+		}
+	}
+#else 
 	while ((hwirq = readl(claim))) {
+	//	printk("[   NEELU    ]     HWIRQ = %x",hwirq);
 		int err = generic_handle_domain_irq(handler->priv->irqdomain,
 						    hwirq);
 		if (unlikely(err))
 			pr_warn_ratelimited("can't find mapping for hwirq %lu\n",
 					hwirq);
 	}
+	uint64_t sip = csr_read(CSR_SIP);
+	//printk("While loop ended: hwirq: %x sip %lx", hwirq, sip);	
+	//BUG_ON((sip & 0x200) && !hwirq);
+#endif
 
 	chained_irq_exit(chip, desc);
+	//printk("%s exit",__func__);
 }
 
 static void plic_set_threshold(struct plic_handler *handler, u32 threshold)

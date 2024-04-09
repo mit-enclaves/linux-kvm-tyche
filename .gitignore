@@ -37,6 +37,7 @@
 *.o
 *.o.*
 *.patch
+*.rej
 *.s
 *.so
 *.so.dbg
