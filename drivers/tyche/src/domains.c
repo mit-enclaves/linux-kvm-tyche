@@ -195,7 +195,8 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   if (ptr != NULL) {
     *ptr = dom;
   }
-  LOG("A new domain was added to the driver with id %p", handle);
+  //Disabled for benchmarks
+  //LOG("A new domain was added to the driver with id %p", handle);
   return SUCCESS;
 failure_free:
   kfree(dom);
@@ -744,7 +745,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
-    ERROR("WARNING: the domain %p has no segment.", dom);
+    //ERROR("WARNING: the domain %p has no segment.", dom);
     //goto failure;
   }
 
