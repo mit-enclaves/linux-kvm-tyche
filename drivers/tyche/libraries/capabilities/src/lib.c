@@ -475,7 +475,8 @@ failure:
   return FAILURE;
 }
 
-int send_region(domain_id_t id, capability_t *capa, capability_t *revoke) {
+int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
+    usize send_access) {
   child_domain_t *child = NULL;
   if (capa == NULL || revoke == NULL) {
     goto failure;
@@ -486,7 +487,9 @@ int send_region(domain_id_t id, capability_t *capa, capability_t *revoke) {
     goto failure;
   }
   if (tyche_send_aliased(child->management->local_id, capa->local_id,
-      0, capa->info.region.start, capa->info.region.end - capa->info.region.start) != SUCCESS) {
+      0, capa->info.region.start,
+      capa->info.region.end - capa->info.region.start,
+      send_access >> 2) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }
@@ -507,6 +510,14 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   capability_t *capa = NULL;
   capability_t* to_send = NULL;
   capability_t* revoke = NULL;
+  memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
+  memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
+  if ((basic_access | send_access) != access) {
+    ERROR("Problem partitioning access right flags. Expected %x, got: %x",
+        access, (basic_access | send_access));
+    goto failure;
+  }
+
   usize aliased_start = (alias == NO_ALIAS)? start : alias;
   paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
@@ -534,7 +545,7 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
             capa->info.region.start,
             capa->info.region.end, start)) &&
         (capa->info.region.start <= end && capa->info.region.end >= end)
-        && has_access_rights(capa->info.region.flags, access)) {
+        && has_access_rights(capa->info.region.flags, basic_access)) {
       // Found the capability.
       break;
     }
@@ -566,12 +577,12 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   }
 
   //@aghosn: this is the new capa interface for regions.
-  if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, access >> 2) != SUCCESS) {
+  if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, basic_access >> 2) != SUCCESS) {
     ERROR("Unable to segment the region !");
     goto failure;
   }
   if (tyche_send_aliased(child->management->local_id, to_send->local_id,
-      is_repeat, aliased_start, size) != SUCCESS) {
+      is_repeat, aliased_start, size, send_access >> 2) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }

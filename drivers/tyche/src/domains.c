@@ -1084,6 +1084,7 @@ int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
   capability_t* orig = NULL;
   capability_t* orig_revoke = NULL;
   driver_pipe_t* pipe = NULL;
+  memory_access_right_t basic_flags = flags & MEM_ACCESS_RIGHT_MASK_SEWRCA;
   usize i = 0;
   if (pipe_id == NULL || width == 0) {
     ERROR("Supplied pipe id is null");
@@ -1097,10 +1098,11 @@ int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
   pipe->id = 0;
   pipe->phys_start = phys_addr;
   pipe->size = size;
+  pipe->flags = flags;
   dll_init_list(&(pipe->actives));
   dll_init_list(&(pipe->revokes));
   dll_init_elem(pipe, list);
-  if (cut_region(phys_addr, size, flags, &orig, &orig_revoke) != SUCCESS) {
+  if (cut_region(phys_addr, size, basic_flags, &orig, &orig_revoke) != SUCCESS) {
     ERROR("Unable to carve out the original pipe region.");
     goto failure_free;
   }
@@ -1137,6 +1139,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   driver_pipe_t *pipe = NULL;
   capability_t* to_send = NULL;
   capability_t* to_revoke = NULL;
+  memory_access_right_t send_access;
   if (domain == NULL) {
     goto failure;
   }
@@ -1159,6 +1162,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   // Remove the capas from the pipe.
   to_send = pipe->actives.head;
   to_revoke = pipe->revokes.head;
+  send_access = pipe->flags & MEM_ACCESS_RIGHT_MASK_VCH;
   dll_remove(&(pipe->actives), to_send, list);
   dll_remove(&(pipe->revokes), to_revoke, list);
 
@@ -1169,7 +1173,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
     pipe = NULL;
   }
 
-  if (send_region(domain->domain_id, to_send, to_revoke) != SUCCESS) {
+  if (send_region(domain->domain_id, to_send, to_revoke, send_access) != SUCCESS) {
     ERROR("failed to send the pipes");
     goto fail_unlock;
   }

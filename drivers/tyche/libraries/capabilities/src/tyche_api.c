@@ -421,7 +421,7 @@ failure:
 }
 
 int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
-		usize alias, usize size) {
+    usize alias, usize size, usize send_access) {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEND_REGION,
     .arg_1 = capa,
@@ -429,6 +429,7 @@ int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
     .arg_3 = alias,
     .arg_4 = is_repeat,
     .arg_5 = size,
+    .arg_6 = send_access,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;

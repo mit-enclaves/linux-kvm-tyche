@@ -111,6 +111,8 @@ typedef struct driver_pipe_t {
 	usize phys_start;
 	// The size of the pipe;
 	usize size;
+	// The flags associated with the creation of the pipe.
+	memory_access_right_t flags;
 	// This is stored in a list inside the global driver state.
 	dll_elem(struct driver_pipe_t, list);
 

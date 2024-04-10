@@ -107,7 +107,7 @@ struct kvm_userspace_memory_region {
  * @aghosn: Added defines to abuse the KVM flags.
  */
 /*Valid mask*/
-#define KVM_FLAGS_VALID_MASK (0b111111111111U)
+#define KVM_FLAGS_VALID_MASK (0b111111111111111U)
 
 /* for KVM_IRQ_LINE */
 struct kvm_irq_level {
