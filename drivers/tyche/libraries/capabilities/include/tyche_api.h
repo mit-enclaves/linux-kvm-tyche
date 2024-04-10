@@ -100,7 +100,7 @@ int tyche_segment_region(usize is_shared, capa_index_t capa,
 int tyche_send(capa_index_t dest, capa_index_t capa);
 
 int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
-		       usize alias, usize size);
+		       usize alias, usize size, usize send_access);
 
 int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 		usize a1, usize a2, usize a3);

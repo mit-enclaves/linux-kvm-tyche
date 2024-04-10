@@ -7,10 +7,10 @@
 /* Begining of the memory access rights in the KVM flags */
 #define KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX (KVM_FLAGS_USABLE_IDX)
 /* The number of bits used to encore the memory access in kvm flags */
-#define KVM_FLAGS_MEM_ACCESS_RIGHTS_SIZE (6)
+#define KVM_FLAGS_MEM_ACCESS_RIGHTS_SIZE (9)
 /* The mask for access right in kvm flags */
 #define KVM_FLAGS_MEM_ACCESS_RIGHTS_MASK \
-	(0b111111U << KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX)
+	(0b111111111U << KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX)
 /* Begining of the segment type in the KVM flags */
 #define KVM_FLAGS_SEGMENT_TYPE_IDX \
 	(KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX + KVM_FLAGS_MEM_ACCESS_RIGHTS_SIZE)

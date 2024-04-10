@@ -61,9 +61,14 @@ typedef enum memory_access_right_t {
 	MEM_EXEC = 1 << 4,
 	MEM_SUPER = 1 << 5,
 	MEM_HASH = 1 << 6,
-	MEM_CLEANUP = 1 << 6,
-	MEM_VITAL = 1 << 7,
+	MEM_CLEANUP = 1 << 7,
+	MEM_VITAL = 1 << 8,
 } memory_access_right_t;
+
+#define MEM_ACCESS_RIGHT_MASK_SEWRCA                                      \
+	(MEM_SUPER | MEM_EXEC | MEM_WRITE | MEM_READ | MEM_CONFIDENTIAL | \
+	 MEM_ACTIVE)
+#define MEM_ACCESS_RIGHT_MASK_VCH ((MEM_VITAL | MEM_CLEANUP | MEM_HASH))
 
 /// Access right information for a region capability.
 typedef struct capa_region_t {
