@@ -140,7 +140,8 @@ int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
   }
   memset(allocation, 0, size);
   // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
+  int i;
+  for (i = 0; i < (size/PAGE_SIZE); i++) {
     char* mem = ((char*)allocation) + i * PAGE_SIZE;
     SetPageReserved(virt_to_page((unsigned long)mem));
   }

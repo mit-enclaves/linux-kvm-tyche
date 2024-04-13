@@ -310,7 +310,7 @@ int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize
       .arg_3 = fields[i],
       .arg_4 = values[i],
     };
-    ERROR("Tyche call write fields: %lx : %lx",fields[i], values[i]);
+    //ERROR("Tyche call write fields: %lx : %lx",fields[i], values[i]);
     if (tyche_call(&frame) != SUCCESS) {
       goto failure;
     }

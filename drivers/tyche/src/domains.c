@@ -251,8 +251,9 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     goto failure;
   }
   memset(allocation, 0, size);
+  int i;
   // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
+  for (i = 0; i < (size/PAGE_SIZE); i++) {
     char* mem = ((char*)allocation) + i * PAGE_SIZE;
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
@@ -796,8 +797,9 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     }*/
   }
   //ERROR("About to seal the domain.");
+  int i;
   //TODO(aghosn) try to flush the cache.
-  for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
+  for (i = 0; i < ENTRIES_PER_DOMAIN; i++) {
     if (dom->contexts[i] != NULL) {
       down_write(&(dom->contexts[i]->rwlock));
       if (flush_caches(dom, i) != SUCCESS) {
@@ -1028,7 +1030,8 @@ delete_dom_struct:
   }
 */
   // Delete the contexts.
-  for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
+  int i;
+  for (i = 0; i < ENTRIES_PER_DOMAIN; i++) {
     if (dom->contexts[i] != NULL) {
       kfree(dom->contexts[i]);
     }
