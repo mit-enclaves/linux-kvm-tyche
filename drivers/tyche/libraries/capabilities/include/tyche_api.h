@@ -28,6 +28,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_ENCLAVE_ATTESTATION = 20,
 	TYCHE_REVOKE_ALIASED_REGION = 21,
 	TYCHE_SERIALIZE_ATTESTATION = 22,
+	TYCHE_TEST_CALL = 30,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {

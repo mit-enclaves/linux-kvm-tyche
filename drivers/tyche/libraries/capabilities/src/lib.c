@@ -422,23 +422,6 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx",
         start, end);
-#if defined(CONFIG_X86) || defined(__x86_64__) 
-    asm volatile (
-      "movq $11, %%rax\n\t"
-      "vmcall\n\t"
-      :
-      :
-      : "rax", "memory"
-        );
-#elif defined(CONFIG_RISCV) || defined(__riscv)
-    asm volatile (
-        "li a0, 0xb\n\t"
-        "li a7, 0x5479636865\n\t"
-        :
-        :
-        : "a0", "a7"
-    );
-#endif 
     goto failure;
   }
 
@@ -555,14 +538,20 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   if (capa == NULL) {
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
+<<<<<<< HEAD
 		    start, end, is_repeat);
 #if defined(CONFIG_X86) || defined(__x86_64__) 
     asm volatile (
+=======
+        start, end, is_repeat);
+    /*asm volatile (
+>>>>>>> 7085131e65ea (Cleaning up linux from raw assembly)
       "movq $11, %%rax\n\t"
       "vmcall\n\t"
       :
       :
       : "rax", "memory"
+<<<<<<< HEAD
         );
 #elif defined(CONFIG_RISCV) || defined(__riscv)
     asm volatile (
@@ -573,6 +562,9 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
         : "a0", "a7"
     );
 #endif
+=======
+        );*/
+>>>>>>> 7085131e65ea (Cleaning up linux from raw assembly)
     goto failure;
   }
 
