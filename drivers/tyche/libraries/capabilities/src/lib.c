@@ -422,13 +422,13 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx",
         start, end);
-    asm volatile (
+    /*asm volatile (
       "movq $11, %%rax\n\t"
       "vmcall\n\t"
       :
       :
       : "rax", "memory"
-        );
+        );*/
     goto failure;
   }
 
@@ -546,13 +546,13 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
         start, end, is_repeat);
-    asm volatile (
+    /*asm volatile (
       "movq $11, %%rax\n\t"
       "vmcall\n\t"
       :
       :
       : "rax", "memory"
-        );
+        );*/
     goto failure;
   }
 
