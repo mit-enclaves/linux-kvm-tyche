@@ -75,6 +75,10 @@ typedef struct vmcall_frame_t {
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
+#if defined(CONFIG_RISCV) || defined(__riscv)
+int user_tyche_call(vmcall_frame_t *frame);
+#endif
+
 int tyche_call(vmcall_frame_t *frame);
 
 int tyche_create_domain(capa_index_t *management, int aliased);

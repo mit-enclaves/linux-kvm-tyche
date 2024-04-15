@@ -8,4 +8,8 @@
 /// Enumerate the next capability with index >= idx.
 int enumerate_capa(capa_index_t idx, capa_index_t* next, capability_t* capa);
 
+#if defined(CONFIG_RISCV) || defined(__riscv)
+int user_enumerate_capa(capa_index_t idx, capa_index_t* next, capability_t* capa);
+#endif
+
 #endif
