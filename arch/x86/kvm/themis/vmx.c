@@ -8035,6 +8035,14 @@ static int vmx_vm_init(struct kvm *kvm)
 		return FAILURE;
 	}
 
+  // For the moment, let's enable all read and all write.
+  for (unsigned int p = TYCHE_CONFIG_R16; p < TYCHE_NR_CONFIGS; p++) {
+    if (driver_set_domain_configuration(vmx->domain, p, ~((uint64_t) 0)) != SUCCESS) {
+      ERROR("Unable to set configuration %u", p);
+      return FAILURE;
+    }
+  }
+
 	return 0;
 }
 
