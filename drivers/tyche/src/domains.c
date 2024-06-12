@@ -451,7 +451,9 @@ EXPORT_SYMBOL(driver_set_domain_configuration);
 
 /// Expose the domain's own configuration for allowed selected fields.
 int driver_set_self_core_config(usize field, usize value) {
-  return tyche_set_self_core_config(field, value);
+  //TODO disable this for now.
+  //return tyche_set_self_core_config(field, value);
+  return 0;
 }
 EXPORT_SYMBOL(driver_set_self_core_config);
 
