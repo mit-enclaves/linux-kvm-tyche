@@ -472,6 +472,7 @@ failure:
 
 int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_t size)
 {
+#if defined(CONFIG_X86) || defined(__x86_64__)
   vmcall_frame_t frame = {
     .vmcall = TYCHE_REVOKE_ALIASED_REGION,
     .arg_1 = id,
@@ -485,6 +486,9 @@ int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_
   return SUCCESS;
 failure:
   return FAILURE;
+#else
+  return tyche_revoke(id);
+#endif
 }
 
 int tyche_serialize_attestation(usize addr, usize size, usize *written)
