@@ -7627,6 +7627,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 					unsigned long flags)
 {
 	struct kvm_vmx *vmx_kvm = to_kvm_vmx(vcpu->kvm);
+	msg_switch_t params = {0, 0, 0};
 	guest_state_enter_irqoff();
 
 	/* L1D Flush includes CPU buffer clear to mitigate MDS */
@@ -7649,7 +7650,8 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	//TODO(@aghosn) how do we relate a vcpu to a core for tyche?
 	//This mapping has to be re-designed I think, should be done before disable interrupt.
 	write_all_gp_registers(vmx);
-	vmx->fail = driver_switch_domain(vmx_kvm->domain, vcpu->vcpu_id);
+	params.core = vcpu->vcpu_id;
+	vmx->fail = driver_switch_domain(vmx_kvm->domain, &params);
 	read_all_gp_registers(vmx);
 	vcpu->arch.cr2 = native_read_cr2();
 

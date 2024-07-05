@@ -21,6 +21,15 @@
 // —————————————————————— Types Exposed by the Library —————————————————————— //
 typedef struct file *domain_handle_t;
 
+/// Information about the exit.
+typedef enum exit_reason_t {
+	UNKNOWN = 0,
+	MEM_FAULT = 1,
+	EXCEPTION = 2,
+	INTERRUPT = 3,
+	TIMER = 4,
+} exit_reason_t;
+
 // ———————————————————————————————— Messages ———————————————————————————————— //
 
 /// Default message used to communicate with the driver.
@@ -45,9 +54,12 @@ typedef struct {
 } msg_mprotect_t;
 
 /// Structure to perform a transition.
+/// Encapsulates the core and an optional non-zero delta quantum of time.
+/// Embeds an error code (0 when ioctl returns success).
 typedef struct {
-	/// The args, will end up in r11 on x86.
-	void *args;
+	usize core;
+	uint32_t delta;
+	exit_reason_t error;
 } msg_switch_t;
 
 /// Structure to set permissions, i.e., traps or cores.
@@ -76,14 +88,14 @@ typedef struct {
 
 /// Information about the attestation buffer.
 typedef struct {
-    /// Virtual address of the start of the buffer.
-    usize start;
+	/// Virtual address of the start of the buffer.
+	usize start;
 
-    /// Size of the buffer.
-    usize size;
+	/// Size of the buffer.
+	usize size;
 
-    /// How many bytes were written by Tyche.
-    usize written;
+	/// How many bytes were written by Tyche.
+	usize written;
 } attest_buffer_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //

@@ -1,5 +1,6 @@
 #include "arch_cache.h"
 #include "dll.h"
+#include "linux/nmi.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
@@ -866,6 +867,28 @@ failure:
   return FAILURE;
 }
 
+static exit_reason_t convert_exit_reason(usize exit[TYCHE_EXIT_FRAME_SIZE]) {
+#if defined(CONFIG_X86) || defined(__x86_64__)
+  /// VM_EXIT_REASON index.
+  switch (exit[4]) {
+    case EXIT_REASON_EPT_VIOLATION:
+    case EXIT_REASON_EPT_MISCONFIG:
+      return MEM_FAULT;
+    case EXIT_REASON_EXCEPTION_NMI:
+      return EXCEPTION;
+    case EXIT_REASON_EXTERNAL_INTERRUPT:
+      return INTERRUPT;
+    case EXIT_REASON_PREEMPTION_TIMER:
+      return TIMER;
+    default:
+      return UNKNOWN;
+  }
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+  return UNKNOWN;
+#endif
+  return UNKNOWN;
+}
+
 const usize GP_REGS_FIELDS[TYCHE_GP_REGS_SIZE] = {
   REG_GP_RAX,
   REG_GP_RBX,
@@ -898,7 +921,8 @@ failure:
   return FAILURE;
 }
 
-int driver_switch_domain(driver_domain_t * dom, usize core) {
+
+int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
   usize exit_frame[TYCHE_EXIT_FRAME_SIZE] = {0};
   usize gp_frame[TYCHE_GP_REGS_SIZE] = {0};
   int local_cpuid = 0;
@@ -906,28 +930,32 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     ERROR("The domain is null.");
     goto failure;
   }
+  if (params == NULL) {
+    ERROR("Switch received a null param, that's unexpected.");
+    goto failure;
+  }
   // Expects the domain to be R-locked.
   CHECK_RLOCK(dom, failure);
 
-  if (core >= ENTRIES_PER_DOMAIN) {
+  if (params->core >= ENTRIES_PER_DOMAIN) {
     ERROR("Invalid core.");
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
-      dom->contexts[core] == NULL) {
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << params->core)) == 0 ||
+      dom->contexts[params->core] == NULL) {
     ERROR("Invalid core.");
     goto failure;
   }
 
   // Lock the core.
-  down_write(&(dom->contexts[core]->rwlock));
+  down_write(&(dom->contexts[params->core]->rwlock));
 
   // This disables preemption to guarantee we remain on the same core after the
   // check.
   local_cpuid = get_cpu();
   // Check we are on the right core.
-  if (core != local_cpuid) {
-    ERROR("Attempt to switch on core %lld from cpu %d", core, local_cpuid);
+  if (params->core != local_cpuid) {
+    ERROR("Attempt to switch on core %lld from cpu %d", params->core, local_cpuid);
     goto failure_unlock;
   }
 
@@ -935,44 +963,53 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
   // Hold the lock until we return from the switch.
 
   // Let's flush the caches.
-  if (flush_caches(dom, core) != SUCCESS) {
+  if (flush_caches(dom, params->core) != SUCCESS) {
     ERROR("Unable to flush caches.");
     goto failure_unlock;
   }
 
   // We can clear the cache now.
-  cache_clear(&(dom->contexts[core]->cache), 1);
+  cache_clear(&(dom->contexts[params->core]->cache), 1);
+
+  // In case there is a delta, we should tell the linux watchdog to backoff.
+  // This will avoid receiving spurious NMIs in the child.
+  if (params->delta != 0) {
+    touch_nmi_watchdog();
+  }
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
-  if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {
+  if (switch_domain(dom->domain_id, params->delta, exit_frame) != SUCCESS) {
     ERROR("Unable to switch to domain %p", dom->handle);
     goto failure_unlock;
   }
 
   // Update the exit frame.
-  if (update_set_exit(dom, core, exit_frame) != SUCCESS) {
+  if (update_set_exit(dom, params->core, exit_frame) != SUCCESS) {
     ERROR("Unable to update the exit frame.");
     goto failure_unlock;
   }
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
-  if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) {
+  if (read_gp_domain(dom->domain_id, params->core, gp_frame) != SUCCESS) {
     ERROR("Unable to read the domain's general purpose registers.");
     goto failure_unlock;
   }
-  if (update_set_gp(dom, core, gp_frame) != SUCCESS) {
+  if (update_set_gp(dom, params->core, gp_frame) != SUCCESS) {
     ERROR("Unable to set the domain's general purpose registers.");
     goto failure_unlock;
   }
 
+  // Provide the exit information.
+  params->error = convert_exit_reason(exit_frame);
+
   // Reenable the preemption.
   put_cpu();
   // UNLOCK THE CORE CONTEXT.
-  up_write(&(dom->contexts[core]->rwlock));
+  up_write(&(dom->contexts[params->core]->rwlock));
   return SUCCESS;
 failure_unlock:
   put_cpu();
-  up_write(&(dom->contexts[core]->rwlock));
+  up_write(&(dom->contexts[params->core]->rwlock));
 failure:
   return FAILURE;
 }

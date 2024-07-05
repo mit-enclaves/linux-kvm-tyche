@@ -145,6 +145,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   driver_domain_t *domain = NULL;
   msg_create_pipe_t pipe = {0};
   attest_buffer_t attest_buff = {0, 0, 0};
+  msg_switch_t switch_params = {0, 0, 0};
   char *buff;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
@@ -250,13 +251,21 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       RELEASE_DOM(true);
       break;
     case TYCHE_TRANSITION:
+      if (arg == 0 || copy_from_user(&switch_params, (msg_switch_t*) arg, sizeof(msg_switch_t))) {
+        ERROR("Unable to copy msg switch arguments from user, arg is %ld.", arg);
+        goto failure;
+      }
       ACQUIRE_DOM(false);
-      if (driver_switch_domain(domain, arg) != SUCCESS) {
+      if (driver_switch_domain(domain, &switch_params) != SUCCESS) {
         ERROR("Unable to switch to domain %p", handle);
         RELEASE_DOM(false);
         goto failure;
       }
       RELEASE_DOM(false);
+      if (copy_to_user((msg_switch_t*)arg, &switch_params, sizeof(msg_switch_t))) {
+        ERROR("Unable to copy switch result to user.");
+        goto failure;
+      }
       break;
     case TYCHE_CREATE_PIPE:
       if (copy_from_user(&pipe, (msg_create_pipe_t*) arg,

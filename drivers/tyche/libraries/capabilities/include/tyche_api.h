@@ -123,7 +123,7 @@ int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa,
 
 int tyche_serialize_attestation(usize addr, usize size, usize *written);
 
-int tyche_switch(capa_index_t *transition_handle,
+int tyche_switch(capa_index_t *transition_handle, usize delta,
 		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
 
 int tyche_read_gp_registers(capa_index_t management, usize core,

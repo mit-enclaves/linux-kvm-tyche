@@ -597,11 +597,11 @@ int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCH
 //TODO rewrite to use the right registers.
 /// TODO there is an opportunity for unused registers here.
 /// That could be part of a write registers if we need it.
-int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
+int tyche_switch(capa_index_t* transition_handle, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
 {
 #if defined(CONFIG_X86) || defined(__x86_64__)
   int result = FAILURE;
-  usize results[2] = {TYCHE_SWITCH, 0};
+  usize results[3] = {TYCHE_SWITCH, 0, delta};
   if (transition_handle == NULL) {
     ERROR("Received null handle");
     return FAILURE;
@@ -632,9 +632,12 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
     "movq %0, %%rax\n\t"
     "pushq %%rax\n\t"
     // Set the arguments.
+    // rdx -> delta, rdi -> transition handle, rsi -> rax -> TYCHE_SWITCH
+    "movq 16(%%rax), %%rdx\n\t"
     "movq 8(%%rax), %%rdi\n\t"
     "movq 0(%%rax), %%rsi\n\t"
     "movq %%rsi, %%rax\n\t"
+    "movq %%rdx, %%rsi\n\t"
     // Do the call.
     "vmcall\n\t"
     // We are back. Let's save the values.
@@ -693,6 +696,7 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SWITCH,
     .arg_1 = 0,
+    .arg_2 = 0,
   };
   if (transition_handle == NULL) {
     ERROR("Received null handle");

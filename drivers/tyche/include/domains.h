@@ -201,10 +201,11 @@ int driver_commit_domain_configuration(driver_domain_t *dom,
 /// @warning: requires a write lock on the domain.
 int driver_commit_domain(driver_domain_t *domain, int full);
 
-/// Implements the transition into a domain on specified core.
+/// Implements the transition into a domain with specified params (core, delta).
+/// It populates the error field in case of failure (return FAILURE).
 /// @warning: requires a R-lock on the domain. Will acquire a W-lock on the core
 /// we switch to.
-int driver_switch_domain(driver_domain_t *domain, usize core);
+int driver_switch_domain(driver_domain_t *domain, msg_switch_t *params);
 
 /// Delete the domain and revoke the capabilities.
 /// @warning: requires a W-lock on the domain.

@@ -692,7 +692,7 @@ failure:
 }
 
 // TODO nothing thread safe in this implementation for the moment.
-int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
+int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
@@ -739,7 +739,7 @@ int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
     ERROR("failed to write all the registers.");
     goto failure;
   }*/
-  if (tyche_switch(&(wrapper->transition->local_id), exit_frame) !=
+  if (tyche_switch(&(wrapper->transition->local_id), delta, exit_frame) !=
       SUCCESS) {
     ERROR("failed to perform a switch on capa %lld",
           wrapper->transition->local_id);
