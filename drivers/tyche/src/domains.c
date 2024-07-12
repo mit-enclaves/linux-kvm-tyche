@@ -207,6 +207,22 @@ failure:
 
 EXPORT_SYMBOL(driver_create_domain);
 
+int driver_get_mgmt_capa(driver_domain_t* dom, capa_index_t* capa)
+{
+  CHECK_RLOCK(dom, failure);
+  if (capa == NULL) {
+    ERROR("Capa pointer is null");
+    goto failure;
+  }
+  if (get_domain_capa(dom->domain_id, capa) != SUCCESS) {
+    ERROR("Unable to read the management capa.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
@@ -1023,7 +1039,6 @@ int driver_delete_domain(driver_domain_t *dom)
     ERROR("The domain is null.");
     goto failure;
   }
-
   /// We cannot delete if we do not have exclusive access to the domain.
   CHECK_WLOCK(dom, failure);
   if (dom->domain_id == UNINIT_DOM_ID) {

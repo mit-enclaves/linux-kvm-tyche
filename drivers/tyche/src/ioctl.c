@@ -2,6 +2,7 @@
 #include "linux/slab.h"
 #include "linux/uaccess.h"
 #include "tyche_api.h"
+#include "tyche_capabilities_types.h"
 #include <linux/ioctl.h>
 #include <linux/kernel.h>   /* printk() */
 #include <linux/cdev.h> 
@@ -146,6 +147,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_create_pipe_t pipe = {0};
   attest_buffer_t attest_buff = {0, 0, 0};
   msg_switch_t switch_params = {0, 0, 0};
+  capa_index_t mgmt_handle = 0;
   char *buff;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
@@ -321,6 +323,19 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       if (copy_to_user((attest_buffer_t*) arg,
                   &attest_buff, sizeof(attest_buffer_t))) {
         ERROR("Unable to copy attestation results");
+        goto failure;
+      }
+      break;
+    case TYCHE_GET_MGMT_INDEX:
+      ACQUIRE_DOM(false);
+      if (driver_get_mgmt_capa(domain, &mgmt_handle) != SUCCESS) {
+        ERROR("Unable to get the mgmt capa");
+        RELEASE_DOM(false);
+        goto failure;
+      }
+      RELEASE_DOM(false);
+      if (copy_to_user((capa_index_t*)arg, &mgmt_handle, sizeof(capa_index_t))) {
+        ERROR("Unable to copy the management handle");
         goto failure;
       }
       break;

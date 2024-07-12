@@ -166,6 +166,23 @@ fail:
   return FAILURE;
 }
 
+int get_domain_capa(domain_id_t id, capa_index_t* capa)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found.");
+    goto failure;
+  }
+  if (capa == NULL) {
+    ERROR("Supplied capability is null.");
+    goto failure;
+  }
+  *capa = child->management->local_id;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int set_domain_configuration(domain_id_t id, tyche_configurations_t idx, usize value)
 {
   child_domain_t *child = find_child(id);

@@ -111,5 +111,6 @@ typedef struct {
 #define TYCHE_CREATE_PIPE _IOWR('a', 'o', msg_create_pipe_t)
 #define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
+#define TYCHE_GET_MGMT_INDEX _IOW('a', 'r', capa_index_t *)
 
 #endif
