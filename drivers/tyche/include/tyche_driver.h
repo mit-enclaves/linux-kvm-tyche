@@ -28,7 +28,12 @@ typedef enum exit_reason_t {
 	EXCEPTION = 2,
 	INTERRUPT = 3,
 	TIMER = 4,
+	REVOKED = 5,
 } exit_reason_t;
+
+typedef enum monitor_errors_t {
+	DOMAIN_REVOKED = 66,
+} monitor_errors_t;
 
 // ———————————————————————————————— Messages ———————————————————————————————— //
 

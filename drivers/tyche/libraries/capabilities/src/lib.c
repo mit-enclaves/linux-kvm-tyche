@@ -519,14 +519,13 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   capability_t* revoke = NULL;
   memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
   memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
+  usize aliased_start = (alias == NO_ALIAS)? start : alias;
+  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
   if ((basic_access | send_access) != access) {
     ERROR("Problem partitioning access right flags. Expected %x, got: %x",
         access, (basic_access | send_access));
     goto failure;
   }
-
-  usize aliased_start = (alias == NO_ALIAS)? start : alias;
-  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
   // Quick checks.
   if (start >= end) {
@@ -758,7 +757,7 @@ int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME
   }*/
   if (tyche_switch(&(wrapper->transition->local_id), delta, exit_frame) !=
       SUCCESS) {
-    ERROR("failed to perform a switch on capa %lld",
+    DEBUG("failed to perform a switch on capa %lld",
           wrapper->transition->local_id);
     goto failure;
   }

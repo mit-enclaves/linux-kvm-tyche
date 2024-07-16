@@ -896,6 +896,8 @@ static exit_reason_t convert_exit_reason(usize exit[TYCHE_EXIT_FRAME_SIZE]) {
       return INTERRUPT;
     case EXIT_REASON_PREEMPTION_TIMER:
       return TIMER;
+    case DOMAIN_REVOKED:
+      return REVOKED;
     default:
       return UNKNOWN;
   }
@@ -995,7 +997,17 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
   if (switch_domain(dom->domain_id, params->delta, exit_frame) != SUCCESS) {
-    ERROR("Unable to switch to domain %p", dom->handle);
+    params->error = 0;
+    params->error = convert_exit_reason(exit_frame);
+    if (params->error == REVOKED) {
+      ERROR("The domain has been revoked!");
+      // We only have a read lock BUT all threads will try to write
+      // the same value to this field. Anyone trying to do another operation
+      // will have to acquire the write lock and is therefore blocked.
+      dom->state = DRIVER_DEAD;
+    } else {
+      ERROR("Error(%d) in switch to domain %p", params->error, dom->handle);
+    }
     goto failure_unlock;
   }
 
@@ -1004,6 +1016,10 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
     ERROR("Unable to update the exit frame.");
     goto failure_unlock;
   }
+
+  // Provide the exit information.
+  params->error = convert_exit_reason(exit_frame);
+
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
   if (read_gp_domain(dom->domain_id, params->core, gp_frame) != SUCCESS) {
@@ -1014,9 +1030,6 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
     ERROR("Unable to set the domain's general purpose registers.");
     goto failure_unlock;
   }
-
-  // Provide the exit information.
-  params->error = convert_exit_reason(exit_frame);
 
   // Reenable the preemption.
   put_cpu();
@@ -1041,7 +1054,7 @@ int driver_delete_domain(driver_domain_t *dom)
   }
   /// We cannot delete if we do not have exclusive access to the domain.
   CHECK_WLOCK(dom, failure);
-  if (dom->domain_id == UNINIT_DOM_ID) {
+  if (dom->domain_id == UNINIT_DOM_ID || dom->state == DRIVER_DEAD) {
     goto delete_dom_struct;
   }
   if (revoke_domain(dom->domain_id) != SUCCESS) {
