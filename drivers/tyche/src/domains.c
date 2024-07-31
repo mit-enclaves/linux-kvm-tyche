@@ -365,7 +365,12 @@ int driver_mprotect_domain(
     segment_type_t tpe,
     usize alias)
 {
-  segment_t* head = NULL, *segment = NULL; 
+  segment_t* raw = NULL;
+  usize curr_vaddr = vstart, curr_size = size;
+  // The list of segments we are creating.
+  dll_list(segment_t, segments);
+  dll_init_list(&segments);
+
 
   if (dom == NULL) {
     ERROR("The domain is null.");
@@ -380,59 +385,144 @@ int driver_mprotect_domain(
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  /// The logic here is as follows:
-  /// 1. We can only mprotect the top address of raw segments.
-  /// 2. When we do so, we carve out the memory segment and add it to segments.
-  /// 3. We adapt the raw segment to point to the next raw address if any.
+  /// We allow arbitrary regions inside the raw segment to be mprotected
+  /// out-of-order (NEW). One region might span several raw ones, 
+  /// with different PAs. The algorithm carves out the correct pieces one by one
+  /// and creates a list of segments to be added to the dom->segments.
   if (dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p doesn't have mmaped memory.", dom);
     goto failure;
   }
 
-  // Check the properties on the segment.
-  head = dll_head(&(dom->raw_segments));
+  // Find the right part of the raw segments and start carving.
+  raw = dom->raw_segments.head;
+  while(raw != NULL && curr_size != 0) {
+    usize raw_end = raw->va + raw->size;
+    if (!((raw->va <= curr_vaddr) && (raw_end > vstart))) {
+      // Not the right one.
+      goto next_iter;
+    }
+    
+    // Three cases are possible.
+    // 1. full overlap with optional remainder.
+    //    [xxxxxxx]
+    //    [yyyyyyy]
+    // 2. Left overlap
+    //    [xxxxxxx]
+    //    [yyyy]
+    // 3. Right overlap with optional remainder.
+    //    [xxxxxxxx]
+    //          [yyy----]
+    if (raw->va == curr_vaddr) {
+      segment_t* seg = kmalloc(sizeof(segment_t), GFP_KERNEL);
+      if (seg == NULL) {
+        ERROR("Unable to allocate new segment");
+        goto failure;
+      }
+      memset(seg, 0, sizeof(segment_t));
+      seg->va = curr_vaddr;
+      seg->pa = raw->pa;
+      seg->size = curr_size;
+      seg->flags = flags;
+      seg->tpe = tpe;
+      seg->alias = alias;
+      seg->state = DRIVER_NOT_COMMITED;
+      dll_init_elem(seg, list);
+      dll_add(&segments, seg, list);
+      // Is the raw segment completely consumed?
+      if (raw->size <= curr_size) {
+        segment_t* next = raw->list.next;
+        // Update the pointers.
+        curr_size -= raw->size;
+        curr_vaddr += raw->size;
+        dll_remove(&(dom->raw_segments), raw, list);
+        kfree(raw);
+        raw = next; 
+        // Skip the update of raw.
+        continue;
+      } else if (raw->size > curr_size) {
+        // Update the current raw segment.
+        raw->va += curr_size;
+        raw->pa += curr_size;
+        raw->size -= curr_size;
+        // Update the pointers.
+        curr_vaddr += curr_size;
+        curr_size = 0;
+      }
+    } else {
+      // Split the current segment into two.
+      usize diff = curr_vaddr - raw->va;
+      segment_t* split = kmalloc(sizeof(segment_t), GFP_KERNEL);
+      if (split == NULL) {
+        ERROR("Unable to allocate the split segment.");
+        goto failure;
+      }
+      memset(split, 0, sizeof(segment_t));
+      dll_init_elem(split, list);
+      split->va = curr_vaddr;
+      split->pa = raw->pa + diff; 
+      split->size = raw->size - diff;
+      split->state = DRIVER_NOT_COMMITED;
+      // Update raw.
+      raw->size = diff;
+      // Add the new segment to queue.
+      dll_add_after(&(dom->raw_segments), split, list, raw);
+      goto next_iter;
+    }
 
-  // Check the mprotect has the correct bounds.
-  if (head->va != vstart) {
-    ERROR("Out of order specification of segment: wrong start");
-    ERROR("Expected: %llx, got: %llx", head->va, vstart);
-    goto failure;
-  }
-
-  if (head->va + head->size < vstart + size) {
-    ERROR("The specified segment is not contained in the raw one.");
-    ERROR("Raw: start(%llx) size(%llx)", head->va, head->size);
-    ERROR("Prot: start(%llx) size(%llx)", vstart, size);
-    goto failure;
-  }
-
-  // Add the segment.
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
-  if (segment == NULL) {
-    ERROR("Unable to allocate new segment");
-  }
-
-  memset(segment, 0, sizeof(segment_t));
-  segment->va = vstart;
-  segment->pa = head->pa;
-  segment->size = size;
-  segment->flags = flags;
-  segment->tpe = tpe;
-  segment->alias = alias;
-  segment->state = DRIVER_NOT_COMMITED;
-  dll_init_elem(segment, list);
-  dll_add(&(dom->segments), segment, list);
-
-  // Adjust the head.
-  // Easy case, we just remove the head.
-  if (segment->size == head->size) {
-    dll_remove(&(dom->raw_segments), head, list);
-    kfree(head);
-  } else {
-    head->va += size;
-    head->pa += size;
-    head->size -= size;
+  next_iter:
+    raw = raw->list.next;
   } 
+
+  if ((curr_vaddr != vstart + size) || (curr_size != 0)) {
+    ERROR("Something went wrong during the mapping\n"
+        "curr_vaddr: %llx, curr_size: %llx\n"
+        "expected addr: %llx", curr_vaddr, curr_size, vstart + size);
+    goto failure;
+  }
+
+  // Add the segments. They are ordered, we need to find where to put them.
+  // Easy case:
+  if (dll_is_empty(&(dom->segments))) {
+    dom->segments.head = segments.head;
+    dom->segments.tail = segments.tail;
+    return SUCCESS;
+  }
+
+  // Find the right spot.
+  dll_foreach(&(dom->segments), raw, list) {
+    // We are too far.
+    if (raw->va > vstart) {
+      raw = NULL;
+      break;
+    }
+
+    // Next one is null or greater than our start.
+    if (raw->list.next == NULL || 
+        (raw->list.next != NULL && raw->list.next->va > vstart)) {
+      break;
+    }
+  }
+
+  // Add everything to the head.
+  if (raw == NULL) {
+    segment_t* prev_head = dom->segments.head;
+    dom->segments.head = segments.head;
+    prev_head->list.prev = segments.tail;
+    segments.tail->list.next = prev_head;
+  } else {
+    // Add everything after raw.
+    segment_t* prev_next = raw->list.next;
+    raw->list.next = segments.head;
+    segments.head->list.prev = raw;
+    segments.tail->list.next = prev_next;
+    if (prev_next != NULL) {
+      prev_next->list.prev = segments.tail;
+    } else {
+      // Update the segments tail.
+      dom->segments.tail = segments.tail;
+    }
+  }
   DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
       domain, vstart, vstart + size);
   return SUCCESS;
