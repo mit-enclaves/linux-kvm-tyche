@@ -374,7 +374,7 @@ int segment_region_capa(
         &((*to_send)->local_id),
         &((*revoke)->local_id),
         start, end, prot) != SUCCESS) {
-    ERROR("Duplicate rejected.");
+    ERROR("Duplicate rejected at start %llx, end %llx.", start, end);
     goto fail_revoke;
   }
 

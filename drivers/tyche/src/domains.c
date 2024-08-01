@@ -294,6 +294,7 @@ failure:
   return FAILURE;
 }
 
+//TODO: attempt to keep things ordered and merge when possible?
 int driver_add_raw_segment(
     driver_domain_t *dom,
     usize va,
@@ -371,7 +372,6 @@ int driver_mprotect_domain(
   dll_list(segment_t, segments);
   dll_init_list(&segments);
 
-
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
@@ -422,7 +422,6 @@ int driver_mprotect_domain(
       memset(seg, 0, sizeof(segment_t));
       seg->va = curr_vaddr;
       seg->pa = raw->pa;
-      seg->size = curr_size;
       seg->flags = flags;
       seg->tpe = tpe;
       seg->alias = alias;
@@ -435,6 +434,7 @@ int driver_mprotect_domain(
         // Update the pointers.
         curr_size -= raw->size;
         curr_vaddr += raw->size;
+        seg->size = raw->size;
         dll_remove(&(dom->raw_segments), raw, list);
         kfree(raw);
         raw = next; 
@@ -447,6 +447,7 @@ int driver_mprotect_domain(
         raw->size -= curr_size;
         // Update the pointers.
         curr_vaddr += curr_size;
+        seg->size = curr_size;
         curr_size = 0;
       }
     } else {
@@ -752,6 +753,12 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("Missing segments for domain %p", dom);
     goto failure;
   }
+
+ /* LOG("Dumping segments.");
+  dll_foreach(&(dom->segments), segment, list) {
+    LOG("Segment [addr: %llx, size: %llx, pa: %llx]", segment->va, segment->size, segment->pa);
+  }
+  segment = NULL;*/
   // Add the segments.
   dll_foreach(&(dom->segments), segment, list) {
     // Skip segments already commited;
@@ -776,7 +783,7 @@ int driver_commit_regions(driver_domain_t *dom)
               segment->pa,
               segment->size,
               segment->flags, segment->alias) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
+          ERROR("Unable to grant segment %llx -- %llx {%x}", segment->va,
               segment->size, segment->flags);
           goto failure;
         }
