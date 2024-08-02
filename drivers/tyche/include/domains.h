@@ -67,6 +67,8 @@ typedef struct context_t {
 	arch_cache_t cache;
 } context_t;
 
+typedef dll_list(segment_t, segment_list_t);
+
 /// Describes an domain.
 typedef struct driver_domain_t {
 	/// The creator task's pid.
@@ -90,11 +92,11 @@ typedef struct driver_domain_t {
 	/// The available raw memory segments.
 	/// This is typically allocated during the mmap (from userspace),
 	/// or taken from KVM (kvm_memory_regions).
-	dll_list(segment_t, raw_segments);
+	segment_list_t raw_segments;
 
 	/// The initialized segments for the domain.
 	/// The access rights have been set.
-	dll_list(segment_t, segments);
+	segment_list_t segments;
 
 	/// Domains are stored in a global list by the driver.
 	dll_elem(struct driver_domain_t, list);

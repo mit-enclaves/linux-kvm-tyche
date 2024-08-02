@@ -294,6 +294,45 @@ failure:
   return FAILURE;
 }
 
+static int check_coalesce(driver_domain_t* dom, bool raw)
+{
+  segment_list_t* l = NULL;
+  segment_t* curr = NULL;
+  if (dom == NULL) {
+    ERROR("Nul domain");
+    goto failure;
+  }
+  l = (raw)? &(dom->raw_segments) : &(dom->segments);
+  curr = l->head;
+  while (curr != NULL && curr->list.next != NULL) {
+    segment_t* n = curr->list.next;
+    // Is it ordered?
+    if (curr->va >= n->va) {
+      ERROR("The list is not ordered");
+      goto failure;
+    }
+    // Does it overlap?
+    if (dll_overlap(curr->va, (curr->va + curr->size),
+          n->va, (n->va + n->size))) {
+      ERROR("Overlap detected.");
+      goto failure;
+    }
+    // Can we merge? vas and pas need to be contiguous
+    if ((curr->va + curr->size) == n->va && (curr->pa + curr->size) == n->pa) {
+      curr->size += n->size;
+      dll_remove(l, n, list);
+      n = NULL;
+      continue;
+    }
+    // Done, proceed to the next.
+    curr = curr->list.next;
+  }
+
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 //TODO: attempt to keep things ordered and merge when possible?
 int driver_add_raw_segment(
     driver_domain_t *dom,
@@ -302,6 +341,7 @@ int driver_add_raw_segment(
     usize size)
 {
   segment_t *segment = NULL;
+  segment_t *curr = NULL;
   if (dom == NULL) {
     ERROR("Provided domain is null.");
     goto failure;
@@ -320,8 +360,46 @@ int driver_add_raw_segment(
   segment->size = size;
   segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
-  dll_add(&(dom->raw_segments), segment, list);
+
+  if (dll_is_empty(&(dom->raw_segments))) {
+    dll_add(&(dom->raw_segments), segment, list);
+    goto finish;
+  }
+
+  dll_foreach(&(dom->raw_segments), curr, list) {
+    if (dll_overlap(curr->va, (curr->va + curr->size),
+          segment->va, (segment->va + segment->size))) {
+      goto failure_free;
+    }
+    // curr is first.
+    if (curr->va + curr->size <= segment->va) {
+      dll_add_after(&(dom->raw_segments), segment, list, curr);
+      break;
+    }
+
+    if ((segment->va + segment->size) <= curr->va) {
+      dll_add_before(&(dom->raw_segments), segment, list, curr);
+      break;
+    }
+  }
+
+  // We failed to insert.
+  if (curr == NULL) {
+    ERROR("Unable to find the correct position in the queue");
+    goto failure_free;
+  }
+
+  // check and coalesce the list.
+  if (check_coalesce(dom, true) != SUCCESS) {
+    ERROR("Something went wrong with check and coalesce.");
+    goto failure;
+  }
+
+finish:
   return SUCCESS;
+failure_free:
+  ERROR("Segments overlap");
+  kfree(segment);
 failure:
   return FAILURE;
 }
