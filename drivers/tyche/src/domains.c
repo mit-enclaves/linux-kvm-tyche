@@ -294,6 +294,14 @@ failure:
   return FAILURE;
 }
 
+static void dump_list(segment_list_t* l) {
+  segment_t* iter = NULL;
+  dll_foreach(l, iter, list) {
+    printk(KERN_NOTICE "[%llx, %llx] -> [%llx, %llx]", iter->va, iter->va + iter->size,
+        iter->pa, iter->pa + iter->size);
+  }
+}
+
 static int check_coalesce(driver_domain_t* dom, bool raw)
 {
   segment_list_t* l = NULL;
@@ -308,19 +316,28 @@ static int check_coalesce(driver_domain_t* dom, bool raw)
     segment_t* n = curr->list.next;
     // Is it ordered?
     if (curr->va >= n->va) {
-      ERROR("The list is not ordered");
+      ERROR("The list (%d) is not ordered: curr_va: %llx, n_va: %llx",
+          raw, curr->va, n->va);
+      dump_list(l);
       goto failure;
     }
-    // Does it overlap?
-    if (dll_overlap(curr->va, (curr->va + curr->size),
+    // Does it overlap? Allow overlaps with KVM
+    if (dom->handle != NULL && dll_overlap(curr->va, (curr->va + curr->size),
           n->va, (n->va + n->size))) {
-      ERROR("Overlap detected.");
+      ERROR("Overlap detected %d.", raw);
+      ERROR("[%llx, %llx] overlaps [%llx, %llx]", curr->va, curr->va + curr->size,
+          n->va, n->va + n->size);
+      dump_list(l);
       goto failure;
     }
     // Can we merge? vas and pas need to be contiguous
-    if ((curr->va + curr->size) == n->va && (curr->pa + curr->size) == n->pa) {
+    if ((curr->va + curr->size) == n->va &&
+        (curr->pa + curr->size) == n->pa &&
+        (raw || (curr->tpe == n->tpe && curr->flags == n->flags))) {
       curr->size += n->size;
       dll_remove(l, n, list);
+      // Free the merged region.
+      kfree(n);
       n = NULL;
       continue;
     }
@@ -372,7 +389,7 @@ int driver_add_raw_segment(
       goto failure_free;
     }
     // curr is first.
-    if (curr->va + curr->size <= segment->va) {
+    if (curr->va + curr->size <= segment->va && curr->list.next == NULL) {
       dll_add_after(&(dom->raw_segments), segment, list, curr);
       break;
     }
@@ -391,7 +408,8 @@ int driver_add_raw_segment(
 
   // check and coalesce the list.
   if (check_coalesce(dom, true) != SUCCESS) {
-    ERROR("Something went wrong with check and coalesce.");
+    ERROR("Something went wrong with check and coalesce\n."
+        "While attempting to add %llx -> %llx", va, va+size);
     goto failure;
   }
 
@@ -405,10 +423,9 @@ failure:
 }
 EXPORT_SYMBOL(driver_add_raw_segment);
 
-int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phys_offset)
+int driver_get_physoffset_domain(driver_domain_t *dom, usize vaddr, usize* phys_offset)
 {
   segment_t *seg = NULL;
-  usize slot_counter = 0;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -425,13 +442,12 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phy
     goto failure;
   }
   dll_foreach(&(dom->raw_segments), seg, list) {
-    if (slot_counter == slot_id) {
-      *phys_offset = seg->pa;
+    if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
+      *phys_offset = seg->pa + (vaddr - seg->va);
       return SUCCESS;
     }
-    slot_counter++;
   }
-  ERROR("Failure to find the right memslot %lld.\n", slot_id);
+  ERROR("Failure to find the right memslot %lld.\n", vaddr);
 failure:
   return FAILURE;
 }
@@ -453,7 +469,7 @@ int driver_mprotect_domain(
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
-  } 
+  }
 
   /// Expects the domain to be write-locked.
   CHECK_WLOCK(dom, failure);
@@ -476,7 +492,7 @@ int driver_mprotect_domain(
   raw = dom->raw_segments.head;
   while(raw != NULL && curr_size != 0) {
     usize raw_end = raw->va + raw->size;
-    if (!((raw->va <= curr_vaddr) && (raw_end > vstart))) {
+    if (!((raw->va <= curr_vaddr) && (raw_end > curr_vaddr))) {
       // Not the right one.
       goto next_iter;
     }
@@ -602,6 +618,12 @@ int driver_mprotect_domain(
       dom->segments.tail = segments.tail;
     }
   }
+
+  if (check_coalesce(dom, false) != SUCCESS) {
+    ERROR("Problem coalescing non-raw segments.");
+    goto failure;
+  }
+
   DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
       domain, vstart, vstart + size);
   return SUCCESS;
