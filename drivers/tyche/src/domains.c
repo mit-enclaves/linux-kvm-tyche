@@ -248,10 +248,13 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     ERROR("Unable to find the right domain.");
     goto failure;
   }
+
+  //TODO(aghosn): we accept adding segments.
+  /*
   if (!dll_is_empty(&(dom->segments))) {
     ERROR("The domain has already been initialized.");
     goto failure;
-  }
+  }*/
 
   // Allocate a contiguous memory region.
   // If the order of the size requested is too big, fail.
@@ -958,6 +961,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   }
   if (!dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p's memory is not correctly initialized.", dom);
+    dump_list(&(dom->raw_segments));
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
