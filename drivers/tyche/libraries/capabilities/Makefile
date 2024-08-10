@@ -5,7 +5,7 @@ LIB_COMMON=../common
 SRC_FILES =	$(wildcard src/*.c) 
 OBJ_FILES = $(patsubst %.c, %.o, $(SRC_FILES)) 
 HDR_FILES = $(wildcard include/*.h)
-INCLUDES= -Iinclude/ -I$(LIB_DLL)/include -I$(LIB_COMMON)/include
+INCLUDES= -Iinclude/ -I$(LIB_DLL)/include -I$(LIB_COMMON)/include -I $(srctree)/drivers/contalloc/include
 
 libcapabilities.so: $(SRC_FILES) $(HDR_FILES)
 	gcc -DTYCHE_USER_SPACE=1 -g -nostdlib -shared $(INCLUDES) -o $@ -fPIC $(SRC_FILES) 

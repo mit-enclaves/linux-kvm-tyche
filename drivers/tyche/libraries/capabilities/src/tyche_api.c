@@ -1,7 +1,16 @@
 #include "tyche_api.h"
+#include "color_bitmap.h"
 #include "common.h"
 #include "common_log.h"
 #include "tyche_capabilities_types.h"
+#include "ecs.h"
+#include "tyche_cross_alloc.h"
+
+#ifdef __KERNEL__
+#include "linux/gfp_types.h"
+#else
+#include "string.h"
+#endif
 
 /// Simple generic vmcall implementation.
 int tyche_call(vmcall_frame_t* frame)
@@ -378,27 +387,42 @@ int tyche_segment_region(
     capa_index_t* revoke,
     usize start,
     usize end,
-    usize prot)
+    access_rights_t rights)
 {
-  vmcall_frame_t frame = {
-    TYCHE_SEGMENT_REGION,
-    capa,
-    is_shared,
-    start,
-    end,
-    prot,
-  };
+  usize serialized_flags;
+  tyche_data_handle_t data_handle;
+  serialized_resource_kind_t serialized_rk;
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_SEGMENT_REGION,
+		.arg_1 = capa,
+		.arg_2 = is_shared,
+		.arg_3 = start,
+		.arg_4 = end,
+		.arg_5 = 0, //filled with serialized flags
+		.arg_6 = 0, //filled with data handle
+	};
   if (to_send == NULL || revoke == NULL) {
-    goto failure;
+		return FAILURE;
   }
+
+  if(serialize_access_rights_t(&rights, &serialized_flags, &serialized_rk)) {
+    ERROR("Failed to serialize rights");
+    return FAILURE;
+  }
+  if(tyche_send_all(serialized_rk.raw, sizeof(serialized_rk), &data_handle)) {
+    ERROR("Failed to send additional data to tyche");
+    return FAILURE;
+  }
+  frame.arg_5 = serialized_flags;
+  frame.arg_6 = data_handle;
+
+
   if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
+    return FAILURE;
   } 
   *to_send = frame.value_1;
   *revoke = frame.value_2;
   return SUCCESS;
-failure:
-  return FAILURE;
 }
 
 int tyche_send(capa_index_t dest, capa_index_t capa) {
@@ -419,27 +443,174 @@ failure:
   return FAILURE;
 }
 
-int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
-    usize alias, usize size, usize send_access) {
+/**
+ * @brief Send arbitrary data to Tyche. If handle == 0 a new data entry will be created.
+ * Otherwise data will be appended to the previously send data. Set `is_ready` to true, for the last transfer
+ * 
+ * @param handle 0 to create new data entry,
+ * @param data payload data. May be at most TYCHE_DATA_CHUNCK_BYTES
+ * @param data_len length of payload data
+ * @param out_handle handle that tyche used to store transmitted data. If input handle is 0, this is the newly created handle, otherwise it should be equal to the input handle
+ * @return int SUCCESS or FAILURE
+ */
+int tyche_send_data(tyche_data_handle_t handle, uint8_t *data, size_t data_len, bool mark_ready, tyche_data_handle_t* out_handle) {
+  tyche_send_get_chunk_t data_as_chunck;
   vmcall_frame_t frame = {
-    .vmcall = TYCHE_SEND_REGION,
+    .vmcall = TYCHE_SEND_DATA,
+    .arg_1 = handle,
+    .arg_2 = data_len,
+    .arg_3 = mark_ready,
+    .arg_4 = 0, //data
+    .arg_5 = 0, //data
+    .arg_6 = 0, //data
+  };
+  if( data_len > sizeof(tyche_send_get_chunk_t) ) {
+    return FAILURE;
+  }
+  CROSS_MEMCPY(data_as_chunck.as_bytes, data, data_len);
+  frame.arg_4 = data_as_chunck.as_usize[0];
+  frame.arg_5 = data_as_chunck.as_usize[1];
+  frame.arg_6 = data_as_chunck.as_usize[2];
+
+  if(tyche_call(&frame)) {
+    return FAILURE;
+  }
+
+
+  *out_handle = frame.value_1;
+  return SUCCESS;
+}
+
+/**
+ * @brief Checks that raw fits into tyche_data_buf and copies the data
+ * 
+ * @param buf 
+ * @param raw 
+ * @param raw_len 
+ * @return int SUCCESS of FAILURE
+ */
+int tyche_data_buf_from_raw(tyche_data_buf_t *buf, uint8_t *raw,
+			    size_t raw_len) {
+  if( raw_len > TYCHE_DATA_BUF_MAX_BYTES ) {
+    ERROR("tyche data buf only supports up to %d bytes, but %lu bytes were requested", TYCHE_DATA_BUF_MAX_BYTES, raw_len);
+    return FAILURE;
+  }
+  CROSS_MEMCPY(buf->raw, raw, raw_len);
+  buf->used_bytes = raw_len;
+  return SUCCESS;
+}
+
+/**
+ * @brief Wrapper around `tyche_send_data` that loops until all data has been send
+ * 
+ * @param data 
+ * @param len 
+ * @param out_handle handle under which this data is stored, pass this to the tyche api function that should consume the data
+ * @return int SUCESS or FAILURE
+ */
+int tyche_send_all(uint8_t *data, size_t len, tyche_data_handle_t *out_handle) {
+  size_t offset;
+  tyche_data_handle_t handle = 0;
+
+  for( offset = 0; offset < len; offset += sizeof(tyche_send_get_chunk_t)) {
+    size_t chunck_size;
+    bool mark_ready;
+    if( (offset + sizeof(tyche_send_get_chunk_t)) < len) {
+      chunck_size = sizeof(tyche_send_get_chunk_t);
+      mark_ready = false;
+    } else {
+      chunck_size = len - offset;
+      mark_ready = true;
+
+    };
+    if(tyche_send_data(handle, data+offset, chunck_size, mark_ready, &handle)) {
+      return FAILURE;      
+    }
+  }
+  *out_handle = handle;
+  return SUCCESS;
+}
+
+int tyche_get_all_data(tyche_data_handle_t handle, tyche_data_buf_t* recv_buf)
+{
+	usize remaining, transferred,buf_offset;
+	tyche_send_get_chunk_t chunck;
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_GET_DATA,
+		.arg_1 = handle,
+		.arg_2 = 0,
+		.arg_3 = 0,
+		.arg_4 = 0,
+		.arg_5 = 0,
+    .arg_6 = 0, //unused
+	};
+
+	if (tyche_call(&frame)) {
+		return FAILURE;
+	}
+
+	remaining = frame.value_1;
+	transferred = frame.value_2;
+  if( (remaining + transferred) > TYCHE_DATA_BUF_MAX_BYTES) {
+    FAIL();
+  }
+  recv_buf->used_bytes = remaining + transferred;
+
+	chunck.as_usize[0] = frame.value_3;
+	chunck.as_usize[1] = frame.value_4;
+	chunck.as_usize[2] = frame.value_5;
+  buf_offset = 0;
+	CROSS_MEMCPY(recv_buf->raw+buf_offset, chunck.as_bytes, transferred);
+	buf_offset += transferred; 
+
+	while (remaining > 0) {
+		if (tyche_call(&frame)) {
+			return FAILURE;
+		}
+		chunck.as_usize[0] = frame.value_3;
+		chunck.as_usize[1] = frame.value_4;
+		chunck.as_usize[2] = frame.value_5;
+		CROSS_MEMCPY(recv_buf->raw+buf_offset, chunck.as_bytes, transferred);
+		buf_offset += transferred;
+	}
+
+  return SUCCESS;
+}
+
+int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
+    usize alias, usize size, access_rights_t rights) {
+    usize serialized_flags;
+    tyche_data_handle_t data_handle;
+    serialized_resource_kind_t serialized_rk;
+
+  vmcall_frame_t frame = {
+    .vmcall = is_repeat ? TYCHE_SEND_REGION_REPEAT : TYCHE_SEND_REGION,
     .arg_1 = capa,
     .arg_2 = dest,
     .arg_3 = alias,
-    .arg_4 = is_repeat,
-    .arg_5 = size,
-    .arg_6 = send_access,
+    .arg_4 = size,
+    .arg_5 = 0, //filled with serialized flags
+    .arg_6 = 0, //filled with data handle
   };
+  if(serialize_access_rights_t(&rights, &serialized_flags, &serialized_rk)) {
+    ERROR("Failed to serialize rights");
+    return FAILURE;
+  }
+
+  if(tyche_send_all(serialized_rk.raw, sizeof(serialized_rk), &data_handle)) {
+    ERROR("Failed to send additional data to tyche");
+    return FAILURE;
+  }
+  frame.arg_5 = serialized_flags;
+  frame.arg_6 = data_handle;
   if (tyche_call(&frame) != SUCCESS) {
-    goto failure;
+    return FAILURE;
   }
   // Check that the revocation handle is the original one.
   if (frame.value_1 != capa) {
-    goto failure;
+    return FAILURE;
   }
   return SUCCESS;
-failure:
-  return FAILURE;
 }
 
 int tyche_duplicate(capa_index_t* new_capa, capa_index_t capa) {
@@ -456,6 +627,30 @@ failure:
   return FAILURE;
 }
 
+int tyche_get_hpas(uint64_t start_gpa, size_t length, uint64_t *out_start_hpa,
+		   uint64_t *out_end_hpa) {
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_GET_HPAS,
+    .arg_1 = start_gpa,
+    .arg_2 = length,
+  };
+
+  if (tyche_call(&frame) != SUCCESS) {
+      LOG("tyche call failed\n");
+
+    goto failure;
+  }
+
+
+  *out_start_hpa = frame.value_1;
+  *out_end_hpa = frame.value_2;
+
+  return SUCCESS;
+failure:
+  return FAILURE;
+
+}
+
 int tyche_revoke(capa_index_t id)
 {
   vmcall_frame_t frame = {
@@ -470,6 +665,7 @@ failure:
   return FAILURE;
 }
 
+//TODO:luca : not sure if we need to add rights here
 int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_t size)
 {
 #if defined(CONFIG_X86) || defined(__x86_64__)

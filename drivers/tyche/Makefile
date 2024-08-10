@@ -10,8 +10,9 @@ ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/pts/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
+ccflags-y += -I $(srctree)/drivers/contalloc/include
 
 obj-y += $(TARGET_MODULE).o
 $(TARGET_MODULE)-objs += src/driver.o src/ioctl.o src/domains.o src/capabilities.o src/arch_cache.o
-$(TARGET_MODULE)-objs += libraries/capabilities/src/ecs.o  libraries/capabilities/src/lib.o  libraries/capabilities/src/tyche_api.o
+$(TARGET_MODULE)-objs += libraries/capabilities/src/ecs.o  libraries/capabilities/src/lib.o  libraries/capabilities/src/tyche_api.o libraries/capabilities/src/color_bitmap.o
 #$(TARGET_MODULE)-objs += libraries/pts/src/lib.o  libraries/pts/src/x86_64_pt.o

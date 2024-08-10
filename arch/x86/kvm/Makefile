@@ -6,6 +6,7 @@ ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/pts/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
+ccflags-y += -I $(srctree)/drivers/contalloc/include
 ccflags-$(CONFIG_KVM_WERROR) += -Werror
 
 ifeq ($(CONFIG_FRAME_POINTER),y)

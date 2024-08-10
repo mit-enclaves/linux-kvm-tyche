@@ -4,6 +4,7 @@
 #include "linux/stddef.h"
 #include "tyche_register_map.h"
 
+#undef WARN_ON_ONCE
 #define WARN_ON_ONCE(cond) {};
 
 

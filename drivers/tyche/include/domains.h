@@ -4,6 +4,7 @@
 #include "linux/rwsem.h"
 #include <linux/fs.h>
 #include <linux/mm_types.h>
+#include "allocs.h"
 
 #include "dll.h"
 #include "tyche_api.h"
@@ -28,14 +29,8 @@ typedef enum driver_state_t {
 
 /// Describes an domain's memory segment in user process address space.
 typedef struct segment_t {
-	/// Start of the virtual memory segment.
-	usize va;
-
-	/// Corresponding start of the physical segment.
-	usize pa;
-
-	/// Size of the memory segment.
-	usize size;
+	/// Information about the allocated memory
+	mmem_t *raw_mem;
 
 	/// Protection flags.
 	memory_access_right_t flags;
@@ -112,7 +107,7 @@ typedef struct driver_pipe_t {
 	// The size of the pipe;
 	usize size;
 	// The flags associated with the creation of the pipe.
-	memory_access_right_t flags;
+	access_rights_t rights;
 	// This is stored in a list inside the global driver state.
 	dll_elem(struct driver_pipe_t, list);
 
@@ -147,10 +142,9 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr,
 /// @warning: expects the domain to be w-locked.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
-/// Add a raw memory segment to the domain.
+/// Add a raw memory segment to the domain. Expects heap allocated pointer and takes ownership
 /// @warning: expects the domain to be w-locked.
-int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
-			   usize size);
+int driver_add_raw_segment(driver_domain_t *dom, mmem_t *contalloc_segment);
 
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
@@ -219,7 +213,7 @@ int driver_delete_domain_regions(driver_domain_t *dom);
 /// and duplicated width times.
 /// If everything goes well, the result pipe id is put inside pipe_id.
 int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
-		       memory_access_right_t flags, usize width);
+		       access_rights_t rights, usize width);
 
 /// Acquires an end of pipe and adds it to the domain.
 /// @warning: requires a W-lock on the domain.

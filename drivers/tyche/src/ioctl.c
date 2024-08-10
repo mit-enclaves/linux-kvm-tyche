@@ -1,3 +1,4 @@
+#include "linux/gfp_types.h"
 #include "linux/rwsem.h"
 #include "linux/slab.h"
 #include "linux/uaccess.h"
@@ -11,6 +12,8 @@
 #include "common.h"
 #include "common_log.h"
 #include "domains.h"
+
+#include "allocs.h"
 #define _IN_MODULE
 #include "tyche_driver.h"
 #include "tyche_ioctl.h"
@@ -23,6 +26,8 @@ static char* device_region = "tyche";
 dev_t dev = 0;
 static struct cdev tyche_cdev;
 static struct class *dev_class;
+
+//luca: tyche ioctl api
 
 // ———————————————————————————— File Operations ————————————————————————————— //
 
@@ -72,6 +77,7 @@ int tyche_register(void)
     goto r_device;
   }
 
+  LOG("Calling driver_init_domains");
   driver_init_domains();
   LOG("Tyche driver registered!\n");
   trace_printk("Tyche driver initialized\n");
@@ -105,6 +111,12 @@ int tyche_open(struct inode* inode, struct file* file)
     ERROR("Unable to create a new domain");
     goto failure;
   }
+
+  if(contalloc_open(inode, file)) {
+    ERROR("Failed to setup contalloc allocator for new domain");
+    goto failure;
+  }
+
   return SUCCESS;
 failure:
   return FAILURE;
@@ -112,11 +124,23 @@ failure:
 
 int tyche_close(struct inode* inode, struct file* handle)
 {
-  driver_domain_t * dom = find_domain(handle, true);
+  driver_domain_t * dom;
+  int have_failed = 0;
+
+  if(contalloc_close(inode, handle)) {
+    ERROR("Failed to tear down state in contalloc driver");
+    have_failed = 1;
+  }
+  
+  dom = find_domain(handle, true);
    if (dom == NULL || driver_delete_domain(dom) != SUCCESS) {
         ERROR("Unable to delete the domain %p", handle);
-        goto failure;
+        have_failed = 1;
     }
+
+  if(have_failed) {
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;
@@ -264,7 +288,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy the create pipe message");
         goto failure;
       }
-      if (driver_create_pipe(&(pipe.id), pipe.phys_addr, pipe.size, pipe.flags,
+      if (driver_create_pipe(&(pipe.id), pipe.phys_addr, pipe.size, pipe.rights,
             pipe.width) != SUCCESS) {
         ERROR("Failed to create a pipe.");
         goto failure;
@@ -326,13 +350,26 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
+  mmem_t* segment;
   int res = FAILURE;
   driver_domain_t *dom = find_domain(file, true);
   if (dom == NULL) {
     ERROR("Unable to find domain for handle %p", file);
     return FAILURE;
   }
-  res = driver_mmap_segment(dom, vma);
+  res = contalloc_mmap(file, vma);
+  segment = kmalloc(sizeof(mmem_t), GFP_KERNEL);
+  if( contalloc_get_segment(file,vma->vm_start,segment) ) {
+    ERROR("Unable to get segment from contalloc after allocation");
+    up_write(&(dom->rwlock));
+    return FAILURE;
+  }
+
+  if( driver_add_raw_segment(dom, segment)) {
+    ERROR("Failed to store segment in tyche deriver");
+    return FAILURE;
+  }
+
   // Unlock the domain.
   up_write(&(dom->rwlock));
   return res;

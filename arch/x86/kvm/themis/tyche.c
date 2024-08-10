@@ -1,4 +1,5 @@
 #include "tyche.h"
+#include "asm/bug.h"
 #include "asm/kvm_host.h"
 #include "domains.h"
 #include "linux/kvm_host.h"
@@ -256,11 +257,23 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		return SUCCESS;
 	}
 
+	//This code path has not yet been adapted to new allocator
+	BUG();
+	/*if( tyche_get_hpas(hfn << PAGE_SHIFT, npages * PAGE_SIZE, 
+	&fragment.start_hpa, &fragment.end_hpa) ) {
+			ERROR("failed to get HPAs for allocation");
+			return FAILURE;
+	}
+	fragment.gpa = allocation_start_gpa;
+	fragment.size = allocation_size;
+	fragment.color_id = cur_color->color_id;
+
+
 	if (driver_add_raw_segment(dom, user_addr, hfn << PAGE_SHIFT,
 				   npages << PAGE_SHIFT) != SUCCESS) {
 		ERROR("Unable to addr raw segment");
 		return FAILURE;
-	}
+	}*/
 
 	if (driver_mprotect_domain(dom, user_addr, npages << PAGE_SHIFT, rights,
 				   tpe, gfn << PAGE_SHIFT) != SUCCESS) {

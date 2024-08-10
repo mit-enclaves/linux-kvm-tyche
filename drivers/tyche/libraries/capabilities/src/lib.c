@@ -1,14 +1,56 @@
+#include "color_bitmap.h"
 #include "dll.h"
 #include "tyche_api.h"
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
+#include "ecs.h"
+#include "tyche_cross_alloc.h"
 #define TYCHE_DEBUG 1
 #include "common.h"
 #include "common_log.h"
 
+#ifdef __KERNEL__
+#include "linux/slab.h"
+#include "linux/types.h"
+#else
+#include <stdio.h>
+#endif
+
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
 domain_t local_domain;
+//void serialize_access_rights(char *buffer, size_t buffer_size, const access_rights_t *access_rights) {
+
+// ------------------------ Public helper functions ------------------------- //
+void print_access_rights_t(access_rights_t *access_rights)
+{
+  #ifdef __KERNEL__
+	int i;
+  const uint8_t* colors_as_u8 = color_bitmap_get_raw(&(access_rights->color_bm));
+  char* kind_as_str;
+
+
+	// Serialize kind as decimal
+  switch(access_rights->kind) {
+  case RK_RAM:
+    kind_as_str = "RAM";
+    break;
+  case RK_Device:
+    kind_as_str = "Device";
+	  break;
+  default:
+    ERROR("Unknown resource kind %d", access_rights->kind);
+    FAIL();
+  }
+
+	// Print colors as a hex string
+	printk("flags: 0x%x, kind %s, colors: 0x\n", access_rights->flags, kind_as_str);
+  for( i = 0; i < color_bitmap_get_byte_count(&(access_rights->color_bm)); i++) {
+    printk(KERN_CONT "%02x", colors_as_u8[i]);
+  }
+  printk("\n");
+  #endif
+}
 
 // ———————————————————————— Private helper functions ———————————————————————— //
 
@@ -42,9 +84,34 @@ child_domain_t* find_child(domain_id_t id)
   return child;
 }
 
-int has_access_rights(memory_access_right_t orig, memory_access_right_t dest)
+/**
+ * @brief Returns true if the access rights of dest or a subset or equal to orig.
+ * For RK_RAM, this also checks the allowed colors
+ * 
+ * @param orig 
+ * @param dest 
+ * @return int 1 if the access rights of dest or a subset or equal to orig
+ */
+int has_access_rights(access_rights_t orig, access_rights_t dest)
 {
-  return (orig & dest) == dest;
+  if( orig.kind != dest.kind) {
+    return false;
+  }
+  switch(orig.kind) {
+  case RK_RAM: {
+    int rights_are_subset,colors_are_subset;
+    rights_are_subset = (orig.flags | dest.flags) == orig.flags;
+    colors_are_subset = color_bitmap_is_subset_of(&(dest.color_bm), &(orig.color_bm));
+    return rights_are_subset && colors_are_subset;
+    break;
+  }
+  case RK_Device:
+    return (orig.flags & dest.flags) == dest.flags;
+	  break;
+    default:
+    ERROR("unknown resource_kind_t value %d", orig.kind);
+    FAIL();
+  }
 }
 
 // —————————————————————————————— Public APIs ——————————————————————————————— //
@@ -124,6 +191,7 @@ int create_domain(domain_id_t *id, int aliased) {
     goto fail_child_capa;
   }
 
+  //TODO: explore required capa change from here
   // Populate the capability.
   if (enumerate_capa(child_idx, NULL, child_capa) != SUCCESS) {
     ERROR("Failed to enumerate the newly created child.");
@@ -333,7 +401,7 @@ int segment_region_capa(
     capability_t **revoke,
     usize start,
     usize end,
-    usize prot) {
+    access_rights_t rights) {
   if (to_send == NULL || revoke == NULL || capa == NULL) {
     goto failure;
   }
@@ -356,7 +424,7 @@ int segment_region_capa(
         capa->local_id,
         &((*to_send)->local_id),
         &((*revoke)->local_id),
-        start, end, prot) != SUCCESS) {
+        start, end, rights) != SUCCESS) {
     ERROR("Duplicate rejected.");
     goto fail_revoke;
   }
@@ -395,7 +463,7 @@ failure:
   return FAILURE;
 }
 
-int cut_region(paddr_t start, usize size, memory_access_right_t access,
+int cut_region(paddr_t start, usize size, access_rights_t rights,
     capability_t **to_send, capability_t **revoke) {
   capability_t *capa = NULL;
   usize end = start + size;
@@ -404,14 +472,14 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
   }
   // Now attempt to find the capability.
   dll_foreach(&(local_domain.capabilities), capa, list) {
-    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+    if (capa->capa_type != Region || (capa->info.region.rights.flags & MEM_ACTIVE) == 0) {
       continue;
     }
     if ((dll_contains(
             capa->info.region.start,
             capa->info.region.end, start)) &&
         (capa->info.region.start <= end && capa->info.region.end >= end)
-        && has_access_rights(capa->info.region.flags, access)) {
+        && has_access_rights(capa->info.region.rights, rights)) {
       // Found the capability.
       break;
     }
@@ -419,7 +487,8 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
 
   // We were not able to find the capability.
   if (capa == NULL) {
-    LOG("The access rights we want: %x", access);
+    LOG("The access rights we want:");
+    print_access_rights_t(&rights);
     ERROR("Unable to find the containing capa: %llx -- %llx",
         start, end);
     /*asm volatile (
@@ -433,7 +502,9 @@ int cut_region(paddr_t start, usize size, memory_access_right_t access,
   }
 
   //@aghosn: this is the new capa interface for regions.
-  if (segment_region_capa(0, capa, to_send, revoke, start, end, access >> 2) != SUCCESS) {
+  //luca: for the prot, they did "flags >> 2" which is a shift of the "memory_access_right_t" type. why???
+  rights.flags = rights.flags >> 2;
+  if (segment_region_capa(0, capa, to_send, revoke, start, end, rights) != SUCCESS) {
     ERROR("Unable to segment the region !");
     goto failure;
   }
@@ -445,6 +516,7 @@ failure:
 }
 
 int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke) {
+  access_rights_t rights;
   if (dup == NULL || revoke == NULL || capa == NULL) {
     goto failure;
   }
@@ -452,8 +524,11 @@ int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke) {
     ERROR("The capa is not a region");
     goto failure;
   }
+  rights = capa->info.region.rights;
+  //TODO: luca: why do ne need to do this??
+  rights.flags = rights.flags >> 2;
   if (segment_region_capa(1, capa, dup, revoke, capa->info.region.start,
-        capa->info.region.end, capa->info.region.flags >> 2) != SUCCESS) {
+        capa->info.region.end, rights) != SUCCESS) {
     ERROR("Unable to duplicate the capability");
     goto failure;
   }
@@ -466,7 +541,7 @@ failure:
 }
 
 int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
-    usize send_access) {
+    access_rights_t rights) {
   child_domain_t *child = NULL;
   if (capa == NULL || revoke == NULL) {
     goto failure;
@@ -476,10 +551,12 @@ int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
     ERROR("Unable to find the child");
     goto failure;
   }
+
+  rights.flags >>= 2;
   if (tyche_send_aliased(child->management->local_id, capa->local_id,
       0, capa->info.region.start,
       capa->info.region.end - capa->info.region.start,
-      send_access >> 2) != SUCCESS) {
+      rights) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }
@@ -493,23 +570,34 @@ failure:
   return FAILURE;
 }
 
-int internal_carve_region(domain_id_t id, paddr_t start, usize size,
-    memory_access_right_t access, int is_shared, int is_repeat,
+int internal_carve_region(domain_id_t id, paddr_t start, paddr_t end, size_t colored_size,
+    access_rights_t rights, int is_shared, int is_repeat,
      usize alias) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
   capability_t* to_send = NULL;
   capability_t* revoke = NULL;
-  memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
-  memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
-  if ((basic_access | send_access) != access) {
+  usize aliased_start;
+  access_rights_t rights_with_basic_access = rights;
+  access_rights_t rights_with_send_access = rights;
+  access_rights_t rights_buf;
+  rights_with_basic_access.flags &= MEM_ACCESS_RIGHT_MASK_SEWRCA;
+  rights_with_send_access.flags &= MEM_ACCESS_RIGHT_MASK_VCH;
+  if ((rights_with_basic_access.flags | rights_with_send_access.flags) != rights.flags) {
     ERROR("Problem partitioning access right flags. Expected %x, got: %x",
-        access, (basic_access | send_access));
+        rights.flags, (rights_with_basic_access.flags | rights_with_send_access.flags));
     goto failure;
   }
 
-  usize aliased_start = (alias == NO_ALIAS)? start : alias;
-  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
+  aliased_start = (alias == NO_ALIAS)? start : alias;
+  //TODO: luca: ask adrien about this. Is this a simplification that just covers
+  //the use case where we repeatedly map a single page over and over again?
+  //If so, why call it with such a large segment? 
+  if(is_repeat) {
+    FAIL();
+  }
+  //if this is a repeat, end is at start + PAGE_SIZE????
+  //paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
   // Quick checks.
   if (start >= end) {
@@ -526,16 +614,19 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     goto failure;
   }
 
+  //luca: I think think, here we check if the current domain has the CAPA that would be required
+  //for the carve. After
   // Now attempt to find the capability.
+  LOG("start hpa 0x%013llx end hpa 0x%013llx, colored_size 0x%lx", start, end, colored_size);
   dll_foreach(&(local_domain.capabilities), capa, list) {
-    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+    if (capa->capa_type != Region || (capa->info.region.rights.flags & MEM_ACTIVE) == 0) {
       continue;
     }
     if ((dll_contains(
             capa->info.region.start,
             capa->info.region.end, start)) &&
         (capa->info.region.start <= end && capa->info.region.end >= end)
-        && has_access_rights(capa->info.region.flags, basic_access)) {
+        && has_access_rights(capa->info.region.rights, rights_with_basic_access)) {
       // Found the capability.
       break;
     }
@@ -543,7 +634,8 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
 
   // We were not able to find the capability.
   if (capa == NULL) {
-    LOG("The access rights we want: %x", access);
+    LOG("The access rights we want");
+    print_access_rights_t(&rights);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
         start, end, is_repeat);
     /*asm volatile (
@@ -556,20 +648,26 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     goto failure;
   }
 
+  //luca: Here we update the capability (locally and in tyche) but DO NOT yet transfer the ownership
   //@aghosn: this is the new capa interface for regions.
-  if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, basic_access >> 2) != SUCCESS) {
+  rights_buf = rights_with_basic_access;
+  rights_buf.flags = rights_buf.flags >> 2;
+  if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, rights_buf) != SUCCESS) {
     ERROR("Unable to segment the region !");
     goto failure;
   }
+  //luca: here, we just to the ownership transfer. The splitting/updating has already been done in the previous
+  rights_buf = rights_with_send_access;
+  rights_buf.flags = rights_buf.flags >> 2;
   if (tyche_send_aliased(child->management->local_id, to_send->local_id,
-      is_repeat, aliased_start, size, send_access >> 2) != SUCCESS) {
+      is_repeat, aliased_start, colored_size, rights_buf) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
   }
   // Set the revocation information on the capability.
   // This is useful to maintain a coherent remapper.
   revoke->info.revoke_region.alias_start = aliased_start;
-  revoke->info.revoke_region.alias_size = size; 
+  revoke->info.revoke_region.alias_size = colored_size; 
   revoke->info.revoke_region.is_repeat = is_repeat;
   // Sort things out in the different lists.
   dll_remove(&(local_domain.capabilities), to_send, list);
@@ -581,25 +679,25 @@ failure:
   return FAILURE;
 }
 
-int grant_region(domain_id_t id, paddr_t start, usize size,
-                 memory_access_right_t access, usize alias)
+int grant_region(domain_id_t id, paddr_t start, paddr_t end, size_t colored_size,
+                 access_rights_t rights, usize alias)
 {
-  return internal_carve_region(id, start, size, access, 0, 0, alias);
+  return internal_carve_region(id, start, end, colored_size, rights, 0, 0, alias);
 } 
 
-int share_region(domain_id_t id, paddr_t start, usize size,
-                 memory_access_right_t access, usize alias) {
-  return internal_carve_region(id, start, size, access, 1, 0, alias);
+int share_region(domain_id_t id, paddr_t start, paddr_t end, size_t colored_size,
+                 access_rights_t rights, usize alias) {
+  return internal_carve_region(id, start, end, colored_size,rights, 1, 0, alias);
 } 
 
-int share_repeat_region(domain_id_t id, paddr_t start, usize size,
-    memory_access_right_t access, usize alias)
+int share_repeat_region(domain_id_t id, paddr_t start, paddr_t end, size_t colored_size,
+                 access_rights_t rights, usize alias)
 {
   if(alias == NO_ALIAS) {
     ERROR("Called share_repeat_region with no alias");
     return FAILURE;
   }
-  return internal_carve_region(id, start, size, access, 1, 1, alias);
+  return internal_carve_region(id, start, end, colored_size, rights,1, 1, alias);
 }
 
 // @warning the handle should be deallocated by the caller!!!!

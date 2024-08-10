@@ -6,10 +6,12 @@
 #include <linux/types.h>
 #else
 #include <stdint.h>
+#include <stdbool.h>
 #include <sys/ioctl.h>
 #endif
 
 #include "tyche_capabilities_types.h"
+#include "common.h"
 
 // ———————————————————— Constants Defined in the Module ————————————————————— //
 #define TE_READ ((uint64_t)MEM_READ)
@@ -69,21 +71,21 @@ typedef struct {
 	/// The size.
 	usize size;
 	/// memory flags
-	memory_access_right_t flags;
+	access_rights_t rights;
 	/// The number of acquirable pipes.
 	usize width;
 } msg_create_pipe_t;
 
 /// Information about the attestation buffer.
 typedef struct {
-    /// Virtual address of the start of the buffer.
-    usize start;
+	/// Virtual address of the start of the buffer.
+	usize start;
 
-    /// Size of the buffer.
-    usize size;
+	/// Size of the buffer.
+	usize size;
 
-    /// How many bytes were written by Tyche.
-    usize written;
+	/// How many bytes were written by Tyche.
+	usize written;
 } attest_buffer_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //

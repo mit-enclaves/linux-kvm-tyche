@@ -2,6 +2,7 @@
 #define __INCLUDE_TYCHE_CAPABILITIES_H__
 
 #include "ecs.h"
+#include "linux/types.h"
 #include "tyche_capabilities_types.h"
 #include "tyche_register_map.h"
 
@@ -13,6 +14,7 @@ extern domain_t local_domain;
 // —————————————————————————————————— API ———————————————————————————————————
 // //
 
+void print_access_rights_t(access_rights_t *access_rights);
 /// Initialize the local domain.
 /// This function enumerates the regions attributed to this domain and
 /// populates the local_domain.
@@ -30,17 +32,17 @@ int seal_domain(domain_id_t id);
 /// Duplicate capability.
 int segment_region_capa(int is_shared, capability_t *capa,
 			capability_t **to_send, capability_t **revoke,
-			usize start, usize end, usize prot);
+			usize start, usize end, access_rights_t rights);
 
 /// Grant a memory region.
 /// Finds the correct capability and grants the region to the target domain.
-int grant_region(domain_id_t id, paddr_t start, usize size,
-		 memory_access_right_t access, usize alias);
+int grant_region(domain_id_t id, paddr_t start, paddr_t end,
+		 size_t colored_size, access_rights_t rights, usize alias);
 
 /// Carve a memory region without sending it to anyone.
 /// @warning: it removes the capabilities from the local domain,
 /// Don't lose them!
-int cut_region(paddr_t start, usize size, memory_access_right_t access,
+int cut_region(paddr_t start, usize size, access_rights_t rights,
 	       capability_t **to_send, capability_t **revoke);
 
 /// Duplicates the capability and creates a revocation handle for it.
@@ -51,17 +53,18 @@ int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke);
 /// This will free the capa in the capa engine and add the revoke to it.
 /// Make sure none of these is inside a list.
 int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
-		usize send_access);
+		access_rights_t rights);
 
 /// Share a memory region.
 /// Finds the correct capability and shares the region with the target domain.
-int share_region(domain_id_t id, paddr_t start, usize size,
-		 memory_access_right_t access, usize alias);
+int share_region(domain_id_t id, paddr_t start, paddr_t end,
+		 size_t colored_size, access_rights_t rights, usize alias);
 
 /// Share a memory region that is aliased and repeats.
 /// This leads to one physical page starting at start, mapped from alias to alias + size.
-int share_repeat_region(domain_id_t id, paddr_t start, usize size,
-			memory_access_right_t access, usize alias);
+int share_repeat_region(domain_id_t id, paddr_t start, paddr_t end,
+			size_t colored_size, access_rights_t rights,
+			usize alias);
 
 /// Revoke the memory region.
 /// Start and end must match existing bounds on a capability.

@@ -1,12 +1,16 @@
 #ifndef __INCLUDE_TYCHE_CAPABILITIES_TYPES_H__
 #define __INCLUDE_TYCHE_CAPABILITIES_TYPES_H__
 
+#ifdef __KERNEL__
+#include "linux/types.h"
+#endif
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
 
-#include "common.h"
 #include "dll.h"
+#include "color_bitmap.h"
 
 #if defined(CONFIG_X86) || defined(__x86_64__)
 #define TYCHE_EXIT_FRAME_SIZE 9
@@ -19,6 +23,7 @@
 
 #define ALL_CORES_MAP (~((usize)0))
 #define NO_CPU_SWITCH (~((usize)0))
+
 /// Internal definition of our types so we can move to 32 bits.
 typedef long long unsigned int paddr_t;
 
@@ -65,6 +70,18 @@ typedef enum memory_access_right_t {
 	MEM_VITAL = 1 << 8,
 } memory_access_right_t;
 
+typedef enum { RK_RAM = 0, RK_Device = 1 } resource_kind_t;
+
+//Wrapper struct that bundles the traditional memory access
+//rights with the additional rights for memory coloring
+//Moving this into its own struct, ensures that we need to modify
+//all sides that previously used this field
+typedef struct {
+	memory_access_right_t flags;
+	resource_kind_t kind;
+	color_bitmap_t color_bm;
+} access_rights_t;
+
 #define MEM_ACCESS_RIGHT_MASK_SEWRCA                                      \
 	(MEM_SUPER | MEM_EXEC | MEM_WRITE | MEM_READ | MEM_CONFIDENTIAL | \
 	 MEM_ACTIVE)
@@ -74,7 +91,7 @@ typedef enum memory_access_right_t {
 typedef struct capa_region_t {
 	paddr_t start;
 	paddr_t end;
-	memory_access_right_t flags;
+	access_rights_t rights;
 } capa_region_t;
 
 /// Access right information for a revoke region capability.
@@ -82,7 +99,7 @@ typedef struct capa_region_t {
 typedef struct capa_revoke_region_t {
 	paddr_t start;
 	paddr_t end;
-	memory_access_right_t flags;
+	access_rights_t rights;
 	/// Alias information.
 	paddr_t alias_start;
 	paddr_t alias_size;
@@ -182,5 +199,4 @@ typedef struct child_domain_t {
 	// This structure can be put in a double-linked list.
 	dll_elem(struct child_domain_t, list);
 } child_domain_t;
-
 #endif

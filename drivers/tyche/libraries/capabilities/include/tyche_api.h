@@ -1,8 +1,33 @@
 #ifndef __INCLUDE_TYCHE_API_H__
 #define __INCLUDE_TYCHE_API_H__
 
+//luca: c definition of the apis
+
+#include "common.h"
+#include "linux/types.h"
 #include "tyche_capabilities_types.h"
 #include "tyche_register_map.h"
+
+#ifndef __KERNEL__
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#endif
+
+#define TYCHE_DATA_BUF_MAX_BYTES 256
+/**
+ * @brief Statically allocated buffer for receiving data from tyche
+ * Dimensions must be changed in sync with the tyche counterpart
+ * 
+ */
+typedef struct {
+	uint8_t raw[TYCHE_DATA_BUF_MAX_BYTES];
+	// number of valid bytes in raw
+	size_t used_bytes;
+} tyche_data_buf_t;
+
+int tyche_data_buf_from_raw(tyche_data_buf_t *buf, uint8_t *raw,
+			    size_t raw_len);
 
 /// Copied from the tyche source code
 typedef enum tyche_monitor_call_t {
@@ -29,6 +54,10 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_REVOKE_ALIASED_REGION = 21,
 	TYCHE_SERIALIZE_ATTESTATION = 22,
 	TYCHE_TEST_CALL = 30,
+	TYCHE_GET_HPAS = 31,
+	TYCHE_SEND_REGION_REPEAT = 32,
+	TYCHE_SEND_DATA = 33,
+	TYCHE_GET_DATA = 34,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -83,6 +112,12 @@ typedef struct vmcall_frame_t {
 	usize value_6;
 } vmcall_frame_t;
 
+typedef uint8_t tyche_data_handle_t;
+typedef union {
+	usize as_usize[3];
+	uint8_t as_bytes[3 * sizeof(usize)];
+} tyche_send_get_chunk_t;
+
 // —————————————————————————————————— API ——————————————————————————————————— //
 
 int tyche_call(vmcall_frame_t *frame);
@@ -106,12 +141,12 @@ int tyche_seal(capa_index_t *transition, capa_index_t management);
 
 int tyche_segment_region(usize is_shared, capa_index_t capa,
 			 capa_index_t *to_send, capa_index_t *revoke,
-			 usize start, usize end, usize prot);
+			 usize start, usize end, access_rights_t rights);
 
 int tyche_send(capa_index_t dest, capa_index_t capa);
 
 int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
-		       usize alias, usize size, usize send_access);
+		       usize alias, usize size, access_rights_t rights);
 
 int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 		usize a1, usize a2, usize a3);
@@ -133,5 +168,15 @@ int tyche_write_fields(capa_index_t management, usize core, usize *fields,
 		       usize *values, int size);
 
 int tyche_duplicate(capa_index_t *new_capa, capa_index_t capa);
+
+int tyche_get_hpas(uint64_t start_gpa, size_t length, uint64_t *out_start_hpa,
+		   uint64_t *out_end_hpa);
+
+int tyche_send_data(tyche_data_handle_t handle, uint8_t *data, size_t data_len,
+		    bool mark_ready, tyche_data_handle_t *out_handle);
+
+int tyche_send_all(uint8_t *data, size_t len, tyche_data_handle_t *out_handle);
+
+int tyche_get_all_data(tyche_data_handle_t handle, tyche_data_buf_t *recv_buf);
 
 #endif

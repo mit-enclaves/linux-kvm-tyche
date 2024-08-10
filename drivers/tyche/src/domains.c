@@ -1,5 +1,9 @@
+#include "allocs.h"
 #include "arch_cache.h"
+#include "color_bitmap.h"
 #include "dll.h"
+#include "linux/gfp_types.h"
+#include "linux/kern_levels.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
@@ -11,6 +15,7 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
+#include <linux/bitops.h>
 
 #if defined(CONFIG_X86) || defined(__x86_64__)
 #include <asm/vmx.h>
@@ -206,82 +211,8 @@ failure:
 
 EXPORT_SYMBOL(driver_create_domain);
 
-int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
-{
-  void* allocation = NULL;
-  usize size = 0;
-  int order;
-  if (vma == NULL || dom->handle == NULL) {
-    ERROR("The provided vma is null or handle is null.");
-    goto failure;
-  }
-  // Expect the domain to be w-locked.
-  CHECK_WLOCK(dom, failure);
-
-  // Checks on the vma.
-  if (vma->vm_end <= vma->vm_start) {
-    ERROR("End is smaller than start");
-    goto failure;
-  }
-  if (vma->vm_start % PAGE_SIZE != 0 || vma->vm_end % PAGE_SIZE != 0) {
-    ERROR("End or/and Start is/are not page-aligned.");
-    goto failure;
-  }
-  if (dom == NULL) {
-    ERROR("Unable to find the right domain.");
-    goto failure;
-  }
-  if (!dll_is_empty(&(dom->segments))) {
-    ERROR("The domain has already been initialized.");
-    goto failure;
-  }
-
-  // Allocate a contiguous memory region.
-  // If the order of the size requested is too big, fail.
-  // This should be handled inside the loader, not the driver.
-  size = vma->vm_end - vma->vm_start;
-  order = get_order(size);
-  if (order >= MAX_ORDER) {
-    ERROR("The requested size of: %llx has order %d while max order is %d",
-        size, order, MAX_ORDER);
-    goto failure;
-  }
-  allocation = alloc_pages_exact(size, GFP_KERNEL); 
-  if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", size);
-    goto failure;
-  }
-  memset(allocation, 0, size);
-  // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
-    char* mem = ((char*)allocation) + i * PAGE_SIZE;
-    SetPageReserved(virt_to_page((unsigned long)mem));
-  }
-
-  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
-  if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
-    ERROR("Unable to map the memory...");
-    goto fail_free_pages;
-  }
-
-  if (driver_add_raw_segment(
-        dom, (usize) vma->vm_start, 
-        (usize) virt_to_phys(allocation), size) != SUCCESS) {
-    ERROR("Unable to allocate a segment");
-    goto fail_free_pages;
-  }
-  return SUCCESS;
-fail_free_pages:
-  free_pages_exact(allocation, size);
-failure:
-  return FAILURE;
-}
-
 int driver_add_raw_segment(
-    driver_domain_t *dom,
-    usize va,
-    usize pa,
-    usize size)
+    driver_domain_t *dom, mmem_t* contalloc_segment)
 {
   segment_t *segment = NULL;
   if (dom == NULL) {
@@ -297,10 +228,9 @@ int driver_add_raw_segment(
     goto failure;
   }
   memset(segment, 0, sizeof(segment_t));
-  segment->va = va;
-  segment->pa = pa;
-  segment->size = size;
+  segment->raw_mem = contalloc_segment;
   segment->state = DRIVER_NOT_COMMITED;
+  
   dll_init_elem(segment, list);
   dll_add(&(dom->raw_segments), segment, list);
   return SUCCESS;
@@ -330,7 +260,8 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phy
   }
   dll_foreach(&(dom->raw_segments), seg, list) {
     if (slot_counter == slot_id) {
-      *phys_offset = seg->pa;
+      //TODO: if we run without colors this is fine, other
+      *phys_offset = seg->raw_mem->fragments[0].start_hpa;
       return SUCCESS;
     }
     slot_counter++;
@@ -340,87 +271,183 @@ failure:
   return FAILURE;
 }
 
-int driver_mprotect_domain(
-    driver_domain_t *dom,
-    usize vstart,
-    usize size,
-    memory_access_right_t flags,
-    segment_type_t tpe,
-    usize alias)
+/**
+ * @brief Take the requested amount of memory from self. Self is updated accordingly
+ * 
+ * @param self 
+ * @param requested_bytes number of bytes that we need 
+ * @param out_carved_mem Callee allocated output param. Free with kfree
+ * @return int SUCCESS or FAILURE
+ */
+static int _carve_from_segment_start(mmem_t *self, size_t requested_bytes,
+				     mmem_t **out_carved_mem)
 {
-  segment_t* head = NULL, *segment = NULL; 
+	size_t  consumed_fragment_count, self_idx, remaining_bytes;
+	mmem_t *carved_mem = kmalloc(sizeof(mmem_t), GFP_KERNEL);
+	mmem_t_init(carved_mem, TYCHE_COLOR_COUNT);
 
-  if (dom == NULL) {
-    ERROR("The domain is null.");
-    goto failure;
-  } 
+  remaining_bytes = requested_bytes;
 
-  /// Expects the domain to be write-locked.
-  CHECK_WLOCK(dom, failure);
+	//track how many fragments we need to remove from self. We do one batch remove at the end
+	consumed_fragment_count = 0;
 
-  if (dom->handle != NULL && dom->pid != current->pid) {
-    ERROR("Wrong pid for domain");
-    ERROR("Expected: %d, got: %d", dom->pid, current->pid);
-    goto failure;
-  }
-  /// The logic here is as follows:
-  /// 1. We can only mprotect the top address of raw segments.
-  /// 2. When we do so, we carve out the memory segment and add it to segments.
-  /// 3. We adapt the raw segment to point to the next raw address if any.
-  if (dll_is_empty(&(dom->raw_segments))) {
-    ERROR("The domain %p doesn't have mmaped memory.", dom);
-    goto failure;
-  }
+	for (self_idx = 0;
+	     (self_idx < self->fragment_count) && (remaining_bytes > 0);
+	     self_idx++) {
+		alloc_fragment_t *f = self->fragments + self_idx;
+		//Case 1: need more bytes than f provides -> use whole fragment
+    //LOG("Processing fragment: GPAs start 0x%013llx, end 0x%013llx", f->gpa, f->gpa+f->size);
+		if (remaining_bytes > f->size) {
+			mmem_t_add_fragment(carved_mem, *f);
+			consumed_fragment_count += 1;
+			remaining_bytes -= f->size;
+      //LOG("Using whole fragment");
+		} else { //Case 2: don't need all of f -> split fragment
+			alloc_fragment_t carved;
+			carved.gpa = f->gpa;
+			carved.size = remaining_bytes;
+			carved.color_id = f->color_id;
+      if( tyche_get_hpas(carved.gpa, carved.size, &carved.start_hpa, &carved.end_hpa)) {
+        ERROR("failed to get HPAs for new carved fragment: gpa 0x%013llx, size 0x%lx", carved.gpa, carved.size);
+        goto failure;
+      }
+			mmem_t_add_fragment(carved_mem, carved);
 
-  // Check the properties on the segment.
-  head = dll_head(&(dom->raw_segments));
+			f->gpa += remaining_bytes;
+			f->size -= remaining_bytes;
+      if( tyche_get_hpas(f->gpa, f->size, &(f->start_hpa), &(f->end_hpa))) {
+        ERROR("failed to get HPAs for updated remaining fragment: gpa 0x%013llx, size 0x%lx", f->gpa, f->size);
+        goto failure;
+      }
+      
+			remaining_bytes = 0;
+		}
+	}
 
-  // Check the mprotect has the correct bounds.
-  if (head->va != vstart) {
-    ERROR("Out of order specification of segment: wrong start");
-    ERROR("Expected: %llx, got: %llx", head->va, vstart);
-    goto failure;
-  }
+	if (remaining_bytes > 0) {
+		ERROR("processed all available fragments but still have %lu bytes remaining",
+		      remaining_bytes);
+		goto failure;
+	}
 
-  if (head->va + head->size < vstart + size) {
-    ERROR("The specified segment is not contained in the raw one.");
-    ERROR("Raw: start(%llx) size(%llx)", head->va, head->size);
-    ERROR("Prot: start(%llx) size(%llx)", vstart, size);
-    goto failure;
-  }
+  //update metadata in self
+	mmem_t_pop_from_front(self, consumed_fragment_count);
+  self->start_gva += requested_bytes;
+  self->start_gpa = self->fragments[0].gpa;
+  self->size -= requested_bytes;
 
-  // Add the segment.
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
-  if (segment == NULL) {
-    ERROR("Unable to allocate new segment");
-  }
-
-  memset(segment, 0, sizeof(segment_t));
-  segment->va = vstart;
-  segment->pa = head->pa;
-  segment->size = size;
-  segment->flags = flags;
-  segment->tpe = tpe;
-  segment->alias = alias;
-  segment->state = DRIVER_NOT_COMMITED;
-  dll_init_elem(segment, list);
-  dll_add(&(dom->segments), segment, list);
-
-  // Adjust the head.
-  // Easy case, we just remove the head.
-  if (segment->size == head->size) {
-    dll_remove(&(dom->raw_segments), head, list);
-    kfree(head);
-  } else {
-    head->va += size;
-    head->pa += size;
-    head->size -= size;
-  } 
-  DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
-      domain, vstart, vstart + size);
-  return SUCCESS;
+	*out_carved_mem = carved_mem;
+	return SUCCESS;
 failure:
+    if(carved_mem) kfree(carved_mem);
   return FAILURE;
+}
+
+//luca: this handles the TYCHE_MPROTECT ioctl. It seems like it only inserts the information into a
+//list which will be send to Tyche by another call.
+int driver_mprotect_domain(driver_domain_t *dom,
+			   usize vstart, //luca: N.B: still in vaddr space
+			   usize size, memory_access_right_t flags,
+			   segment_type_t tpe, usize alias)
+{
+	segment_t *head = NULL, *segment = NULL;
+	mmem_t *carved_mem = NULL;
+
+	if (dom == NULL) {
+		ERROR("The domain is null.");
+		goto failure;
+	}
+
+	/// Expects the domain to be write-locked.
+	CHECK_WLOCK(dom, failure);
+
+	if (dom->handle != NULL && dom->pid != current->pid) {
+		ERROR("Wrong pid for domain");
+		ERROR("Expected: %d, got: %d", dom->pid, current->pid);
+		goto failure;
+	}
+	/// The raw segments from the allocations step may not directly map to the elf sections/segments
+	/// for which we want to configure the memory protection in this function.
+	///
+	/// The logic here is as follows:
+	/// 1. We can only mprotect the top address of raw segments.
+	/// 2. When we do so, we carve out the memory segment and add it to segments.
+	/// 3. We adapt the raw segment to point to the next raw address if any.
+	if (dll_is_empty(&(dom->raw_segments))) {
+		ERROR("The domain %p doesn't have mmaped memory.", dom);
+		goto failure;
+	}
+
+	// Check the properties on the segment.
+	head = dll_head(&(dom->raw_segments));
+
+	// Check the mprotect has the correct bounds.
+	if (head->raw_mem->start_gva != vstart) {
+		ERROR("Out of order specification of segment: wrong start");
+		ERROR("Expected: %llx, got: %llx", head->raw_mem->start_gva,
+		      vstart);
+		goto failure;
+	}
+
+	//luca: idea here is that we take a chunk from the allocated raw segment in va space an apply memory protection
+	//luca: ie. break the assumption that one allocation maps one section/segment
+
+	if (head->raw_mem->start_gva + head->raw_mem->size < vstart + size) {
+		ERROR("The specified segment is not contained in the raw one.");
+		ERROR("Raw: start(%llx) size(%llx)", head->raw_mem->start_gva,
+		      head->raw_mem->size);
+		ERROR("Prot: start(%llx) size(%llx)", vstart, size);
+		goto failure;
+	}
+
+	// Add the segment.
+	segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
+  segment->raw_mem = kmalloc(sizeof(mmem_t), GFP_KERNEL);
+
+
+  //easy case: use whole segment
+	if (size == head->raw_mem->size) {
+    *segment = *head;
+    segment->flags = flags;
+		segment->tpe = tpe;
+		segment->alias = alias;
+		segment->state = DRIVER_NOT_COMMITED;
+    /*LOG("Using whole segment");
+    LOG("Deepcopy mmem_t, head->raw_mem = 0x%llx, segment->raw_mem 0x%llx", (uint64_t)head->raw_mem, (uint64_t)segment->raw_mem);*/
+    mmem_t_deepcopy(head->raw_mem, segment->raw_mem);
+
+    //LOG("Remove segment from raw_segments list");
+		dll_remove(&(dom->raw_segments), head, list);
+    //LOG("Free raw_mem in removed head");
+    mmem_t_free(*head->raw_mem);
+    //LOG("Free head");
+		kfree(head);
+	} else {//hard case: use only some fragments from the segment
+		if (_carve_from_segment_start(head->raw_mem, size,
+					      &carved_mem)) {
+			ERROR("_carve_from_segment for vstart 0x%013llx size 0x%llx failed",
+			      vstart, size);
+			goto failure;
+		}
+
+		segment->raw_mem = carved_mem;
+		segment->flags = flags;
+		segment->tpe = tpe;
+		segment->alias = alias;
+		segment->state = DRIVER_NOT_COMMITED;
+		dll_init_elem(segment, list);
+		dll_add(&(dom->segments), segment, list);
+	}
+
+	DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx",
+	      domain, vstart, vstart + size);
+	return SUCCESS;
+failure:
+	if (segment)
+		kfree(segment);
+	if (carved_mem)
+		kfree(carved_mem);
+	return FAILURE;
 }
 EXPORT_SYMBOL(driver_mprotect_domain);
 
@@ -613,9 +640,13 @@ failure:
 }
 EXPORT_SYMBOL(driver_alloc_core_context);
 
+//luca: this uses alias/carve to create the CAPAs for the previously recorded MPROTECT
+//requests
 int driver_commit_regions(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
+  size_t fragment_idx;
+  usize fragment_next_alias;
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
@@ -651,47 +682,61 @@ int driver_commit_regions(driver_domain_t *dom)
     if (segment->state == DRIVER_COMMITED) {
       continue;
     }
-    switch(segment->tpe) {
-      case SHARED:
-        if (share_region(
-              dom->domain_id, 
-              segment->pa,
-              segment->size,
-              segment->flags, segment->alias) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
-              segment->size, segment->flags);
-          goto failure;
-        }
-        break;
-      case CONFIDENTIAL:
-        if (grant_region(
-              dom->domain_id,
-              segment->pa,
-              segment->size,
-              segment->flags, segment->alias) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
-              segment->size, segment->flags);
-          goto failure;
-        }
-        break;
-  case SHARED_REPEAT:
-    if (share_repeat_region(dom->domain_id,
-          segment->pa,
-          segment->size,
-          segment->flags,
-          segment->alias) != SUCCESS) {
-      ERROR("Unable to share repeat segment %llx -- %llx {%x}",
-          segment->va, segment->size, segment->flags);
-      goto failure;
+    // share_region
+    for (fragment_idx = 0; fragment_idx < segment->raw_mem->fragment_count;
+	 fragment_idx++) {
+      alloc_fragment_t *frag;
+	    access_rights_t rights = {
+		    .flags = segment->flags,
+		    .kind = RK_RAM,
+	    };
+      color_bitmap_init(&(rights.color_bm));
+	    frag = segment->raw_mem->fragments + fragment_idx;
+	    fragment_next_alias = segment->alias;
+      color_bitmap_set(&(rights.color_bm), frag->color_id, true);
+	    switch (segment->tpe)
+	    {
+	    case SHARED:
+		    if (share_region(dom->domain_id, frag->start_hpa,
+				     frag->end_hpa, frag->size, rights,
+				     fragment_next_alias) != SUCCESS) {
+			    ERROR("Unable to share segment GVA %llx -- %llx {%x}",
+				  segment->raw_mem->start_gva,
+				  segment->raw_mem->size, segment->flags);
+			    goto failure;
+		    }
+		    break;
+	    case CONFIDENTIAL:
+		    if (grant_region(dom->domain_id, frag->start_hpa,
+				     frag->end_hpa, frag->size, rights,
+				     fragment_next_alias) != SUCCESS) {
+			    ERROR("Unable to share segment  GVA %llx -- %llx {%x}",
+				  segment->raw_mem->start_gva,
+				  segment->raw_mem->size, segment->flags);
+			    goto failure;
+		    }
+		    break;
+	    case SHARED_REPEAT:
+		    if (share_repeat_region(dom->domain_id, frag->start_hpa,
+					    frag->end_hpa, frag->size,
+					    rights,
+					    fragment_next_alias) != SUCCESS) {
+			    ERROR("Unable to share segment GVA %llx -- %llx {%x}",
+				  segment->raw_mem->start_gva,
+				  segment->raw_mem->size, segment->flags);
+			    goto failure;
+		    }
+		    break;
+	    default:
+		    ERROR("Invalid tpe for segment!");
+		    goto failure;
+	    }
+	    fragment_next_alias += frag->size;
     }
-    break;
-      default:
-        ERROR("Invalid tpe for segment!");
-        goto failure;
-    }
+
     segment->state = DRIVER_COMMITED;
-    DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
-        segment->pa, segment->pa + segment->size, segment->tpe);
+    DEBUG("Registered segment with tyche: %llx -- %llx [%x]", segment->pa,
+	  segment->pa + segment->size, segment->tpe);
   }
   return SUCCESS;
 failure:
@@ -764,6 +809,8 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   // We need to commit some of the configuration.
   if (full != 0) {
     //ERROR("Full is not 0");
+    //luca: this triggers the CAPA creation. Previously, we used mprotect calls
+    //to create a linked list with the memory protection that we want
     if (driver_commit_regions(dom) != SUCCESS) {
       ERROR("Failed to commit regions.");
       goto failure;
@@ -1002,7 +1049,7 @@ delete_dom_struct:
   // Delete all segments;
   while(!dll_is_empty(&(dom->segments))) {
     segment = dll_head(&(dom->segments));
-    size += segment->size;
+    size += segment->raw_mem->size;
     dll_remove(&(dom->segments), segment, list);
     //TODO: this creates a bug if user code calls munmap.
     /*if (dom->handle != NULL) {
@@ -1053,7 +1100,7 @@ delete_dom_struct:
   // Delete all segments;
   while(!dll_is_empty(&(dom->segments))) {
     segment = dll_head(&(dom->segments));
-    size += segment->size;
+    size += segment->raw_mem->size;
     dll_remove(&(dom->segments), segment, list);
     kfree(segment);
     segment = NULL;
@@ -1065,12 +1112,15 @@ failure:
 EXPORT_SYMBOL(driver_delete_domain_regions);
 
 int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
-           memory_access_right_t flags, usize width) {
+           access_rights_t rights, usize width) {
   capability_t* orig = NULL;
   capability_t* orig_revoke = NULL;
   driver_pipe_t* pipe = NULL;
-  memory_access_right_t basic_flags = flags & MEM_ACCESS_RIGHT_MASK_SEWRCA;
+  access_rights_t rights_basic_flags;
   usize i = 0;
+  rights_basic_flags = rights;
+  rights_basic_flags.flags &= MEM_ACCESS_RIGHT_MASK_SEWRCA;
+
   if (pipe_id == NULL || width == 0) {
     ERROR("Supplied pipe id is null");
     goto failure;
@@ -1083,11 +1133,11 @@ int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
   pipe->id = 0;
   pipe->phys_start = phys_addr;
   pipe->size = size;
-  pipe->flags = flags;
+  pipe->rights = rights;
   dll_init_list(&(pipe->actives));
   dll_init_list(&(pipe->revokes));
   dll_init_elem(pipe, list);
-  if (cut_region(phys_addr, size, basic_flags, &orig, &orig_revoke) != SUCCESS) {
+  if (cut_region(phys_addr, size, rights_basic_flags, &orig, &orig_revoke) != SUCCESS) {
     ERROR("Unable to carve out the original pipe region.");
     goto failure_free;
   }
@@ -1124,7 +1174,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   driver_pipe_t *pipe = NULL;
   capability_t* to_send = NULL;
   capability_t* to_revoke = NULL;
-  memory_access_right_t send_access;
+  access_rights_t send_rights;
   if (domain == NULL) {
     goto failure;
   }
@@ -1147,7 +1197,8 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   // Remove the capas from the pipe.
   to_send = pipe->actives.head;
   to_revoke = pipe->revokes.head;
-  send_access = pipe->flags & MEM_ACCESS_RIGHT_MASK_VCH;
+  send_rights = pipe->rights;
+  send_rights.flags &= MEM_ACCESS_RIGHT_MASK_VCH;
   dll_remove(&(pipe->actives), to_send, list);
   dll_remove(&(pipe->revokes), to_revoke, list);
 
@@ -1158,7 +1209,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
     pipe = NULL;
   }
 
-  if (send_region(domain->domain_id, to_send, to_revoke, send_access) != SUCCESS) {
+  if (send_region(domain->domain_id, to_send, to_revoke, send_rights) != SUCCESS) {
     ERROR("failed to send the pipes");
     goto fail_unlock;
   }
