@@ -73,16 +73,18 @@ int contalloc_get_segment(driver_handle_t handle, uint64_t start_gva, mmem_t* ou
 	alloc = find_alloc(handle);
 	if( !alloc) {
 		ERROR("did not find entry for handle 0x%llx", (uint64_t)handle);
-		return -1;
+		return FAILURE;
 	}
 	dll_foreach(&(alloc->raw_segments), seg, list)
 	{
 		if( seg->start_gva == start_gva) {
 			mmem_t_deepcopy(seg, out_segment);
-			return 0;
+			return SUCCESS;
 		}
 	}
-	return 1;
+	
+	ERROR("handle 0x%llx : no raw segment  with start GVA 0x%llx", (uint64_t)handle, start_gva);
+	return FAILURE;
 }
 
 //luca: creates new entry in global var `allocs` to track any upcoming allocations for this caller
