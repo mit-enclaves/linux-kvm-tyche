@@ -160,6 +160,47 @@ failure:
     up_read(&(domain->rwlock)); \
   }
 
+char *tyche_driver_ioctl_to_str(unsigned int nr)
+{
+	switch (nr) {
+	case TYCHE_GET_PHYSOFFSET:
+		return "TYCHE_GET_PHYSOFFSET";
+		break;
+	case TYCHE_COMMIT:
+		return "TYCHE_COMMIT";
+		break;
+	case TYCHE_MPROTECT:
+		return "TYCHE_MPROTECT";
+		break;
+	case TYCHE_TRANSITION:
+		return "TYCHE_TRANSITION";
+		break;
+	case TYCHE_DEBUG_ADDR:
+		return "TYCHE_DEBUG_ADDR";
+		break;
+	case TYCHE_SET_DOMAIN_CORE_CONFIG:
+		return "TYCHE_SET_DOMAIN_CORE_CONFIG";
+		break;
+	case TYCHE_SET_DOMAIN_CONFIGURATION:
+		return "TYCHE_SET_DOMAIN_CONFIGURATION";
+		break;
+	case TYCHE_ALLOC_CONTEXT:
+		return "TYCHE_ALLOC_CONTEXT";
+		break;
+	case TYCHE_CREATE_PIPE:
+		return "TYCHE_CREATE_PIPE";
+		break;
+	case TYCHE_ACQUIRE_PIPE:
+		return "TYCHE_ACQUIRE_PIPE";
+		break;
+	case TYCHE_GET_ATTESTATION:
+		return "TYCHE_GET_ATTESTATION";
+		break;
+	default:
+		FAIL();
+	}
+}
+
 
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
@@ -170,6 +211,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_create_pipe_t pipe = {0};
   attest_buffer_t attest_buff = {0, 0, 0};
   char *buff;
+  LOG("running cmd %s",tyche_driver_ioctl_to_str(cmd));
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
       if (copy_from_user(
@@ -358,6 +400,10 @@ int tyche_mmap(struct file *file, struct vm_area_struct *vma)
     return FAILURE;
   }
   res = contalloc_mmap(file, vma);
+  if( res != SUCCESS ) {
+    ERROR("handle 0x%llu, contalloc_mma failed", (uint64_t)file);
+    return FAILURE;
+  }
   segment = kmalloc(sizeof(mmem_t), GFP_KERNEL);
   if( contalloc_get_segment(file,vma->vm_start,segment) ) {
     ERROR("Unable to get segment from contalloc after allocation");

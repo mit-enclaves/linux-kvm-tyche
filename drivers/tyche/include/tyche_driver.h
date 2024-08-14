@@ -102,4 +102,5 @@ typedef struct {
 #define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
 
+char *tyche_driver_ioctl_to_str(unsigned int nr);
 #endif
