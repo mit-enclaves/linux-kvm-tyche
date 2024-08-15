@@ -103,6 +103,7 @@ typedef struct capa_channel_t {
 typedef struct capa_switch_t {
 	// TODO what id is this?
 	capa_index_t id;
+	usize core;
 	// TODO: add reference about the domain?
 } capa_switch_t;
 

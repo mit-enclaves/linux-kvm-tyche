@@ -231,17 +231,45 @@ failure:
 }
 
 int alloc_core_context(domain_id_t id, usize core) {
+  capability_t *transition = NULL;
+  transition_t *trans_wrapper = NULL;
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found");
     goto failure;
   }
+  transition = (capability_t *) local_domain.alloc(sizeof(capability_t));
+  if (transition == NULL) {
+    ERROR("Could not allocate transition capa.");
+    goto failure;
+  }
+  trans_wrapper = (transition_t *)local_domain.alloc(sizeof(transition_t));
+  if (trans_wrapper == NULL) {
+    ERROR("Unable to allocate transition_t wrapper");
+    goto failure_free;
+  }
 
-  if (tyche_alloc_core_context(child->management->local_id, core) != SUCCESS) {
+  if (tyche_alloc_core_context(child->management->local_id, core, &(transition->local_id)) != SUCCESS) {
     ERROR("Unable to allocate the core context.");
     goto failure;
   }
+  // Enumerate the transition capability.
+  if (enumerate_capa(transition->local_id, NULL, transition) != SUCCESS) {
+    ERROR("Unable to read the transition capability.");
+    goto failure_dealloc;
+  }
+  // Initialize the transition wrapper.
+  trans_wrapper->transition = transition;
+  trans_wrapper->lock = TRANSITION_UNLOCKED;
+  dll_init_elem(trans_wrapper, list);
+
+  // Add the transition wrapper to the child.
+  dll_add(&(child->transitions), trans_wrapper, list);
   return SUCCESS;
+failure_dealloc:
+  local_domain.dealloc(trans_wrapper);
+failure_free:
+  local_domain.dealloc(transition);
 failure:
   return FAILURE;
 }
@@ -267,8 +295,6 @@ failure:
 
 int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
-  capability_t *transition = NULL;
-  transition_t *trans_wrapper = NULL;
 
   DEBUG("start");
   // Find the target domain.
@@ -280,64 +306,34 @@ int seal_domain(domain_id_t id) {
     goto failure;
   }
 
-  transition = (capability_t *)local_domain.alloc(sizeof(capability_t));
-  if (transition == NULL) {
-    ERROR("Could not allocate transition capa.");
-    goto failure;
-  }
-
-  trans_wrapper = (transition_t *)local_domain.alloc(sizeof(transition_t));
-  if (trans_wrapper == NULL) {
-    ERROR("Unable to allocate transition_t wrapper");
-    goto failure_transition;
-  }
-
   // Create the transfer.
   if (child->management == NULL) {
     ERROR("The child's management is null");
-    goto failure_dealloc;
-  }
+    goto failure;
+ }
   if (child->management->capa_type != Management ||
       child->management->info.management.status != Unsealed ) {
     ERROR("we do not have a valid unsealed capa.");
     ERROR("management capa: type: 0x%x  -- status 0x%x",
         child->management->info.management.status,
         child->management->info.management.status);
-    goto failure_dealloc;
+    goto failure;
   }
 
-  if (tyche_seal(&(transition->local_id), child->management->local_id) != SUCCESS) {
-    ERROR("Unable to create a channel.");
-    goto failure_dealloc;
-  }
-
-  // Enumerate the transition capability.
-  if (enumerate_capa(transition->local_id, NULL, transition) != SUCCESS) {
-    ERROR("Unable to read the transition capability.");
-    goto failure_dealloc;
+  if (tyche_seal(child->management->local_id) != SUCCESS) {
+    ERROR("Unable to seal domain.");
+    goto failure;
   }
 
   // Update the management capability.
   if (enumerate_capa(child->management->local_id, NULL, child->management) != SUCCESS) {
     ERROR("Unable to update the management capa.");
-    goto failure_dealloc;
+    goto failure;
   }
-
-  // Initialize the transition wrapper.
-  trans_wrapper->transition = transition;
-  trans_wrapper->lock = TRANSITION_UNLOCKED;
-  dll_init_elem(trans_wrapper, list);
-
-  // Add the transition wrapper to the child.
-  dll_add(&(child->transitions), trans_wrapper, list);
 
   // All done !
   DEBUG("Success");
   return SUCCESS;
-failure_dealloc:
-  local_domain.dealloc(trans_wrapper);
-failure_transition:
-  local_domain.dealloc(transition);
 failure:
   return FAILURE;
 }
@@ -708,7 +704,7 @@ failure:
 }
 
 // TODO nothing thread safe in this implementation for the moment.
-int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
+int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE], usize local_cpuid) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
@@ -734,17 +730,18 @@ int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME
 
   // Acquire a transition handle.
   dll_foreach(&(child->transitions), wrapper, list) {
-    if (wrapper->lock == TRANSITION_UNLOCKED) {
+    if (wrapper->transition->info.transition.core == local_cpuid &&  wrapper->lock == TRANSITION_UNLOCKED) {
       wrapper->lock = TRANSITION_LOCKED;
       break;
-    } else if (wrapper->lock != TRANSITION_LOCKED) {
-      ERROR("There is an invalid lock value %d (%p) (child: %p)", wrapper->lock,
-            (void *)wrapper, (void *)child);
-      goto failure;
     }
   }
   if (wrapper == NULL) {
     ERROR("Unable to find a transition handle!");
+    // Let's have a look at the transitions.
+    dll_foreach(&(child->transitions), wrapper, list) {
+      ERROR("A transition handle with value %d", wrapper->lock);
+    }
+    ERROR("Done dumping transitions");
     goto failure;
   }
   DEBUG("Found a handle for domain %lld, id %lld", id,

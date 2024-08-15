@@ -848,10 +848,10 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("The domain %p is already committed.", dom);
     goto failure;
   }*/
-  if (!dll_is_empty(&(dom->raw_segments))) {
+ /* if (!dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p's memory is not correctly initialized.", dom);
     goto failure;
-  }
+  }*/
   if (dll_is_empty(&dom->segments)) {
     ERROR("Missing segments for domain %p", dom);
     goto failure;
@@ -959,11 +959,11 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  if (!dll_is_empty(&(dom->raw_segments))) {
+  /*if (!dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p's memory is not correctly initialized.", dom);
     dump_list(&(dom->raw_segments));
     goto failure;
-  }
+  }*/
   if (dll_is_empty(&dom->segments)) {
     //ERROR("WARNING: the domain %p has no segment.", dom);
     //goto failure;
@@ -1197,8 +1197,8 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
   }
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
-  if (switch_domain(dom->domain_id, params->delta, exit_frame) != SUCCESS) {
-    params->error = 0;
+  params->error = 0;
+  if (switch_domain(dom->domain_id, params->delta, exit_frame, local_cpuid) != SUCCESS) {
     params->error = convert_exit_reason(exit_frame);
     if (params->error == REVOKED) {
       ERROR("The domain has been revoked!");
@@ -1212,7 +1212,6 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
     goto failure_unlock;
   }
 
-  // Update the exit frame.
   if (update_set_exit(dom, params->core, exit_frame) != SUCCESS) {
     ERROR("Unable to update the exit frame.");
     goto failure_unlock;

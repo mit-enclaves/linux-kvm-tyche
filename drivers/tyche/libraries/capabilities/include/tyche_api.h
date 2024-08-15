@@ -100,9 +100,10 @@ int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx,
 int tyche_get_domain_core_config(capa_index_t management, usize core, usize idx,
 				 usize *value);
 
-int tyche_alloc_core_context(capa_index_t management, usize core);
+int tyche_alloc_core_context(capa_index_t management, usize core,
+			     capa_index_t *trans);
 
-int tyche_seal(capa_index_t *transition, capa_index_t management);
+int tyche_seal(capa_index_t management);
 
 int tyche_segment_region(usize is_shared, capa_index_t capa,
 			 capa_index_t *to_send, capa_index_t *revoke,

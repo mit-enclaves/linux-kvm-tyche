@@ -76,7 +76,7 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end);
 /// Fails if all transition handles are used.
 /// TODO(aghosn) where is the core?
 int switch_domain(domain_id_t id, usize delta,
-		  usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
+		  usize exit_frame[TYCHE_EXIT_FRAME_SIZE], usize local_id);
 
 /// Delete a domain.
 /// This function goes through all the capabilities in the domain and revokes

@@ -337,35 +337,35 @@ failure:
   return FAILURE;
 }
 
-int tyche_alloc_core_context(capa_index_t management, usize core) {
+int tyche_alloc_core_context(capa_index_t management, usize core, capa_index_t* trans) {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_ALLOC_CORE_CONTEXT,
     .arg_1 = management,
     .arg_2 = core,
   };
+  if (trans == NULL) {
+    goto failure;
+  }
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   }
+  *trans = frame.value_1;
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
 
-int tyche_seal(capa_index_t* transition, capa_index_t management)
+int tyche_seal(capa_index_t management)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEAL_DOMAIN,
     .arg_1 = management,
   };
-  if (transition == NULL) {
-    goto failure;
-  }
 
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   }
-  *transition = frame.value_1;
   return SUCCESS;
 failure:
   return FAILURE;
