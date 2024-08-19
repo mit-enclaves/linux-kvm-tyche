@@ -55,6 +55,7 @@ typedef enum tyche_perm_value_t {
 	TYCHE_PERM_DUPLICATE = (1 << 2),
 	TYCHE_PERM_ALIAS = (1 << 3),
 	TYCHE_PERM_CARVE = (1 << 4),
+	TYCHE_PERM_CPUID = (1 << 5),
 } tyche_perm_value_t;
 
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
