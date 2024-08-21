@@ -329,6 +329,7 @@ int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_tyche_mmap);
 
 int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {

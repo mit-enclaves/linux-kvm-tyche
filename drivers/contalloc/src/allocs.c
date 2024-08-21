@@ -42,13 +42,13 @@ failure:
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
-void driver_init_allocs(void)
+void contalloc_init_allocs(void)
 {
   dll_init_list((&allocs));
 }
 
 
-int driver_create_alloc(driver_handle_t handle)
+int contalloc_create_alloc(driver_handle_t handle)
 {
   cont_alloc_t* alloc = find_alloc(handle);
   if (alloc != NULL) {
@@ -75,39 +75,8 @@ failure:
   return FAILURE;
 }
 
-static int driver_add_raw_segment(
-    cont_alloc_t *alloc,
-    usize va,
-    usize pa,
-    usize size)
+int contalloc_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
 {
-  mmem_t *segment = NULL;
-  if (alloc == NULL) {
-    ERROR("Provided alloc is null.");
-    goto failure;
-  }
-
-  segment = kmalloc(sizeof(mmem_t), GFP_KERNEL);
-  if (segment == NULL) {
-    ERROR("Unable to allocate a segment");
-    goto failure;
-  }
-  memset(segment, 0, sizeof(mmem_t));
-  segment->va = va;
-  segment->pa = pa;
-  segment->size = size;
-  dll_init_elem(segment, list);
-  dll_add(&(alloc->raw_segments), segment, list);
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
-{
-  void* allocation = NULL;
-  usize size = 0;
-  int order = 0;
   if (vma == NULL || alloc->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
@@ -125,49 +94,19 @@ int driver_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
     ERROR("Unable to find the right alloc.");
     goto failure;
   }
-
-  // Allocate a contiguous memory region.
-  size = vma->vm_end - vma->vm_start;
-  order = get_order(size);
-  if (order >= MAX_ORDER) {
-    ERROR("The requested size of: %llx has order %d while max order is %d",
-        size, order, MAX_ORDER);
-  }
-  allocation = alloc_pages_exact(size, GFP_KERNEL); 
-  if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages %llx.", size);
+  if (driver_tyche_mmap(&(alloc->raw_segments), vma) != SUCCESS) {
+    ERROR("Unable to mmap vma 0x%lx - 0x%lx", vma->vm_start, vma->vm_end);
     goto failure;
   }
-  memset(allocation, 0, size);
-  // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
-    char* mem = ((char*)allocation) + i * PAGE_SIZE;
-    SetPageReserved(virt_to_page((unsigned long)mem));
-  }
-
-  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
-  if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
-    ERROR("Unable to map the memory...");
-    goto fail_free_pages;
-  }
-
-  if (driver_add_raw_segment(
-        alloc, (usize) vma->vm_start, 
-        (usize) virt_to_phys(allocation), size) != SUCCESS) {
-    ERROR("Unable to allocate a segment");
-    goto fail_free_pages;
-  }
+  // We do not coalesce in kvm.
   return SUCCESS;
-fail_free_pages:
-  free_pages_exact(allocation, size);
 failure:
   return FAILURE;
 }
 
-int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize slot_id, usize* phys_offset)
+int contalloc_get_physoffset_alloc(cont_alloc_t *alloc, usize vaddr, usize* phys_offset)
 {
   mmem_t *seg = NULL;
-  usize slot_counter = 0;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -181,18 +120,17 @@ int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize slot_id, usize* phys_
     goto failure;
   }
   dll_foreach(&(alloc->raw_segments), seg, list) {
-    if (slot_counter == slot_id) {
-      *phys_offset = seg->pa;
+    if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
+      *phys_offset = seg->pa + (vaddr - seg->va);
       return SUCCESS;
     }
-    slot_counter++;
   }
-  ERROR("Failure to find the right memslot %lld.\n", slot_id);
+  ERROR("Failure to find the right memslot %lld.\n", vaddr);
 failure:
   return FAILURE;
 }
 
-int driver_delete_alloc(cont_alloc_t *alloc)
+int contalloc_delete_alloc(cont_alloc_t *alloc)
 {
   mmem_t* segment = NULL;
   usize size = 0;

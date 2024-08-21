@@ -68,7 +68,7 @@ int contalloc_register(void)
     goto r_device;
   }
 
-  driver_init_allocs();
+  contalloc_init_allocs();
   LOG("Tyche allocator driver registered!\n");
   trace_printk("Tyche driver initialized\n");
   return SUCCESS; 
@@ -97,7 +97,7 @@ int contalloc_open(struct inode* inode, struct file* file)
     ERROR("We received a Null file descriptor.");
     goto failure;
   }
-  if (driver_create_alloc(file) != SUCCESS) {
+  if (contalloc_create_alloc(file) != SUCCESS) {
     ERROR("Unable to create a new alloc");
     goto failure;
   }
@@ -109,7 +109,7 @@ failure:
 int contalloc_close(struct inode* inode, struct file* handle)
 {
   cont_alloc_t * alloc = find_alloc(handle);
-   if (alloc == NULL || driver_delete_alloc(alloc) != SUCCESS) {
+   if (alloc == NULL || contalloc_delete_alloc(alloc) != SUCCESS) {
         ERROR("Unable to delete the alloc %p", handle);
         goto failure;
     }
@@ -133,7 +133,7 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy from user.");
         goto failure;
       }
-      if (driver_get_physoffset_alloc(alloc, info.virtaddr, &info.physoffset) != SUCCESS) {
+      if (contalloc_get_physoffset_alloc(alloc, info.virtaddr, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for alloc %p", handle);
         goto failure;
       }
@@ -161,5 +161,5 @@ int contalloc_mmap(struct file *file, struct vm_area_struct *vma)
     ERROR("Unable to find alloc for handle %p", file);
     return FAILURE;
   }
-  return driver_mmap_alloc(alloc, vma);
+  return contalloc_mmap_alloc(alloc, vma);
 }

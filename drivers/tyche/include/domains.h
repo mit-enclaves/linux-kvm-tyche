@@ -154,6 +154,10 @@ int driver_get_mgmt_capa(driver_domain_t *domain, capa_index_t *capa);
 /// @warning: expects the domain to be w-locked.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
+/// Mmaps a raw segment from a vm.
+/// This function is also called from contalloc.
+int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct *vma);
+
 /// Add a raw memory segment to the list.
 /// @warning: expects the domain to be w-locked.
 int driver_add_raw_segment(segment_list_t *l, usize va, usize pa, usize size);
