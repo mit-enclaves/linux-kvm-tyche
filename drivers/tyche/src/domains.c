@@ -1,4 +1,5 @@
 #include "arch_cache.h"
+#include "asm/page_types.h"
 #include "dll.h"
 #include "linux/nmi.h"
 #include "linux/rwsem.h"
@@ -134,6 +135,13 @@ failure:
   return NULL;
 }
 
+static void dump_list(segment_list_t* l) {
+  segment_t* iter = NULL;
+  dll_foreach(l, iter, list) {
+    printk(KERN_ERR "[0x%llx, 0x%llx] -> [0x%llx, 0x%llx]", iter->va, iter->va + iter->size,
+        iter->pa, iter->pa + iter->size);
+  }
+}
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
@@ -227,6 +235,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
+  unsigned long vaddr = 0, max_size = 0x400000;
   int order;
   if (vma == NULL || dom->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
@@ -260,49 +269,42 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
   // If the order of the size requested is too big, fail.
   // This should be handled inside the loader, not the driver.
   size = vma->vm_end - vma->vm_start;
-  order = get_order(size);
-  if (order >= MAX_ORDER) {
-    ERROR("The requested size of: %llx has order %d while max order is %d",
-        size, order, MAX_ORDER);
-    goto failure;
-  }
-  allocation = alloc_pages_exact(size, GFP_KERNEL); 
-  if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", size);
-    goto failure;
-  }
-  memset(allocation, 0, size);
-  // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
-    char* mem = ((char*)allocation) + i * PAGE_SIZE;
-    SetPageReserved(virt_to_page((unsigned long)mem));
-  }
-
-  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
-  if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
-    ERROR("Unable to map the memory...");
-    goto fail_free_pages;
-  }
-
-  if (driver_add_raw_segment(
-        dom, (usize) vma->vm_start, 
-        (usize) virt_to_phys(allocation), size) != SUCCESS) {
-    ERROR("Unable to allocate a segment");
-    goto fail_free_pages;
+  vaddr = vma->vm_start;
+  while (vaddr < vma->vm_end) {
+    usize left_to_map = vma->vm_end - vaddr, to_map = 0;
+    unsigned long pfn = 0;
+    order = get_order(left_to_map);
+    to_map = (order < MAX_ORDER)? left_to_map : max_size;
+    allocation = alloc_pages_exact(to_map, GFP_KERNEL);
+    if (allocation == NULL) {
+      ERROR("alloc_pages_exact failed to allocated %llu bytes", to_map);
+      goto failure;
+    }
+    memset(allocation, 0, to_map);
+    for (int i = 0; i < (to_map/PAGE_SIZE); i++) {
+      char* mem = ((char*)allocation) + i * PAGE_SIZE;
+      SetPageReserved(virt_to_page((unsigned long)mem));
+    }
+    pfn = virt_to_phys(allocation) >> PAGE_SHIFT;
+    if (remap_pfn_range(vma, vaddr, pfn, to_map, vma->vm_page_prot) < 0) {
+      ERROR("remap_pfn_range failed with vaddr %lx, pfn %lx, size %llx",
+          vaddr, pfn, to_map);
+      goto failure;
+    }
+    // Add the segment to the domain.
+    if (driver_add_raw_segment(
+        dom, (usize) vaddr,
+        (usize) virt_to_phys(allocation), to_map) != SUCCESS) {
+      ERROR("Unable to allocate a segment");
+      goto failure;
+    }
+    /* Update the vaddr */
+    vaddr += to_map;
+    allocation = NULL;
   }
   return SUCCESS;
-fail_free_pages:
-  free_pages_exact(allocation, size);
 failure:
   return FAILURE;
-}
-
-static void dump_list(segment_list_t* l) {
-  segment_t* iter = NULL;
-  dll_foreach(l, iter, list) {
-    printk(KERN_NOTICE "[%llx, %llx] -> [%llx, %llx]", iter->va, iter->va + iter->size,
-        iter->pa, iter->pa + iter->size);
-  }
 }
 
 static int check_coalesce(driver_domain_t* dom, bool raw)
@@ -391,7 +393,7 @@ int driver_add_raw_segment(
           segment->va, (segment->va + segment->size))) {
       goto failure_free;
     }
-    // curr is first.
+    // curr is last and we come after..
     if (curr->va + curr->size <= segment->va && curr->list.next == NULL) {
       dll_add_after(&(dom->raw_segments), segment, list, curr);
       break;
@@ -440,11 +442,19 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize vaddr, usize* phys_
   // We expect to have a r-lock on the domain.
   CHECK_RLOCK(dom, failure);
 
-  if (dll_is_empty(&(dom->raw_segments))) {
+  if (dll_is_empty(&(dom->raw_segments)) && dll_is_empty(&(dom->segments))) {
     ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
   }
+  // Check the raw segments.
   dll_foreach(&(dom->raw_segments), seg, list) {
+    if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
+      *phys_offset = seg->pa + (vaddr - seg->va);
+      return SUCCESS;
+    }
+  }
+  // Check the segments.
+  dll_foreach(&(dom->segments), seg, list) {
     if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
       *phys_offset = seg->pa + (vaddr - seg->va);
       return SUCCESS;
@@ -627,8 +637,8 @@ int driver_mprotect_domain(
     goto failure;
   }
 
-  DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
-      domain, vstart, vstart + size);
+  DEBUG("Mprotect success  start: %llx, end: %llx",
+      vstart, vstart + size);
   return SUCCESS;
 failure:
   return FAILURE;
@@ -848,10 +858,11 @@ int driver_commit_regions(driver_domain_t *dom)
     ERROR("The domain %p is already committed.", dom);
     goto failure;
   }*/
- /* if (!dll_is_empty(&(dom->raw_segments))) {
-    ERROR("The domain %p's memory is not correctly initialized.", dom);
+  if (!dll_is_empty(&(dom->raw_segments))) {
+    ERROR("The domain still has raw segments");
+    dump_list(&(dom->raw_segments));
     goto failure;
-  }*/
+  }
   if (dll_is_empty(&dom->segments)) {
     ERROR("Missing segments for domain %p", dom);
     goto failure;
@@ -960,8 +971,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     goto failure;
   }
   /*if (!dll_is_empty(&(dom->raw_segments))) {
-    ERROR("The domain %p's memory is not correctly initialized.", dom);
-    dump_list(&(dom->raw_segments));
+    ERROR("The domain still has raw segments at commit time");
     goto failure;
   }*/
   if (dll_is_empty(&dom->segments)) {
