@@ -256,7 +256,7 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		return SUCCESS;
 	}
 
-	if (driver_add_raw_segment(dom, user_addr, hfn << PAGE_SHIFT,
+	if (driver_add_raw_segment(&(dom->raw_segments), user_addr, hfn << PAGE_SHIFT,
 				   npages << PAGE_SHIFT) != SUCCESS) {
 		ERROR("Unable to addr raw segment");
 		return FAILURE;

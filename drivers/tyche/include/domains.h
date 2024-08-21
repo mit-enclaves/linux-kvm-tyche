@@ -154,10 +154,9 @@ int driver_get_mgmt_capa(driver_domain_t *domain, capa_index_t *capa);
 /// @warning: expects the domain to be w-locked.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
-/// Add a raw memory segment to the domain.
+/// Add a raw memory segment to the list.
 /// @warning: expects the domain to be w-locked.
-int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
-			   usize size);
+int driver_add_raw_segment(segment_list_t *l, usize va, usize pa, usize size);
 
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.

@@ -1,6 +1,7 @@
 #include "arch_cache.h"
 #include "asm/page_types.h"
 #include "dll.h"
+#include "linux/export.h"
 #include "linux/nmi.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
@@ -231,83 +232,7 @@ failure:
   return FAILURE;
 }
 
-int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
-{
-  void* allocation = NULL;
-  usize size = 0;
-  unsigned long vaddr = 0, max_size = 0x400000;
-  int order;
-  if (vma == NULL || dom->handle == NULL) {
-    ERROR("The provided vma is null or handle is null.");
-    goto failure;
-  }
-  // Expect the domain to be w-locked.
-  CHECK_WLOCK(dom, failure);
-
-  // Checks on the vma.
-  if (vma->vm_end <= vma->vm_start) {
-    ERROR("End is smaller than start");
-    goto failure;
-  }
-  if (vma->vm_start % PAGE_SIZE != 0 || vma->vm_end % PAGE_SIZE != 0) {
-    ERROR("End or/and Start is/are not page-aligned.");
-    goto failure;
-  }
-  if (dom == NULL) {
-    ERROR("Unable to find the right domain.");
-    goto failure;
-  }
-
-  //TODO(aghosn): we accept adding segments.
-  /*
-  if (!dll_is_empty(&(dom->segments))) {
-    ERROR("The domain has already been initialized.");
-    goto failure;
-  }*/
-
-  // Allocate a contiguous memory region.
-  // If the order of the size requested is too big, fail.
-  // This should be handled inside the loader, not the driver.
-  size = vma->vm_end - vma->vm_start;
-  vaddr = vma->vm_start;
-  while (vaddr < vma->vm_end) {
-    usize left_to_map = vma->vm_end - vaddr, to_map = 0;
-    unsigned long pfn = 0;
-    order = get_order(left_to_map);
-    to_map = (order < MAX_ORDER)? left_to_map : max_size;
-    allocation = alloc_pages_exact(to_map, GFP_KERNEL);
-    if (allocation == NULL) {
-      ERROR("alloc_pages_exact failed to allocated %llu bytes", to_map);
-      goto failure;
-    }
-    memset(allocation, 0, to_map);
-    for (int i = 0; i < (to_map/PAGE_SIZE); i++) {
-      char* mem = ((char*)allocation) + i * PAGE_SIZE;
-      SetPageReserved(virt_to_page((unsigned long)mem));
-    }
-    pfn = virt_to_phys(allocation) >> PAGE_SHIFT;
-    if (remap_pfn_range(vma, vaddr, pfn, to_map, vma->vm_page_prot) < 0) {
-      ERROR("remap_pfn_range failed with vaddr %lx, pfn %lx, size %llx",
-          vaddr, pfn, to_map);
-      goto failure;
-    }
-    // Add the segment to the domain.
-    if (driver_add_raw_segment(
-        dom, (usize) vaddr,
-        (usize) virt_to_phys(allocation), to_map) != SUCCESS) {
-      ERROR("Unable to allocate a segment");
-      goto failure;
-    }
-    /* Update the vaddr */
-    vaddr += to_map;
-    allocation = NULL;
-  }
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-static int check_coalesce(driver_domain_t* dom, bool raw)
+int driver_tyche_check_coalesce(driver_domain_t* dom, bool raw)
 {
   segment_list_t* l = NULL;
   segment_t* curr = NULL;
@@ -354,22 +279,114 @@ static int check_coalesce(driver_domain_t* dom, bool raw)
 failure:
   return FAILURE;
 }
+EXPORT_SYMBOL(driver_tyche_check_coalesce);
 
-//TODO: attempt to keep things ordered and merge when possible?
+int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
+{
+  void* allocation = NULL;
+  usize size = 0;
+  unsigned long vaddr = 0, max_size = 0x400000;
+  int order;
+  if (vma == NULL || raw == NULL) {
+    ERROR("Arguments are null.");
+    goto failure;
+  }
+  size = vma->vm_end - vma->vm_start;
+  vaddr = vma->vm_start;
+  while (vaddr < vma->vm_end) {
+    usize left_to_map = vma->vm_end - vaddr, to_map = 0;
+    unsigned long pfn = 0;
+    order = get_order(left_to_map);
+    to_map = (order < MAX_ORDER)? left_to_map : max_size;
+    allocation = alloc_pages_exact(to_map, GFP_KERNEL);
+    if (allocation == NULL) {
+      ERROR("alloc_pages_exact failed to allocated %llu bytes", to_map);
+      goto failure;
+    }
+    memset(allocation, 0, to_map);
+    for (int i = 0; i < (to_map/PAGE_SIZE); i++) {
+      char* mem = ((char*)allocation) + i * PAGE_SIZE;
+      SetPageReserved(virt_to_page((unsigned long)mem));
+    }
+    pfn = virt_to_phys(allocation) >> PAGE_SHIFT;
+    if (remap_pfn_range(vma, vaddr, pfn, to_map, vma->vm_page_prot) < 0) {
+      ERROR("remap_pfn_range failed with vaddr %lx, pfn %lx, size %llx",
+          vaddr, pfn, to_map);
+      goto failure;
+    }
+    // Add the segment to the domain.
+    if (driver_add_raw_segment(
+        raw, (usize) vaddr,
+        (usize) virt_to_phys(allocation), to_map) != SUCCESS) {
+      ERROR("Unable to allocate a segment");
+      goto failure;
+    }
+    /* Update the vaddr */
+    vaddr += to_map;
+    allocation = NULL;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
+{
+  if (vma == NULL || dom->handle == NULL) {
+    ERROR("The provided vma is null or handle is null.");
+    goto failure;
+  }
+  // Expect the domain to be w-locked.
+  CHECK_WLOCK(dom, failure);
+
+  // Checks on the vma.
+  if (vma->vm_end <= vma->vm_start) {
+    ERROR("End is smaller than start");
+    goto failure;
+  }
+  if (vma->vm_start % PAGE_SIZE != 0 || vma->vm_end % PAGE_SIZE != 0) {
+    ERROR("End or/and Start is/are not page-aligned.");
+    goto failure;
+  }
+  if (dom == NULL) {
+    ERROR("Unable to find the right domain.");
+    goto failure;
+  }
+
+  //TODO(aghosn): we accept adding segments.
+  /*
+  if (!dll_is_empty(&(dom->segments))) {
+    ERROR("The domain has already been initialized.");
+    goto failure;
+  }*/
+
+  if (driver_tyche_mmap(&(dom->raw_segments), vma) != SUCCESS) {
+    ERROR("Unable to mmap vma 0x%lx - 0x%lx", vma->vm_start, vma->vm_end);
+    goto failure;
+  }
+
+  /* Attempt a cleanup of the domain.*/
+  if (driver_tyche_check_coalesce(dom, true) != SUCCESS) {
+    ERROR("Something went wrong with check and coalesce.\n");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int driver_add_raw_segment(
-    driver_domain_t *dom,
+    segment_list_t *segments,
     usize va,
     usize pa,
     usize size)
 {
   segment_t *segment = NULL;
   segment_t *curr = NULL;
-  if (dom == NULL) {
+  if (segments == NULL) {
     ERROR("Provided domain is null.");
     goto failure;
   }
-  // Expects to be w-locked.
-  CHECK_WLOCK(dom, failure);
 
   segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
   if (segment == NULL) {
@@ -383,24 +400,24 @@ int driver_add_raw_segment(
   segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
 
-  if (dll_is_empty(&(dom->raw_segments))) {
-    dll_add(&(dom->raw_segments), segment, list);
+  if (dll_is_empty(segments)) {
+    dll_add(segments, segment, list);
     goto finish;
   }
 
-  dll_foreach(&(dom->raw_segments), curr, list) {
+  dll_foreach(segments, curr, list) {
     if (dll_overlap(curr->va, (curr->va + curr->size),
           segment->va, (segment->va + segment->size))) {
       goto failure_free;
     }
     // curr is last and we come after..
     if (curr->va + curr->size <= segment->va && curr->list.next == NULL) {
-      dll_add_after(&(dom->raw_segments), segment, list, curr);
+      dll_add_after(segments, segment, list, curr);
       break;
     }
 
     if ((segment->va + segment->size) <= curr->va) {
-      dll_add_before(&(dom->raw_segments), segment, list, curr);
+      dll_add_before(segments, segment, list, curr);
       break;
     }
   }
@@ -412,11 +429,11 @@ int driver_add_raw_segment(
   }
 
   // check and coalesce the list.
-  if (check_coalesce(dom, true) != SUCCESS) {
+  /*if (check_coalesce(dom, true) != SUCCESS) {
     ERROR("Something went wrong with check and coalesce\n."
         "While attempting to add %llx -> %llx", va, va+size);
     goto failure;
-  }
+  }*/
 
 finish:
   return SUCCESS;
@@ -632,7 +649,7 @@ int driver_mprotect_domain(
     }
   }
 
-  if (check_coalesce(dom, false) != SUCCESS) {
+  if (driver_tyche_check_coalesce(dom, false) != SUCCESS) {
     ERROR("Problem coalescing non-raw segments.");
     goto failure;
   }
