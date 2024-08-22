@@ -86,11 +86,14 @@ int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value)
 		goto failure;
 	}
 
+	ACQUIRE_DOM(kvm_vmx->domain, true);
 	if (driver_set_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id,
 					  idx, value) != SUCCESS) {
 		ERROR("Unable to set the domain core config");
+		RELEASE_DOM(kvm_vmx->domain, true);
 		goto failure;
 	}
+	RELEASE_DOM(kvm_vmx->domain, true);
 	return SUCCESS;
 failure:
 	// TODO error here?
@@ -108,12 +111,14 @@ usize read_domain_config(struct vcpu_vmx *vmx, usize idx)
 		ERROR("The tyche domain is null");
 		goto failure;
 	}
+	ACQUIRE_DOM(kvm_vmx->domain, false);
 	if (driver_get_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id,
 					  idx, &value) != SUCCESS) {
 		ERROR("Unable to get the domain core config.");
-		BUG_ON(1);
+		RELEASE_DOM(kvm_vmx->domain, false);
 		goto failure;
 	}
+	RELEASE_DOM(kvm_vmx->domain, false);
 	return value;
 failure:
 	printk(KERN_ERR "Failed to read domain configuration.\n");
@@ -241,7 +246,7 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		       usize gfn, usize npages, segment_type_t tpe,
 		       memory_access_right_t rights)
 {
-
+	segment_t* seg = NULL;
 	// Special case for PIPEs.
 	if (tpe == PIPE) {
 		usize pipe_id = 0;
@@ -254,6 +259,25 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 			return FAILURE;
 		}
 		return SUCCESS;
+	}
+
+	//Manually lock the domain here to ensure that we can check the queues.
+	down_write(&(dom->rwlock));
+	// Check if the segment exists
+	dll_foreach(&(dom->raw_segments), seg, list) {
+		if (seg->va == user_addr && seg->pa == (hfn << PAGE_SHIFT) &&
+				seg->size == (npages << PAGE_SHIFT)) {
+			//TODO that's weird, let's skip?
+			goto unlock;
+		}
+	}
+	dll_foreach(&(dom->segments), seg, list) {
+		if (seg->va == user_addr && seg->pa == (hfn << PAGE_SHIFT) &&
+				seg->alias == (gfn << PAGE_SHIFT) && seg->size == (npages << PAGE_SHIFT)
+				&& seg->state == DRIVER_COMMITED) {
+			//TODO found it.
+			goto unlock;
+		}
 	}
 
 	if (driver_add_raw_segment(&(dom->raw_segments), user_addr, hfn << PAGE_SHIFT,
@@ -272,6 +296,8 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 		ERROR("Unable to mprotect the segment.");
 		return FAILURE;
 	}
+unlock:
+	up_write(&(dom->rwlock));
 
 	/*pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d | prot: %d\n",
 	       hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe,
@@ -452,8 +478,7 @@ map_segment:
 			fault->slot->base_gfn, fault->slot->npages, tpe,
 			rights) != SUCCESS) {
 		pr_err("Map segment failed.\n");
-		ret = RET_PF_INVALID;
-		BUG_ON(1);
+		ret = RET_PF_RETRY;
 		goto unlock;
 	}
 unlock:
@@ -464,12 +489,18 @@ unlock:
 /// Delete the domain regions. There is a write lock on kvm->mmu_lock.
 int tyche_delete_regions(struct kvm *kvm)
 {
+	int ret = FAILURE;
 	struct kvm_vmx *vmx = to_kvm_vmx(kvm);
 	if (vmx->domain == NULL) {
 		ERROR("Domain is null!");
 		return FAILURE;
 	}
-	return driver_delete_domain_regions(vmx->domain);
+
+	// Manually lock the memory regions.
+	down_write(&(vmx->domain->rwlock));
+	ret = driver_delete_domain_regions(vmx->domain);
+	up_write(&(vmx->domain->rwlock));
+	return ret;
 }
 
 /// Assume this is locked.

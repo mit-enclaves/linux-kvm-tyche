@@ -650,10 +650,10 @@ int driver_mprotect_domain(
     }
   }
 
-  if (driver_tyche_check_coalesce(dom, false) != SUCCESS) {
+  /*if (driver_tyche_check_coalesce(dom, false) != SUCCESS) {
     ERROR("Problem coalescing non-raw segments.");
     goto failure;
-  }
+  }*/
 
   DEBUG("Mprotect success  start: %llx, end: %llx",
       vstart, vstart + size);

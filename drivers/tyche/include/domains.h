@@ -162,6 +162,9 @@ int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct *vma);
 /// @warning: expects the domain to be w-locked.
 int driver_add_raw_segment(segment_list_t *l, usize va, usize pa, usize size);
 
+/// Coalesces a domain's segment list (raw for raw segments).
+int driver_tyche_check_coalesce(driver_domain_t *dom, bool raw);
+
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
 /// @warning: expects the domain to be R-locked.

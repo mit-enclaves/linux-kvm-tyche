@@ -6134,11 +6134,14 @@ static int vmx_vcpu_pre_run(struct kvm_vcpu *vcpu)
 	}
 
 	//@aghosn: commit the domain if it is not commited yet.
+	ACQUIRE_DOM(kvm->domain, true);
 	if (kvm->domain->state != DRIVER_COMMITED &&
 	    (driver_commit_domain(kvm->domain, 0) != SUCCESS)) {
 		ERROR("Unable to commit the domain!\n");
+		RELEASE_DOM(kvm->domain, true);
 		return FAILURE;
 	}
+	RELEASE_DOM(kvm->domain, true);
 	return 1;
 }
 
@@ -7651,7 +7654,9 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	//This mapping has to be re-designed I think, should be done before disable interrupt.
 	write_all_gp_registers(vmx);
 	params.core = vcpu->vcpu_id;
+	ACQUIRE_DOM(vmx_kvm->domain, false);
 	vmx->fail = driver_switch_domain(vmx_kvm->domain, &params);
+	RELEASE_DOM(vmx_kvm->domain, false);
 	read_all_gp_registers(vmx);
 	vcpu->arch.cr2 = native_read_cr2();
 
@@ -7865,12 +7870,15 @@ static int vmx_vcpu_create(struct kvm_vcpu *vcpu)
 	vmx->vpid = allocate_vpid();
 
 	/// Create a context for this core.
+	ACQUIRE_DOM(vmx_kvm->domain, true);
 	if (driver_alloc_core_context(vmx_kvm->domain, vmx->vcpu.vcpu_id) !=
 	    SUCCESS) {
 		ERROR("Unable to allocated core context on %d",
 		      vmx->vcpu.vcpu_id);
+		RELEASE_DOM(vmx_kvm->domain, true);
 		return FAILURE;
 	}
+	RELEASE_DOM(vmx_kvm->domain, true);
 	/*
 	 * If PML is turned on, failure on enabling PML just results in failure
 	 * of creating the vcpu, therefore we can simplify PML logic (by
@@ -8682,10 +8690,10 @@ static void vmx_vm_destroy(struct kvm *kvm)
 	struct kvm_vmx *kvm_vmx = to_kvm_vmx(kvm);
 
 	// Delete the domain.
+	ACQUIRE_DOM(kvm_vmx->domain, true);
 	if (driver_delete_domain(kvm_vmx->domain) != SUCCESS) {
 		ERROR("Unable to delete the domain in kvm themis!");
 		BUG_ON(1);
-		;
 	}
 
 	free_pages((unsigned long)kvm_vmx->pid_table,

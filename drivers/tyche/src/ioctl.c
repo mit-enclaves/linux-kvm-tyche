@@ -250,6 +250,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         RELEASE_DOM(true);
         goto failure;
       }
+      /*We coalesce by default with tyche*/
+      if (driver_tyche_check_coalesce(domain, false) != SUCCESS) {
+        ERROR("Failure to coalesce after an mprotect");
+        RELEASE_DOM(true);
+        goto failure;
+      }
       RELEASE_DOM(true);
       break;
     case TYCHE_TRANSITION:
