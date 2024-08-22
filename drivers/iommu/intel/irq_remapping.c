@@ -24,6 +24,22 @@
 #include "../irq_remapping.h"
 #include "cap_audit.h"
 
+#ifndef NO_TYCHE
+#include "iommu_tyche_pv_wrapper.h"
+#undef readl
+#define readl(target) iommu_reg_readl(target)
+
+#undef dmar_readq
+#define dmar_readq(target) iommu_reg_readq(target)
+
+#undef writel
+//not a bug, type argument order is actually flipped
+#define writel(val, target) iommu_reg_writel(val, target)
+
+#undef dmar_writeq
+#define dmar_writeq(target, val) iommu_reg_writeq(val, target)
+#endif
+
 enum irq_mode {
 	IRQ_REMAPPING,
 	IRQ_POSTING,
@@ -1343,6 +1359,7 @@ static int intel_irq_remapping_alloc(struct irq_domain *domain,
 	up_read(&dmar_global_lock);
 	if (index < 0) {
 		pr_warn("Failed to allocate IRTE\n");
+		BUG();
 		kfree(data);
 		goto out_free_parent;
 	}

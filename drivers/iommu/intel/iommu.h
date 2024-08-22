@@ -10,6 +10,7 @@
 #ifndef _INTEL_IOMMU_H_
 #define _INTEL_IOMMU_H_
 
+#include "linux/spinlock_types_raw.h"
 #include <linux/types.h>
 #include <linux/iova.h>
 #include <linux/io.h>
@@ -429,24 +430,117 @@ struct qi_desc {
 	u64 qw3;
 };
 
-struct q_inval {
-	raw_spinlock_t  q_lock;
-	void		*desc;          /* invalidation queue */
-	int             *desc_status;   /* desc status */
-	int             free_head;      /* first free entry */
-	int             free_tail;      /* last free entry */
-	int             free_cnt;
-};
+//type definition is in linux/drivers/iommu/intel/q_inval_pv.c
+//we hide the type to prevent any accidental usage of its internal state
+typedef struct q_inval q_inval;
+
+
+/**
+ * @brief Initializes internal state.
+ * You still need to use qinval_enable_qi enable queued invalidation
+ * in the hardware
+ * 
+ * @param self Caller allocated, use `qinval_get_struct_bytes` for size
+ * @return int 0 on success
+ */
+int qinval_initialize(q_inval* self, struct intel_iommu* iommu);
+
+/**
+ * @brief Returns the number of bytes you need to allocate
+ * for a struct_inval ptr
+ * 
+ * @return size_t 
+ */
+size_t qinval_get_struct_bytes(void);
+
+/**
+ * @brief Activate queued invalidation feature in HW
+ * 
+ * @param self 
+ * @param iommu 
+ */
+void qinval_enable_qi(q_inval* self, struct intel_iommu* iommu);
+
+/**
+ * @brief Frees internal state. Caller still needs to free object
+ * itself
+ * 
+ * @param self 
+ */
+void qinval_free_inner(q_inval* self);
+
+/**
+ * @brief Reclaim all the submitted descriptors which have completed its work.
+ * 
+ * @param qi 
+ */
+void qinval_reclaim_free_desc(struct q_inval *self);
+
+
+/**
+ * @brief Reads the descriptor at the given offset.
+ * 
+ * @param self 
+ * @param offset in bytes from start of queue
+ * @return struct qi_desc 
+ */
+struct qi_desc qinval_read_desc(struct q_inval* self, int32_t offset);
+
+/**
+ * @brief Writes a new descriptor to the given offset
+ * 
+ * @param self 
+ * @param offset in bytes from start of queue
+ * @param value descriptor value to be written
+ */
+void qinval_write_desc(struct q_inval* self, int32_t offset, struct qi_desc* value);
+
+/**
+ * @brief Returns pointer to interal desc status buffer.
+ * Caller may write to this buffer, as it never travels to the para virt
+ * part on the HV side
+ * 
+ * @param self 
+ * @return int* pointer to internal buffer, ok to write to
+ */
+volatile int* qinval_desc_status_ptr(struct q_inval* self);
+
+/**
+ * @brief Returns pointer to state lock
+ * 
+ * @param self 
+ * @return raw_spinlock_t* 
+ */
+raw_spinlock_t* qinval_lock_ptr(struct q_inval* self);
+
+//These values need to be synced to the HW explictly via
+//the corresponding register writes. We keep a local copy
+//of the state for easier operation
+
+int qinval_get_free_head(struct q_inval* self);
+void qinval_set_free_head(struct q_inval* self, int value);
+
+int qinval_get_free_tail(struct q_inval* self);
+void qinval_set_free_tail(struct q_inval* self, int value);
+
+int qinval_get_free_cnt(struct q_inval* self);
+void qinval_set_free_cnt(struct q_inval* self, int value);
+
 
 struct dmar_pci_notify_info;
 
 #ifdef CONFIG_IRQ_REMAP
 /* 1MB - maximum possible interrupt remapping table size */
-#define INTR_REMAP_PAGE_ORDER	8
-#define INTR_REMAP_TABLE_REG_SIZE	0xf
+/*luca: With paravirt setup, we can oly support one page, as
+ * iommu stores this as start addr + size. Since we allocate the buffer
+ * inside dom0, we cannot guarantee that we have more than one 4KiB page
+ * of contiguous memory
+*/
+#define INTR_REMAP_PAGE_ORDER	0//8
+#define INTR_REMAP_TABLE_REG_SIZE	7//0xf // this goes to bits [3:0] in irta
 #define INTR_REMAP_TABLE_REG_SIZE_MASK  0xf
 
-#define INTR_REMAP_TABLE_ENTRIES	65536
+#define INTR_REMAP_TABLE_ENTRIES	(256)//65536
 
 struct irq_domain;
 

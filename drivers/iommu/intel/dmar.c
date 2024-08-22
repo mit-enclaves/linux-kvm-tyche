@@ -35,6 +35,23 @@
 #include "perf.h"
 #include "trace.h"
 
+/*Unless we built without Tyche support, use paravirt iommu interface*/
+#include "iommu_tyche_pv_wrapper.h"
+#ifndef NO_TYCHE
+#undef readl
+#define readl(target) iommu_reg_readl(target)
+
+#undef dmar_readq
+#define dmar_readq(target) iommu_reg_readq(target)
+
+#undef writel
+//no type, argument order is actually flipped
+#define writel(val, target) iommu_reg_writel(val, target)
+
+#undef dmar_writeq
+#define dmar_writeq(target, val) iommu_reg_writeq(val, target)
+#endif
+
 typedef int (*dmar_res_handler_t)(struct acpi_dmar_header *, void *);
 struct dmar_res_callback {
 	dmar_res_handler_t	cb[ACPI_DMAR_TYPE_RESERVED];
@@ -896,6 +913,9 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
 		return -EINVAL;
 	}
 
+	//This is a probing, step, we might call init multiple times, overwriting the previous one
+	//This code assumes that there will be only one iommu
+	iommu_tyche_pv_wrapper_init(addr);
 	cap = dmar_readq(addr + DMAR_CAP_REG);
 	ecap = dmar_readq(addr + DMAR_ECAP_REG);
 
@@ -980,6 +1000,7 @@ static int map_iommu(struct intel_iommu *iommu, u64 phys_addr)
 		err = -ENOMEM;
 		goto release;
 	}
+	iommu_tyche_pv_wrapper_init(iommu->reg);
 
 	iommu->cap = dmar_readq(iommu->reg + DMAR_CAP_REG);
 	iommu->ecap = dmar_readq(iommu->reg + DMAR_ECAP_REG);
@@ -1164,8 +1185,7 @@ static void free_iommu(struct intel_iommu *iommu)
 	}
 
 	if (iommu->qi) {
-		free_page((unsigned long)iommu->qi->desc);
-		kfree(iommu->qi->desc_status);
+		qinval_free_inner(iommu->qi);
 		kfree(iommu->qi);
 	}
 
@@ -1176,18 +1196,6 @@ static void free_iommu(struct intel_iommu *iommu)
 	kfree(iommu);
 }
 
-/*
- * Reclaim all the submitted descriptors which have completed its work.
- */
-static inline void reclaim_free_desc(struct q_inval *qi)
-{
-	while (qi->desc_status[qi->free_tail] == QI_DONE ||
-	       qi->desc_status[qi->free_tail] == QI_ABORT) {
-		qi->desc_status[qi->free_tail] = QI_FREE;
-		qi->free_tail = (qi->free_tail + 1) % QI_LENGTH;
-		qi->free_cnt++;
-	}
-}
 
 static const char *qi_type_string(u8 type)
 {
@@ -1219,7 +1227,7 @@ static void qi_dump_fault(struct intel_iommu *iommu, u32 fault)
 {
 	unsigned int head = dmar_readl(iommu->reg + DMAR_IQH_REG);
 	u64 iqe_err = dmar_readq(iommu->reg + DMAR_IQER_REG);
-	struct qi_desc *desc = iommu->qi->desc + head;
+	struct qi_desc desc = qinval_read_desc(iommu->qi, head);
 
 	if (fault & DMA_FSTS_IQE)
 		pr_err("VT-d detected Invalidation Queue Error: Reason %llx",
@@ -1232,18 +1240,18 @@ static void qi_dump_fault(struct intel_iommu *iommu, u32 fault)
 		       DMAR_IQER_REG_ICESID(iqe_err));
 
 	pr_err("QI HEAD: %s qw0 = 0x%llx, qw1 = 0x%llx\n",
-	       qi_type_string(desc->qw0 & 0xf),
-	       (unsigned long long)desc->qw0,
-	       (unsigned long long)desc->qw1);
+	       qi_type_string(desc.qw0 & 0xf),
+	       (unsigned long long)desc.qw0,
+	       (unsigned long long)desc.qw1);
 
 	head = ((head >> qi_shift(iommu)) + QI_LENGTH - 1) % QI_LENGTH;
 	head <<= qi_shift(iommu);
-	desc = iommu->qi->desc + head;
+	desc = qinval_read_desc(iommu->qi, head);
 
 	pr_err("QI PRIOR: %s qw0 = 0x%llx, qw1 = 0x%llx\n",
-	       qi_type_string(desc->qw0 & 0xf),
-	       (unsigned long long)desc->qw0,
-	       (unsigned long long)desc->qw1);
+	       qi_type_string(desc.qw0 & 0xf),
+	       (unsigned long long)desc.qw0,
+	       (unsigned long long)desc.qw1);
 }
 
 static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
@@ -1251,9 +1259,10 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	u32 fault;
 	int head, tail;
 	struct q_inval *qi = iommu->qi;
+	//2^shift is the size of a the descriptor
 	int shift = qi_shift(iommu);
 
-	if (qi->desc_status[wait_index] == QI_ABORT)
+	if (qinval_desc_status_ptr(qi)[wait_index] == QI_ABORT)
 		return -EAGAIN;
 
 	fault = readl(iommu->reg + DMAR_FSTS_REG);
@@ -1268,15 +1277,19 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	if (fault & DMA_FSTS_IQE) {
 		head = readl(iommu->reg + DMAR_IQH_REG);
 		if ((head >> shift) == index) {
-			struct qi_desc *desc = qi->desc + head;
+			struct qi_desc buf;
 
 			/*
 			 * desc->qw2 and desc->qw3 are either reserved or
 			 * used by software as private data. We won't print
 			 * out these two qw's for security consideration.
 			 */
-			memcpy(desc, qi->desc + (wait_index << shift),
-			       1 << shift);
+			//luca: 1 << shift: size of the descriptor
+			//luca: wait_index << shift : equal to wait_index * (1<<shift)
+			//i.e. skip wait_index many descriptors
+
+			buf = qinval_read_desc(qi, head + (wait_index << shift));
+			qinval_write_desc(qi, head, &buf);
 			writel(DMA_FSTS_IQE, iommu->reg + DMAR_FSTS_REG);
 			pr_info("Invalidation Queue Error (IQE) cleared\n");
 			return -EINVAL;
@@ -1298,12 +1311,12 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 		pr_info("Invalidation Time-out Error (ITE) cleared\n");
 
 		do {
-			if (qi->desc_status[head] == QI_IN_USE)
-				qi->desc_status[head] = QI_ABORT;
+			if (qinval_desc_status_ptr(qi)[head] == QI_IN_USE)
+				qinval_desc_status_ptr(qi)[head] = QI_ABORT;
 			head = (head - 2 + QI_LENGTH) % QI_LENGTH;
 		} while (head != tail);
 
-		if (qi->desc_status[wait_index] == QI_ABORT)
+		if (qinval_desc_status_ptr(qi)[wait_index] == QI_ABORT)
 			return -EAGAIN;
 	}
 
@@ -1356,52 +1369,52 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 restart:
 	rc = 0;
 
-	raw_spin_lock_irqsave(&qi->q_lock, flags);
+	raw_spin_lock_irqsave(qinval_lock_ptr(qi), flags);
 	/*
 	 * Check if we have enough empty slots in the queue to submit,
 	 * the calculation is based on:
 	 * # of desc + 1 wait desc + 1 space between head and tail
 	 */
-	while (qi->free_cnt < count + 2) {
-		raw_spin_unlock_irqrestore(&qi->q_lock, flags);
+	while (qinval_get_free_cnt(qi) < count + 2) {
+		raw_spin_unlock_irqrestore(qinval_lock_ptr(qi), flags);
 		cpu_relax();
-		raw_spin_lock_irqsave(&qi->q_lock, flags);
+		raw_spin_lock_irqsave(qinval_lock_ptr(qi), flags);
 	}
 
-	index = qi->free_head;
+	index = qinval_get_free_head(qi);
 	wait_index = (index + count) % QI_LENGTH;
 	shift = qi_shift(iommu);
 
 	for (i = 0; i < count; i++) {
 		offset = ((index + i) % QI_LENGTH) << shift;
-		memcpy(qi->desc + offset, &desc[i], 1 << shift);
-		qi->desc_status[(index + i) % QI_LENGTH] = QI_IN_USE;
+		qinval_write_desc(qi, offset, desc+i);
+		qinval_desc_status_ptr(qi)[(index + i) % QI_LENGTH] = QI_IN_USE;
 		trace_qi_submit(iommu, desc[i].qw0, desc[i].qw1,
 				desc[i].qw2, desc[i].qw3);
 	}
-	qi->desc_status[wait_index] = QI_IN_USE;
+	qinval_desc_status_ptr(qi)[wait_index] = QI_IN_USE;
 
 	wait_desc.qw0 = QI_IWD_STATUS_DATA(QI_DONE) |
 			QI_IWD_STATUS_WRITE | QI_IWD_TYPE;
 	if (options & QI_OPT_WAIT_DRAIN)
 		wait_desc.qw0 |= QI_IWD_PRQ_DRAIN;
-	wait_desc.qw1 = virt_to_phys(&qi->desc_status[wait_index]);
+	wait_desc.qw1 = virt_to_phys(&(qinval_desc_status_ptr(qi)[wait_index]));
 	wait_desc.qw2 = 0;
 	wait_desc.qw3 = 0;
 
 	offset = wait_index << shift;
-	memcpy(qi->desc + offset, &wait_desc, 1 << shift);
+	qinval_write_desc(qi, offset, &wait_desc);
 
-	qi->free_head = (qi->free_head + count + 1) % QI_LENGTH;
-	qi->free_cnt -= count + 1;
+	qinval_set_free_head(qi, (qinval_get_free_head(qi) + count + 1) % QI_LENGTH );
+	qinval_set_free_cnt(qi, qinval_get_free_cnt(qi) - (count + 1));
 
 	/*
 	 * update the HW tail register indicating the presence of
 	 * new descriptors.
 	 */
-	writel(qi->free_head << shift, iommu->reg + DMAR_IQT_REG);
+	writel(qinval_get_free_head(qi) << shift, iommu->reg + DMAR_IQT_REG);
 
-	while (qi->desc_status[wait_index] != QI_DONE) {
+	while (qinval_desc_status_ptr(qi)[wait_index] != QI_DONE) {
 		/*
 		 * We will leave the interrupts disabled, to prevent interrupt
 		 * context to queue another cmd while a cmd is already submitted
@@ -1413,16 +1426,16 @@ restart:
 		if (rc)
 			break;
 
-		raw_spin_unlock(&qi->q_lock);
+		raw_spin_unlock(qinval_lock_ptr(qi));
 		cpu_relax();
-		raw_spin_lock(&qi->q_lock);
+		raw_spin_lock(qinval_lock_ptr(qi));
 	}
 
 	for (i = 0; i < count; i++)
-		qi->desc_status[(index + i) % QI_LENGTH] = QI_DONE;
+		qinval_desc_status_ptr(qi)[(index + i) % QI_LENGTH] = QI_DONE;
 
-	reclaim_free_desc(qi);
-	raw_spin_unlock_irqrestore(&qi->q_lock, flags);
+	qinval_reclaim_free_desc(qi);
+	raw_spin_unlock_irqrestore(qinval_lock_ptr(qi), flags);
 
 	if (rc == -EAGAIN)
 		goto restart;
@@ -1656,24 +1669,18 @@ static void __dmar_enable_qi(struct intel_iommu *iommu)
 	u32 sts;
 	unsigned long flags;
 	struct q_inval *qi = iommu->qi;
-	u64 val = virt_to_phys(qi->desc);
 
-	qi->free_head = qi->free_tail = 0;
-	qi->free_cnt = QI_LENGTH;
-
-	/*
-	 * Set DW=1 and QS=1 in IQA_REG when Scalable Mode capability
-	 * is present.
-	 */
-	if (ecap_smts(iommu->ecap))
-		val |= (1 << 11) | 1;
-
+	qinval_set_free_head(qi, 0);
+	qinval_set_free_tail(qi, 0);
+	qinval_set_free_cnt(qi, QI_LENGTH);
+	
+	
 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
 
 	/* write zero to the tail reg */
 	writel(0, iommu->reg + DMAR_IQT_REG);
 
-	dmar_writeq(iommu->reg + DMAR_IQA_REG, val);
+	qinval_enable_qi(qi, iommu);
 
 	iommu->gcmd |= DMA_GCMD_QIE;
 	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
@@ -1692,7 +1699,6 @@ static void __dmar_enable_qi(struct intel_iommu *iommu)
 int dmar_enable_qi(struct intel_iommu *iommu)
 {
 	struct q_inval *qi;
-	struct page *desc_page;
 
 	if (!ecap_qis(iommu->ecap))
 		return -ENOENT;
@@ -1703,35 +1709,17 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	if (iommu->qi)
 		return 0;
 
-	iommu->qi = kmalloc(sizeof(*qi), GFP_ATOMIC);
+	iommu->qi = kmalloc(qinval_get_struct_bytes(), GFP_ATOMIC);
 	if (!iommu->qi)
 		return -ENOMEM;
 
 	qi = iommu->qi;
 
-	/*
-	 * Need two pages to accommodate 256 descriptors of 256 bits each
-	 * if the remapping hardware supports scalable mode translation.
-	 */
-	desc_page = alloc_pages_node(iommu->node, GFP_ATOMIC | __GFP_ZERO,
-				     !!ecap_smts(iommu->ecap));
-	if (!desc_page) {
+	if( qinval_initialize(qi, iommu)) {
 		kfree(qi);
 		iommu->qi = NULL;
 		return -ENOMEM;
 	}
-
-	qi->desc = page_address(desc_page);
-
-	qi->desc_status = kcalloc(QI_LENGTH, sizeof(int), GFP_ATOMIC);
-	if (!qi->desc_status) {
-		free_page((unsigned long) qi->desc);
-		kfree(qi);
-		iommu->qi = NULL;
-		return -ENOMEM;
-	}
-
-	raw_spin_lock_init(&qi->q_lock);
 
 	__dmar_enable_qi(iommu);
 

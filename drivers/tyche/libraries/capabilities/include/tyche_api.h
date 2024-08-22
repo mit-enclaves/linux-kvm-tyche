@@ -58,6 +58,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_SEND_REGION_REPEAT = 32,
 	TYCHE_SEND_DATA = 33,
 	TYCHE_GET_DATA = 34,
+	TYCHE_PV_IOMMU_CMD = 35,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -117,6 +118,43 @@ typedef union {
 	usize as_usize[3];
 	uint8_t as_bytes[3 * sizeof(usize)];
 } tyche_send_get_chunk_t;
+
+typedef union {
+	usize as_usize[5];
+	uint8_t as_bytes[5 * sizeof(usize)];
+} tyche_pv_iommu_in_out_buf_u;
+
+typedef struct {
+	tyche_pv_iommu_in_out_buf_u buf;
+	size_t written;
+} tyche_pv_iommu_arg_builder_t;
+
+void tyche_pv_iommu_arg_builder_init(tyche_pv_iommu_arg_builder_t *self);
+
+int tyche_pv_iommu_arg_builder_append_int32(tyche_pv_iommu_arg_builder_t *self,
+					  int32_t data);
+int tyche_pv_iommu_arg_builder_append_u32(tyche_pv_iommu_arg_builder_t *self,
+					  u32 data);
+int tyche_pv_iommu_arg_builder_append_u64(tyche_pv_iommu_arg_builder_t *self,
+					  u64 data);
+int tyche_pv_iommu_arg_builder_append_u8(tyche_pv_iommu_arg_builder_t *self, u8 data);
+
+enum tyche_pv_iommu_cmd {
+	/// Write u32 value
+	TYCHE_PVIOMMU_WRITEL = 0,
+	/// write u64 value
+	TYCHE_PVIOMMU_WRITEQ = 1,
+	/// read u32 value
+	TYCHE_PV_IOMMU_READL = 2,
+	/// read u64 value
+	TYCHE_PV_IOMMU_READQ = 3,
+	/// This will activate queued invalidation interface
+	TYCHE_PV_IOMMU_QI_INIT = 4,
+	/// Read QI Descritor
+	TYCHE_PV_IOMMU_QI_DESC_READ = 5,
+	/// Write QI Descriptor
+	TYCHE_PV_IOMMU_QI_DESC_WRITE = 6,
+};
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
@@ -178,5 +216,14 @@ int tyche_send_data(tyche_data_handle_t handle, uint8_t *data, size_t data_len,
 int tyche_send_all(uint8_t *data, size_t len, tyche_data_handle_t *out_handle);
 
 int tyche_get_all_data(tyche_data_handle_t handle, tyche_data_buf_t *recv_buf);
+
+/**
+ * @brief Execute command in PV IOMMU driver in tyche
+ * 
+ * @param in_arg input data
+ * @param out_results buffer for output data, may be NULL
+ * @return SUCCESS or FAILURE
+ */
+volatile int tyche_pv_iommu(enum tyche_pv_iommu_cmd, tyche_pv_iommu_in_out_buf_u *in_arg, tyche_pv_iommu_in_out_buf_u* out_results);
 
 #endif

@@ -906,3 +906,63 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
 #endif
   return result;
 }
+
+// ------------------------------- ParaVirt IOMMU -------------------------------------- //
+static int tyche_pv_iommu_arg_builder_append_untyped(tyche_pv_iommu_arg_builder_t*self, void* data, size_t bytes) {
+  size_t max_bytes = sizeof(self->buf);
+  size_t new_size = self->written + bytes;
+  if( new_size > max_bytes) {
+    LOG("overflow: have only %lu bytes, attempting to store %lu", max_bytes, new_size);
+    return FAILURE;
+  }
+  CROSS_MEMCPY(self->buf.as_bytes + self->written, data, bytes);
+  self->written += bytes;
+  return SUCCESS;  
+}
+
+void tyche_pv_iommu_arg_builder_init(tyche_pv_iommu_arg_builder_t *self) {
+  CROSS_MEMSET(self, 0, sizeof(*self));
+}
+
+int tyche_pv_iommu_arg_builder_append_int32(tyche_pv_iommu_arg_builder_t *self, int32_t data) {
+  return tyche_pv_iommu_arg_builder_append_untyped(self, (void*)&data,sizeof(data));
+}
+
+int tyche_pv_iommu_arg_builder_append_u32(tyche_pv_iommu_arg_builder_t *self, u32 data) {
+  return tyche_pv_iommu_arg_builder_append_untyped(self, (void*)&data,sizeof(data));
+}
+
+int tyche_pv_iommu_arg_builder_append_u64(tyche_pv_iommu_arg_builder_t *self, u64 data) {
+  return tyche_pv_iommu_arg_builder_append_untyped(self, (void*)&data,sizeof(data));
+}
+
+int tyche_pv_iommu_arg_builder_append_u8(tyche_pv_iommu_arg_builder_t *self, u8 data) {
+  return tyche_pv_iommu_arg_builder_append_untyped(self, (void*)&data,sizeof(data));
+}
+
+
+volatile int tyche_pv_iommu(enum tyche_pv_iommu_cmd command, tyche_pv_iommu_in_out_buf_u *in_arg, tyche_pv_iommu_in_out_buf_u* out_results) {
+	vmcall_frame_t frame = {
+		.vmcall = TYCHE_PV_IOMMU_CMD,
+		.arg_1 = command,
+		.arg_2 = in_arg->as_usize[0],
+		.arg_3 = in_arg->as_usize[1],
+		.arg_4 = in_arg->as_usize[2],
+		.arg_5 = in_arg->as_usize[3],
+		.arg_6 = in_arg->as_usize[4],
+	};
+
+	if (tyche_call(&frame)) {
+		return FAILURE;
+	}
+
+	if (out_results != NULL) {
+		out_results->as_usize[0] = frame.value_1;
+		out_results->as_usize[1] = frame.value_2;
+		out_results->as_usize[2] = frame.value_3;
+		out_results->as_usize[3] = frame.value_4;
+		out_results->as_usize[4] = frame.value_5;
+	}
+
+  return SUCCESS;
+}

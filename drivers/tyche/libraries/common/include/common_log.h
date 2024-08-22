@@ -36,7 +36,7 @@
 
 #define LOG(...)                                                       \
 	do {                                                           \
-		printk(KERN_NOTICE "[@%s:%d %s] ", __FILE__, __LINE__, \
+		printk(KERN_NOTICE "[@ %s:%d %s] ", __FILE__, __LINE__, \
 		       __func__);                                      \
 		printk(KERN_NOTICE __VA_ARGS__);                       \
 		printk("\n");                                          \
@@ -48,7 +48,7 @@
 
 #define ERROR(...)                                                             \
 	do {                                                                   \
-		printk(KERN_ERR "[@%s:%d %s] ", __FILE__, __LINE__, __func__); \
+		printk(KERN_ERR "[@ %s:%d %s] ", __FILE__, __LINE__, __func__); \
 		printk(KERN_ERR __VA_ARGS__);                                  \
 		printk("\n");                                                  \
 	} while (0);
@@ -74,7 +74,7 @@
 
 #define LOG(...)                                                          \
 	do {                                                              \
-		printf("[LOG @%s:%d %s] ", __FILE__, __LINE__, __func__); \
+		printf("[LOG %s:%d %s] ", __FILE__, __LINE__, __func__); \
 		printf(__VA_ARGS__);                                      \
 		printf("\n");                                             \
 	} while (0);
@@ -82,7 +82,7 @@
 #ifdef TYCHE_DEBUG
 #define DEBUG(...)                                                          \
 	do {                                                                \
-		printf("[DEBUG @%s:%d %s] ", __FILE__, __LINE__, __func__); \
+		printf("[DEBUG %s:%d %s] ", __FILE__, __LINE__, __func__); \
 		printf(__VA_ARGS__);                                        \
 		printf("\n");                                               \
 	} while (0);
@@ -94,7 +94,7 @@
 
 #define ERROR(...)                                                          \
 	do {                                                                \
-		printf("[ERROR @%s:%d %s] ", __FILE__, __LINE__, __func__); \
+		printf("[ERROR %s:%d %s] ", __FILE__, __LINE__, __func__); \
 		printf(__VA_ARGS__);                                        \
 		printf("\n");                                               \
 	} while (0);
