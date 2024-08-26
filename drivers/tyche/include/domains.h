@@ -269,4 +269,8 @@ int driver_find_pipe_from_hpa(usize *pipe_id, usize addr, usize size);
 /// Request tyche to serialize an atestation of the current state of the system
 /// into the provided buffer.
 int driver_serialize_attestation(char *addr, usize size, usize *written);
+
+// Request tyche to perform a selftest on the TPM and return info about the
+// manufacturer into the provided buffer
+int driver_tpm_selftest(char *addr, usize size, usize *written, usize *result);
 #endif /*__SRC_DOMAINS_H__*/

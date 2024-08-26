@@ -2035,3 +2035,10 @@ int driver_serialize_attestation(char *addr, usize size, usize *written) {
     return tyche_serialize_attestation(phys, size, written);
 }
 EXPORT_SYMBOL(driver_serialize_attestation);
+
+int driver_tpm_selftest(char *addr, usize size, usize *written, usize *result) {
+    usize phys = virt_to_phys(addr);
+    return tyche_tpm_selftest(phys, size, written, result);
+}
+
+EXPORT_SYMBOL(driver_tpm_selftest);
