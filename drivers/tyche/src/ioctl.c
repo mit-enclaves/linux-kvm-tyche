@@ -148,6 +148,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   attest_buffer_t attest_buff = {0, 0, 0};
   msg_switch_t switch_params = {0, 0, 0};
   capa_index_t mgmt_handle = 0;
+  tpm_selftest_buffer_t tpm_selftest_buff = {0, 0, 0, 0};
   char *buff;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
@@ -357,6 +358,39 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       RELEASE_DOM(true);
       //TODO(aghosn): do we need to get the physoffset?
+      break;
+    case TYCHE_TPM_INFO:
+      // Copy tpm_selftest struct into kernel buffer
+      if (copy_from_user(&tpm_selftest_buff, (tpm_selftest_buffer_t *) arg,
+          sizeof(tpm_selftest_buffer_t))) {
+        ERROR("Unable to copy the TPM selftest buffer");
+        goto failure;
+      }
+      // Limit potential size of TPM MFTR message
+      if (tpm_selftest_buff.size > 4096) {
+        tpm_selftest_buff.size = 4096;
+      }
+      // Allocate another buffer in kernel memory
+      buff = kmalloc(tpm_selftest_buff.size, GFP_KERNEL);
+      if (buff == NULL) {
+        ERROR("Failed to allocate buffer in kernel");
+        goto failure;
+      }
+      // Call the meat of our driver, which performs the Tyche syscall
+      if (driver_tpm_selftest(buff, tpm_selftest_buff.size, &tpm_selftest_buff.written, &tpm_selftest_buff.result) != SUCCESS) {
+        ERROR("Unable to perform TPM selftest");
+        goto failure;
+      }
+      // Copy TPM MFTR message back to userspace
+      if (copy_to_user((char *)tpm_selftest_buff.start, buff, tpm_selftest_buff.written)) {
+        ERROR("Unable to copy TPM mftr string");
+        goto failure;
+      }
+      // Copy TPM selftest struct back to userspace
+      if (copy_to_user((tpm_selftest_buffer_t *)arg, &tpm_selftest_buff, sizeof(tpm_selftest_buffer_t))) {
+        ERROR("Unable to copy the TPM selftest buffer");
+        goto failure;
+      }
       break;
     default:
       ERROR("The command is not valid! %d", cmd);

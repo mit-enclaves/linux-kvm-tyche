@@ -32,6 +32,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_GET_HPA = 24,
 	TYCHE_SET_CPUID_ENTRY = 26,
 	TYCHE_TEST_CALL = 30,
+	TYCHE_TPM_SELFTEST = 31,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
@@ -130,6 +131,8 @@ int tyche_serialize_attestation(usize addr, usize size, usize *written);
 
 int tyche_switch(capa_index_t *transition_handle, usize delta,
 		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
+
+int tyche_tpm_selftest(usize addr, usize size, usize *written, usize *result);
 
 int tyche_read_gp_registers(capa_index_t management, usize core,
 			    usize regs[TYCHE_GP_REGS_SIZE]);
