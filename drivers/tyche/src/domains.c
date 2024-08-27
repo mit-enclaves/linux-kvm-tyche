@@ -1,7 +1,10 @@
 #include "arch_cache.h"
+#include "asm-generic/memory_model.h"
 #include "asm/page_types.h"
+#include "asm/uaccess.h"
 #include "dll.h"
 #include "linux/export.h"
+#include "linux/gfp_types.h"
 #include "linux/nmi.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
@@ -376,6 +379,114 @@ failure:
   return FAILURE;
 }
 
+int tyche_internal_register_mmap(segment_list_t* raw, usize virtaddr, usize vsize)
+{
+  struct page **pages;
+  unsigned long start_addr, end_addr;
+  unsigned long page_count, i, idx_start;
+  unsigned long pfn_prev, pfn_curr, pfn_start;
+  int ret;
+  if (raw == NULL) {
+    ERROR("The raw segment list is null");
+    goto failure;
+  }
+  // Nothing to do if size is null.
+  if (vsize == 0) {
+    goto success;
+  }
+  // Check this is a valid address range.
+  if (!access_ok((void*) virtaddr, vsize)) {
+    ERROR("Invalid range of addresses");
+    goto failure;
+  }
+
+  // Go through the entire region and split physically contiguous ranges.
+  // Register each contiguous range as a raw segment in the domain.
+  // First we compute the number of pages (page_count).
+  // Then, we use linux to give us every page in the range.
+  // This process pins the pages in the address space.
+  // After that, we can go through the list of pages to find contiguous ranges.
+  start_addr = virtaddr & PAGE_MASK;
+  end_addr = (virtaddr + vsize + PAGE_SIZE -1) & PAGE_MASK;
+  page_count = (end_addr - start_addr) >> PAGE_SHIFT;
+  pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
+  if (!pages) {
+    ERROR("Unable to allocate the pages.");
+    goto failure;
+  }
+  // This will pin the pages in the address space.
+  ret = get_user_pages_fast(virtaddr, page_count, 1, pages);
+  if (ret != page_count) {
+    ERROR("Unable to get user pages");
+    goto failure_free;
+  }
+
+  // Look for contiguous ranges.
+  pfn_prev = page_to_pfn(pages[0]);
+  pfn_start = pfn_prev;
+  idx_start = 0;
+  start_addr = virtaddr & PAGE_MASK;
+  for (i = 0; i < page_count; i++) {
+    pfn_curr = page_to_pfn(pages[i]);
+    // we have a split or we are the last entry.
+    if ((i != 0 && (pfn_curr != pfn_prev + 1)) || i == (page_count-1)) {
+      // Compute the end of the range (no -1 because we add the size of the page).
+      // We also need to account for the page at index i being included or not.
+      unsigned long incr = (i == (page_count -1))? 1 : 0;
+      unsigned long size = (i - idx_start + incr) * PAGE_SIZE;
+      if (driver_add_raw_segment(raw, (usize) start_addr,
+           (usize)(pfn_start << PAGE_SHIFT), size) != SUCCESS) {
+        ERROR("Unable to add raw segment.");
+        goto failure_free;
+      }
+      // Update the start.
+      start_addr = virtaddr + (i * PAGE_SIZE);
+      pfn_start = pfn_curr;
+      idx_start = i;
+    }
+    pfn_prev = pfn_curr;
+  }
+  // Unpin the pages now.
+  for (i = 0; i < page_count; i++) {
+    put_page(pages[i]);
+  }
+  kfree(pages);
+  // All done!
+success:
+  return SUCCESS;
+failure_free:
+  kfree(pages);
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(tyche_internal_register_mmap);
+
+int tyche_register_mmap(driver_domain_t* dom, usize virtaddr, usize vsize)
+{
+  if (dom == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  }
+  // Check we have the lock on the domain.
+  CHECK_WLOCK(dom, failure);
+
+  // Nothing to do if size is null.
+  if (vsize == 0) {
+    goto success;
+  }
+  // Call the internal function.
+  if (tyche_internal_register_mmap(&(dom->raw_segments), virtaddr, vsize)
+      != SUCCESS) {
+    ERROR("Unable to do the internal register mmap");
+    goto failure;
+  }
+
+success:
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int driver_add_raw_segment(
     segment_list_t *segments,
     usize va,
@@ -478,7 +589,7 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize vaddr, usize* phys_
       return SUCCESS;
     }
   }
-  ERROR("Failure to find the right memslot %lld.\n", vaddr);
+  ERROR("Failure to find the right memslot %llx.\n", vaddr);
 failure:
   return FAILURE;
 }
@@ -879,7 +990,7 @@ int driver_commit_regions(driver_domain_t *dom)
   if (!dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain still has raw segments");
     dump_list(&(dom->raw_segments));
-    goto failure;
+    //goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
     ERROR("Missing segments for domain %p", dom);

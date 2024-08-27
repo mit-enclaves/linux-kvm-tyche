@@ -41,6 +41,7 @@ typedef enum monitor_errors_t {
 typedef struct {
 	usize virtaddr;
 	usize physoffset;
+	usize size;
 } msg_info_t;
 
 /// Message type to add a new region.
@@ -117,5 +118,6 @@ typedef struct {
 #define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
 #define TYCHE_GET_MGMT_INDEX _IOW('a', 'r', capa_index_t *)
+#define TYCHE_REGISTER_REGION _IOWR('a', 's', msg_info_t *)
 
 #endif

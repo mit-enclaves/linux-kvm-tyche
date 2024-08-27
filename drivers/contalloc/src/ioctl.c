@@ -121,7 +121,7 @@ failure:
 
 long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_t info = {UNINIT_USIZE, UNINIT_USIZE};
+  msg_t info = {UNINIT_USIZE, UNINIT_USIZE, UNINIT_USIZE};
   cont_alloc_t *alloc = find_alloc(handle);
   if (alloc == NULL) {
     ERROR("Unable to find the alloc %p!\n", handle);
@@ -142,6 +142,16 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
             &info,
             sizeof(msg_t))) {
         ERROR("Unable to copy alloc physoffset for %p", handle);
+        goto failure;
+      }
+      break;
+    case CONTALLOC_REGISTER_MMAP:
+      if (copy_from_user(&info, (msg_t*)arg, sizeof(msg_t))) {
+        ERROR("Unable to copy from user.");
+        goto failure;
+      }
+      if (contalloc_register_mmap(alloc, info.virtaddr, info.size) != SUCCESS) {
+        ERROR("Unable to register the foreign region.");
         goto failure;
       }
       break;

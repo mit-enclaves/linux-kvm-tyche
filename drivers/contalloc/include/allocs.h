@@ -66,4 +66,7 @@ int contalloc_get_physoffset_alloc(cont_alloc_t *alloc, usize vaddr,
 				   usize *phys_offset);
 /// Delete the allocation.
 int contalloc_delete_alloc(cont_alloc_t *alloc);
+
+/// Register an mmap from linux.
+int contalloc_register_mmap(cont_alloc_t *alloc, usize vaddr, usize size);
 #endif /*__SRC_ALLOCS_H__*/

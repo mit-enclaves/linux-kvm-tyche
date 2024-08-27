@@ -158,6 +158,15 @@ int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 /// This function is also called from contalloc.
 int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct *vma);
 
+/// Internal implementation of registering a foreign mmap.
+int tyche_internal_register_mmap(segment_list_t *raw, usize virtaddr,
+				 usize vsize);
+
+/// Register a region mmaped by linux (not within the driver).
+/// Takes the domain, the virtaddr start and the virtual memory vsize.
+/// @warning: expects the domain to be w-locked.
+int tyche_register_mmap(driver_domain_t *dom, usize virtaddr, usize vsize);
+
 /// Add a raw memory segment to the list.
 /// @warning: expects the domain to be w-locked.
 int driver_add_raw_segment(segment_list_t *l, usize va, usize pa, usize size);

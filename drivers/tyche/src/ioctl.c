@@ -140,7 +140,7 @@ failure:
 
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
+  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE, UNINIT_USIZE};
   msg_mprotect_t mprotect = {0, 0, 0, 0};
   msg_set_perm_t perm = {0};
   driver_domain_t *domain = NULL;
@@ -160,7 +160,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       ACQUIRE_DOM(false);
       if (driver_get_physoffset_domain(domain, info.virtaddr, &info.physoffset) != SUCCESS) {
-        ERROR("Unable to get the physoffset for domain %p", handle);
+        ERROR("Unable to get the physoffset for domain at address %p", (void*) info.virtaddr);
         RELEASE_DOM(false);
         goto failure;
       }
@@ -344,6 +344,19 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy the management handle");
         goto failure;
       }
+      break;
+    case TYCHE_REGISTER_REGION:
+      ACQUIRE_DOM(true);
+      if (copy_from_user(&info, (msg_info_t*) arg, sizeof(msg_info_t))) {
+        ERROR("Unable to copy info arguments from user.");
+        goto failure;
+      }
+      if (tyche_register_mmap(domain, info.virtaddr, info.size) != SUCCESS) {
+        RELEASE_DOM(true);
+        goto failure;
+      }
+      RELEASE_DOM(true);
+      //TODO(aghosn): do we need to get the physoffset?
       break;
     default:
       ERROR("The command is not valid! %d", cmd);

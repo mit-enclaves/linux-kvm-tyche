@@ -1,3 +1,4 @@
+#include "domains.h"
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -155,6 +156,16 @@ int contalloc_delete_alloc(cont_alloc_t *alloc)
   dll_remove(&allocs, alloc, list);
   kfree(alloc);
   return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int contalloc_register_mmap(cont_alloc_t* alloc, usize vaddr, usize size) {
+  if (alloc == NULL) {
+    ERROR("The alloc is null");
+    goto failure;
+  }
+  return tyche_internal_register_mmap(&(alloc->raw_segments), vaddr, size);
 failure:
   return FAILURE;
 }
