@@ -27,8 +27,6 @@ dev_t dev = 0;
 static struct cdev tyche_cdev;
 static struct class *dev_class;
 
-//luca: tyche ioctl api
-
 // ———————————————————————————— File Operations ————————————————————————————— //
 
 // File operation structure
@@ -77,7 +75,6 @@ int tyche_register(void)
     goto r_device;
   }
 
-  LOG("Calling driver_init_domains");
   driver_init_domains();
   LOG("Tyche driver registered!\n");
   trace_printk("Tyche driver initialized\n");

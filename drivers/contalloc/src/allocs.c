@@ -21,11 +21,9 @@
 
 #include "tyche_api.h"
 
-//luca: this is the driver that kvm uses. the one before was the custom sdk stuff
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
-//luca: probably tracks active allocations
 static dll_list(cont_alloc_t, allocs);
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //
@@ -277,8 +275,7 @@ int contalloc_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
 		ERROR("failed to get HPAs for allocation");
 		goto fail_free_pages;
 	}
-	//TODO:make configureable
-	mmem_t_init(segment, 64);
+	mmem_t_init(segment, TYCHE_COLOR_COUNT);
 	fragment.color_id = 0;
 	fragment.gpa = virt_to_phys(allocation);
 	fragment.size = size;
@@ -296,7 +293,7 @@ failure:
 	return FAILURE;
 }
 
-//TODO: this broken with coloring
+//TODO: this is broken with coloring
 int driver_get_physoffset_alloc(cont_alloc_t *alloc, usize slot_id,
 				usize *phys_offset)
 {

@@ -19,7 +19,6 @@
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
 domain_t local_domain;
-//void serialize_access_rights(char *buffer, size_t buffer_size, const access_rights_t *access_rights) {
 
 // ------------------------ Public helper functions ------------------------- //
 void print_access_rights_t(access_rights_t *access_rights)
@@ -191,7 +190,6 @@ int create_domain(domain_id_t *id, int aliased) {
     goto fail_child_capa;
   }
 
-  //TODO: explore required capa change from here
   // Populate the capability.
   if (enumerate_capa(child_idx, NULL, child_capa) != SUCCESS) {
     ERROR("Failed to enumerate the newly created child.");
@@ -502,7 +500,7 @@ int cut_region(paddr_t start, usize size, access_rights_t rights,
   }
 
   //@aghosn: this is the new capa interface for regions.
-  //luca: for the prot, they did "flags >> 2" which is a shift of the "memory_access_right_t" type. why???
+  //luca: this is a hacky hidden type conversion between the access rights known to the Tyche API and our defintion of the access rights
   rights.flags = rights.flags >> 2;
   if (segment_region_capa(0, capa, to_send, revoke, start, end, rights) != SUCCESS) {
     ERROR("Unable to segment the region !");
@@ -525,7 +523,7 @@ int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke) {
     goto failure;
   }
   rights = capa->info.region.rights;
-  //TODO: luca: why do ne need to do this??
+  //luca: this is a hacky hidden type conversion between the access rights known to the Tyche API and our defintion of the access rights
   rights.flags = rights.flags >> 2;
   if (segment_region_capa(1, capa, dup, revoke, capa->info.region.start,
         capa->info.region.end, rights) != SUCCESS) {
@@ -551,7 +549,7 @@ int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
     ERROR("Unable to find the child");
     goto failure;
   }
-
+  //luca: this is a hacky hidden type conversion between the access rights known to the Tyche API and our defintion of the access rights
   rights.flags >>= 2;
   if (tyche_send_aliased(child->management->local_id, capa->local_id,
       0, capa->info.region.start,
@@ -614,10 +612,7 @@ int internal_carve_region(domain_id_t id, paddr_t start, paddr_t end, size_t col
     goto failure;
   }
 
-  //luca: I think think, here we check if the current domain has the CAPA that would be required
-  //for the carve. After
   // Now attempt to find the capability.
-  LOG("start hpa 0x%013llx end hpa 0x%013llx, colored_size 0x%lx", start, end, colored_size);
   dll_foreach(&(local_domain.capabilities), capa, list) {
     if (capa->capa_type != Region || (capa->info.region.rights.flags & MEM_ACTIVE) == 0) {
       continue;
@@ -648,7 +643,6 @@ int internal_carve_region(domain_id_t id, paddr_t start, paddr_t end, size_t col
     goto failure;
   }
 
-  //luca: Here we update the capability (locally and in tyche) but DO NOT yet transfer the ownership
   //@aghosn: this is the new capa interface for regions.
   rights_buf = rights_with_basic_access;
   rights_buf.flags = rights_buf.flags >> 2;
@@ -656,7 +650,7 @@ int internal_carve_region(domain_id_t id, paddr_t start, paddr_t end, size_t col
     ERROR("Unable to segment the region !");
     goto failure;
   }
-  //luca: here, we just to the ownership transfer. The splitting/updating has already been done in the previous
+  //luca: here, we just do the ownership transfer. The splitting/updating has already been done in the previous
   rights_buf = rights_with_send_access;
   rights_buf.flags = rights_buf.flags >> 2;
   if (tyche_send_aliased(child->management->local_id, to_send->local_id,

@@ -45,7 +45,7 @@
 #define dmar_readq(target) iommu_reg_readq(target)
 
 #undef writel
-//no type, argument order is actually flipped
+//no typo, argument order is actually flipped
 #define writel(val, target) iommu_reg_writel(val, target)
 
 #undef dmar_writeq

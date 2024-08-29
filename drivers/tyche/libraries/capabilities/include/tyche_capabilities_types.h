@@ -23,7 +23,6 @@
 
 #define ALL_CORES_MAP (~((usize)0))
 #define NO_CPU_SWITCH (~((usize)0))
-
 /// Internal definition of our types so we can move to 32 bits.
 typedef long long unsigned int paddr_t;
 

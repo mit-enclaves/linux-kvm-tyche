@@ -343,8 +343,6 @@ failure:
   return FAILURE;
 }
 
-//luca: this handles the TYCHE_MPROTECT ioctl. It seems like it only inserts the information into a
-//list which will be send to Tyche by another call.
 int driver_mprotect_domain(driver_domain_t *dom,
 			   usize vstart, //luca: N.B: still in vaddr space
 			   usize size, memory_access_right_t flags,
@@ -412,15 +410,10 @@ int driver_mprotect_domain(driver_domain_t *dom,
 		segment->tpe = tpe;
 		segment->alias = alias;
 		segment->state = DRIVER_NOT_COMMITED;
-    /*LOG("Using whole segment");
-    LOG("Deepcopy mmem_t, head->raw_mem = 0x%llx, segment->raw_mem 0x%llx", (uint64_t)head->raw_mem, (uint64_t)segment->raw_mem);*/
     mmem_t_deepcopy(head->raw_mem, segment->raw_mem);
 
-    //LOG("Remove segment from raw_segments list");
 		dll_remove(&(dom->raw_segments), head, list);
-    //LOG("Free raw_mem in removed head");
     mmem_t_free(*head->raw_mem);
-    //LOG("Free head");
 		kfree(head);
 	} else {//hard case: use only some fragments from the segment
 		if (_carve_from_segment_start(head->raw_mem, size,
@@ -640,8 +633,6 @@ failure:
 }
 EXPORT_SYMBOL(driver_alloc_core_context);
 
-//luca: this uses alias/carve to create the CAPAs for the previously recorded MPROTECT
-//requests
 int driver_commit_regions(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
@@ -809,8 +800,6 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   // We need to commit some of the configuration.
   if (full != 0) {
     //ERROR("Full is not 0");
-    //luca: this triggers the CAPA creation. Previously, we used mprotect calls
-    //to create a linked list with the memory protection that we want
     if (driver_commit_regions(dom) != SUCCESS) {
       ERROR("Failed to commit regions.");
       goto failure;

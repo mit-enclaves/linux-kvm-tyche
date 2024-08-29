@@ -136,7 +136,6 @@ long contalloc_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
     goto failure;
   }
   switch(cmd) {
-    //luca: add sth like get colors?
     case CONTALLOC_GET_PHYSOFFSET:
       if (copy_from_user(&info, (msg_t*)arg, sizeof(msg_t))) {
         ERROR("Unable to copy from user.");
@@ -203,6 +202,5 @@ int contalloc_mmap(struct file *file, struct vm_area_struct *vma)
     ERROR("Unable to find alloc for handle %p", file);
     return FAILURE;
   }
-  //return driver_mmap_alloc(alloc, vma);
   return global_alloc_backend.driver_mmap_alloc(alloc, vma);
 }
