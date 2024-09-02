@@ -487,40 +487,76 @@ failure:
   return FAILURE;
 }
 
-int driver_add_raw_segment(
-    segment_list_t *segments,
-    usize va,
-    usize pa,
-    usize size)
-{
-  segment_t *segment = NULL;
-  segment_t *curr = NULL;
-  if (segments == NULL) {
-    ERROR("Provided domain is null.");
-    goto failure;
-  }
-
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
+static segment_t* create_segment(usize va, usize hpa, usize size) {
+  segment_t *segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
   if (segment == NULL) {
     ERROR("Unable to allocate a segment");
     goto failure;
   }
   memset(segment, 0, sizeof(segment_t));
   segment->va = va;
-  segment->pa = pa;
+  segment->pa = hpa;
   segment->size = size;
   segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
+  return segment;
+failure:
+  return NULL;
+}
 
+static int translate_gpa_hpas(segment_list_t* res, usize va, usize gpa, usize size)
+{
+  usize curr_size = size, curr_gpa = gpa, curr_va = va;
+  if (res == NULL) {
+    ERROR("Result is null");
+    goto failure;
+  }
+  dll_init_list(res);
+  do {
+    usize hpa = 0, hpa_size = 0;
+    segment_t* seg = NULL;
+    if (tyche_get_hpa(curr_gpa, curr_size, &hpa, &hpa_size) != SUCCESS) {
+      ERROR("Call to monitor get hpa failed");
+      goto failure_free;
+    }
+    seg = create_segment(curr_va, hpa, hpa_size);
+    if (seg == NULL) {
+      ERROR("Unable to allocate segment");
+      goto failure_free;
+    }
+    // Add the segment.
+    dll_add(res, seg, list);
+    if (curr_size < hpa_size) {
+      ERROR("curr size is smaller than hpa_size")
+      goto failure_free;
+    }
+    curr_size -= hpa_size;
+    curr_va += hpa_size;
+  } while(curr_size > 0);
+  return SUCCESS;
+failure_free:
+  while(!dll_is_empty(res)) {
+    segment_t* seg = res->head;
+    dll_remove(res, seg, list);
+    kfree(seg);
+  }
+failure:
+  return FAILURE;
+}
+
+static int add_single_raw_segment(segment_list_t* segments, segment_t* segment)
+{
+  segment_t* curr = NULL;
+  // The list is empty.
   if (dll_is_empty(segments)) {
     dll_add(segments, segment, list);
     goto finish;
   }
-
+  // The list is not empty, we look for the right spot.
   dll_foreach(segments, curr, list) {
     if (dll_overlap(curr->va, (curr->va + curr->size),
           segment->va, (segment->va + segment->size))) {
-      goto failure_free;
+      goto failure;
     }
     // curr is last and we come after..
     if (curr->va + curr->size <= segment->va && curr->list.next == NULL) {
@@ -537,21 +573,48 @@ int driver_add_raw_segment(
   // We failed to insert.
   if (curr == NULL) {
     ERROR("Unable to find the correct position in the queue");
-    goto failure_free;
-  }
-
-  // check and coalesce the list.
-  /*if (check_coalesce(dom, true) != SUCCESS) {
-    ERROR("Something went wrong with check and coalesce\n."
-        "While attempting to add %llx -> %llx", va, va+size);
     goto failure;
-  }*/
+  }
 
 finish:
   return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_add_raw_segment(
+    segment_list_t *segments,
+    usize va,
+    usize pa,
+    usize size)
+{
+  segment_list_t to_add;
+  if (segments == NULL) {
+    ERROR("Provided domain is null.");
+    goto failure;
+  }
+  if (translate_gpa_hpas(&to_add, va, pa, size) != SUCCESS) {
+    ERROR("Failure to translate gpa to hpa");
+    goto failure;
+  }
+
+  while(!dll_is_empty(&to_add)) {
+    segment_t* seg = to_add.head;
+    dll_remove(&to_add, seg, list);
+    if (add_single_raw_segment(segments, seg) != SUCCESS) {
+      ERROR("Failure to add one segment.");
+      kfree(seg);
+      goto failure_free;
+    }
+  }
+  // All done.
+  return SUCCESS;
 failure_free:
-  ERROR("Segments overlap");
-  kfree(segment);
+  while(!dll_is_empty(&to_add)) {
+    segment_t* seg = to_add.head;
+    dll_remove(&to_add, seg, list);
+    kfree(seg);
+  }
 failure:
   return FAILURE;
 }

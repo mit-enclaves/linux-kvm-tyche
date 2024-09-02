@@ -714,3 +714,22 @@ int tyche_switch(capa_index_t* transition_handle, usize delta, usize exit_frame[
 #endif
   return result;
 }
+
+int tyche_get_hpa(usize gpa, usize gpa_size, usize* hpa, usize* hpa_size) {
+  vmcall_frame_t frame = {
+      .vmcall = TYCHE_GET_HPA,
+      .arg_1 = gpa,
+      .arg_2 = gpa_size,
+  };
+  if (hpa == NULL || hpa_size == NULL) {
+    goto failure;
+  }
+  if (tyche_call(&frame) != SUCCESS) {
+      goto failure;
+  }
+  *hpa = frame.value_1;
+  *hpa_size = frame.value_2;
+  return SUCCESS;
+failure:
+    return FAILURE;
+}

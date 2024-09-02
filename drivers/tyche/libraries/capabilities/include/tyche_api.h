@@ -29,6 +29,7 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_REVOKE_ALIASED_REGION = 21,
 	TYCHE_SERIALIZE_ATTESTATION = 22,
 	TYCHE_RETURN_TO_MANAGER = 23,
+	TYCHE_GET_HPA = 24,
 	TYCHE_TEST_CALL = 30,
 } tyche_monitor_call_t;
 
@@ -136,5 +137,7 @@ int tyche_write_fields(capa_index_t management, usize core, usize *fields,
 		       usize *values, int size);
 
 int tyche_duplicate(capa_index_t *new_capa, capa_index_t capa);
+
+int tyche_get_hpa(usize gpa, usize gpa_size, usize *hpa, usize *hpa_size);
 
 #endif
