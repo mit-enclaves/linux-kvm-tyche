@@ -558,13 +558,12 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
         start, end, is_repeat);
-    /*asm volatile (
-      "movq $11, %%rax\n\t"
-      "vmcall\n\t"
-      :
-      :
-      : "rax", "memory"
-        );*/
+    dll_foreach(&(local_domain.capabilities), capa, list) {
+      if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+        continue;
+      }
+      ERROR("Capa %lld: [s: %llx -- %llx | ar: %x]", capa->local_id, capa->info.region.start, capa->info.region.end, capa->info.region.flags);
+    }
     goto failure;
   }
 

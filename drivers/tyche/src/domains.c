@@ -532,6 +532,7 @@ static int translate_gpa_hpas(segment_list_t* res, usize va, usize gpa, usize si
     }
     curr_size -= hpa_size;
     curr_va += hpa_size;
+    curr_gpa += hpa_size;
   } while(curr_size > 0);
   return SUCCESS;
 failure_free:
@@ -1089,8 +1090,8 @@ int driver_commit_regions(driver_domain_t *dom)
               segment->pa,
               segment->size,
               segment->flags, segment->alias) != SUCCESS) {
-          ERROR("Unable to grant segment %llx -- %llx {%x}", segment->va,
-              segment->size, segment->flags);
+          ERROR("Unable to grant segment %llx -- %llx {%x} | pa: %llx alias: %llx", segment->va,
+              segment->size, segment->flags, segment->pa, segment->alias);
           goto failure;
         }
         break;

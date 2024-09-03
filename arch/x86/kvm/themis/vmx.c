@@ -15,6 +15,7 @@
 
 #include "asm/kvm_host.h"
 #include "domains.h"
+#include "tyche_api.h"
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
 #include <linux/kernel.h>
@@ -8023,7 +8024,7 @@ static int vmx_vm_init(struct kvm *kvm)
 		perms = ((kvm->type) >> 32) << 32;
 	else {
 		perms = TYCHE_PERM_SPAWN | TYCHE_PERM_SEND |
-			TYCHE_PERM_DUPLICATE;
+			TYCHE_PERM_DUPLICATE | TYCHE_PERM_CARVE | TYCHE_PERM_ALIAS;
 	}
 	if (driver_set_domain_configuration(
 		    vmx->domain, TYCHE_CONFIG_PERMISSIONS, perms) != SUCCESS) {
