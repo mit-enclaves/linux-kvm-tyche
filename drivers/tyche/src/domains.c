@@ -1499,6 +1499,7 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
   usize exit_frame[TYCHE_EXIT_FRAME_SIZE] = {0};
   usize gp_frame[TYCHE_GP_REGS_SIZE] = {0};
   int local_cpuid = 0;
+  int real_cpuid;
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
@@ -1526,6 +1527,8 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
   // This disables preemption to guarantee we remain on the same core after the
   // check.
   local_cpuid = get_cpu();
+  // Linux does not use the physical CPU IDs, so we need to do the conversion ourselfes
+  real_cpuid = tyche_cpu(local_cpuid);
   // Check we are on the right core.
   if (params->core != local_cpuid) {
     ERROR("Attempt to switch on core %lld from cpu %d", params->core, local_cpuid);
@@ -1555,7 +1558,7 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
   params->error = 0;
-  if (switch_domain(dom->domain_id, params->delta, exit_frame, local_cpuid) != SUCCESS) {
+  if (switch_domain(dom->domain_id, params->delta, exit_frame, real_cpuid) != SUCCESS) {
     params->error = convert_exit_reason(exit_frame);
     if (params->error == REVOKED) {
       ERROR("The domain has been revoked!");

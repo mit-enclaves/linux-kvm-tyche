@@ -4,6 +4,8 @@
 #ifdef _IN_MODULE
 #include <linux/ioctl.h>
 #include <linux/types.h>
+#include <linux/kernel.h>
+#include <linux/sched.h>
 #else
 #include <stdint.h>
 #include <sys/ioctl.h>
@@ -119,5 +121,23 @@ typedef struct {
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
 #define TYCHE_GET_MGMT_INDEX _IOW('a', 'r', capa_index_t *)
 #define TYCHE_REGISTER_REGION _IOWR('a', 's', msg_info_t *)
+
+// ———————————————————————————— CPU translation ————————————————————————————— //
+
+#ifdef _IN_MODULE
+
+/// Returns the physical CPU ID.
+///
+/// In Linux there are multiple CPU numbering scheme, and the one exposed to
+/// userspace is not the same as the one used by Tyche. This function returns
+/// the CPU ID used by Tyche from a Linux CPU ID.
+///
+/// TODO: for now we only have a x86 implementation
+static inline usize tyche_cpu(usize cpuid) {
+    // On x86 we use the APIC ID
+    return per_cpu(x86_cpu_to_apicid, cpuid);
+}
+
+#endif
 
 #endif
