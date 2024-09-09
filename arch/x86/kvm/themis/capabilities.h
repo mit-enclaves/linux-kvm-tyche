@@ -234,6 +234,8 @@ static inline bool cpu_has_vmx_shadow_vmcs(void)
 
 static inline bool cpu_has_vmx_encls_vmexit(void)
 {
+    // NOTE: let's just not use that with Tyche
+    return false;
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
 		SECONDARY_EXEC_ENCLS_EXITING;
 }
