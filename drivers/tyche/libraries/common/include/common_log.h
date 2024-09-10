@@ -32,7 +32,11 @@
 	} while (0);
 
 #define DEBUG(...) \
-	do {       \
+	do {                                                           \
+		printk(KERN_DEBUG "[@%s:%d %s] ", __FILE__, __LINE__, \
+		       __func__);                                      \
+		printk(KERN_DEBUG __VA_ARGS__);                       \
+		printk("\n");                                          \
 	} while (0);
 
 #define ERROR(...)                                                             \

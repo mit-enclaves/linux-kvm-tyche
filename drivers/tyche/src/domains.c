@@ -258,7 +258,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
 
-  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
+  LOG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
   if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
     ERROR("Unable to map the memory...");
     goto fail_free_pages;
@@ -416,8 +416,8 @@ int driver_mprotect_domain(
     head->pa += size;
     head->size -= size;
   } 
-  DEBUG("Mprotect success for domain %lld, start: %llx, end: %llx", 
-      domain, vstart, vstart + size);
+  LOG("Mprotect success for domain %lld, start: %llx, end: %llx", 
+      dom, vstart, vstart + size);
   return SUCCESS;
 failure:
   return FAILURE;
@@ -688,7 +688,7 @@ int driver_commit_regions(driver_domain_t *dom)
         goto failure;
     }
     segment->state = DRIVER_COMMITED;
-    DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
+    LOG("Registered segment with tyche: %llx -- %llx [%x]",
         segment->pa, segment->pa + segment->size, segment->tpe);
   }
   return SUCCESS;
@@ -817,7 +817,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
   // Mark the state of the domain as committed.
   dom->state = DRIVER_COMMITED;
   
-  DEBUG("Managed to seal domain %lld | dom %p", dom->domain_id, dom->handle);
+  LOG("Managed to seal domain %lld | dom %p", dom->domain_id, dom->handle);
   // We are all done!
   return SUCCESS;
 failure:
@@ -929,9 +929,11 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     goto failure_unlock;
   }
 
+
   // LOCK THE CORE CONTEXT.
   // Hold the lock until we return from the switch.
 
+  /* Deactivate for Rhino (no need to protect agaisnt side channels)
   // Let's flush the caches.
   if (flush_caches(dom, core) != SUCCESS) {
     ERROR("Unable to flush caches.");
@@ -940,6 +942,7 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
 
   // We can clear the cache now.
   cache_clear(&(dom->contexts[core]->cache), 1);
+  */
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
   if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {

@@ -696,6 +696,7 @@ int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
+  
 
   if (exit_frame == NULL) {
     ERROR("Exit frame is null.");
