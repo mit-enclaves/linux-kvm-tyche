@@ -67,6 +67,8 @@ typedef struct context_t {
 	arch_cache_t cache;
 } context_t;
 
+typedef dll_list(segment_t, segment_list_t);
+
 /// Describes an domain.
 typedef struct driver_domain_t {
 	/// The creator task's pid.
@@ -90,11 +92,11 @@ typedef struct driver_domain_t {
 	/// The available raw memory segments.
 	/// This is typically allocated during the mmap (from userspace),
 	/// or taken from KVM (kvm_memory_regions).
-	dll_list(segment_t, raw_segments);
+	segment_list_t raw_segments;
 
 	/// The initialized segments for the domain.
 	/// The access rights have been set.
-	dll_list(segment_t, segments);
+	segment_list_t segments;
 
 	/// Domains are stored in a global list by the driver.
 	dll_elem(struct driver_domain_t, list);
@@ -141,21 +143,41 @@ int driver_init_capabilities(void);
 /// If ptr is not null, it points to the newly created driver domain.
 int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr,
 			 int aliased);
+
+/// Get the management handle for the domain.
+/// Mostly for debugging.
+int driver_get_mgmt_capa(driver_domain_t *domain, capa_index_t *capa);
+
 /// Handles an mmap call to the driver.
 /// This reserves a contiguous region and registers it until a domain claims
 /// it.
 /// @warning: expects the domain to be w-locked.
 int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
-/// Add a raw memory segment to the domain.
+/// Mmaps a raw segment from a vm.
+/// This function is also called from contalloc.
+int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct *vma);
+
+/// Internal implementation of registering a foreign mmap.
+int tyche_internal_register_mmap(segment_list_t *raw, usize virtaddr,
+				 usize vsize);
+
+/// Register a region mmaped by linux (not within the driver).
+/// Takes the domain, the virtaddr start and the virtual memory vsize.
 /// @warning: expects the domain to be w-locked.
-int driver_add_raw_segment(driver_domain_t *dom, usize va, usize pa,
-			   usize size);
+int tyche_register_mmap(driver_domain_t *dom, usize virtaddr, usize vsize);
+
+/// Add a raw memory segment to the list.
+/// @warning: expects the domain to be w-locked.
+int driver_add_raw_segment(segment_list_t *l, usize va, usize pa, usize size);
+
+/// Coalesces a domain's segment list (raw for raw segments).
+int driver_tyche_check_coalesce(driver_domain_t *dom, bool raw);
 
 /// Returns the domain's physoffset.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
 /// @warning: expects the domain to be R-locked.
-int driver_get_physoffset_domain(driver_domain_t *domain, usize slot_id,
+int driver_get_physoffset_domain(driver_domain_t *domain, usize virt,
 				 usize *phys_offset);
 
 /// Sets up access rights and conf|share for the segment.
@@ -201,10 +223,11 @@ int driver_commit_domain_configuration(driver_domain_t *dom,
 /// @warning: requires a write lock on the domain.
 int driver_commit_domain(driver_domain_t *domain, int full);
 
-/// Implements the transition into a domain on specified core.
+/// Implements the transition into a domain with specified params (core, delta).
+/// It populates the error field in case of failure (return FAILURE).
 /// @warning: requires a R-lock on the domain. Will acquire a W-lock on the core
 /// we switch to.
-int driver_switch_domain(driver_domain_t *domain, usize core);
+int driver_switch_domain(driver_domain_t *domain, msg_switch_t *params);
 
 /// Delete the domain and revoke the capabilities.
 /// @warning: requires a W-lock on the domain.

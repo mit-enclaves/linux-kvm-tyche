@@ -57,6 +57,19 @@
 		}                                              \
 	} while (0);
 
+#define dll_add_before(list, elem, name, previous)             \
+	do {                                                   \
+		(elem)->name.next = (previous);                \
+		(elem)->name.prev = (previous)->name.prev;     \
+		(previous)->name.prev = (elem);                \
+		if ((elem)->name.prev != 0) {                  \
+			(elem)->name.prev->name.next = (elem); \
+		}                                              \
+		if ((list)->head == (previous)) {              \
+			(list)->head = elem;                   \
+		}                                              \
+	} while (0);
+
 #define dll_add_first(list, elem, name)                   \
 	do {                                              \
 		(elem)->name.prev = 0;                    \

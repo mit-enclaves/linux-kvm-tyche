@@ -2,6 +2,7 @@
 #include "linux/slab.h"
 #include "linux/uaccess.h"
 #include "tyche_api.h"
+#include "tyche_capabilities_types.h"
 #include <linux/ioctl.h>
 #include <linux/kernel.h>   /* printk() */
 #include <linux/cdev.h> 
@@ -139,12 +140,14 @@ failure:
 
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
+  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE, UNINIT_USIZE};
   msg_mprotect_t mprotect = {0, 0, 0, 0};
   msg_set_perm_t perm = {0};
   driver_domain_t *domain = NULL;
   msg_create_pipe_t pipe = {0};
   attest_buffer_t attest_buff = {0, 0, 0};
+  msg_switch_t switch_params = {0, 0, 0};
+  capa_index_t mgmt_handle = 0;
   char *buff;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
@@ -157,7 +160,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       ACQUIRE_DOM(false);
       if (driver_get_physoffset_domain(domain, info.virtaddr, &info.physoffset) != SUCCESS) {
-        ERROR("Unable to get the physoffset for domain %p", handle);
+        ERROR("Unable to get the physoffset for domain at address %p", (void*) info.virtaddr);
         RELEASE_DOM(false);
         goto failure;
       }
@@ -247,16 +250,30 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         RELEASE_DOM(true);
         goto failure;
       }
+      /*We coalesce by default with tyche*/
+      if (driver_tyche_check_coalesce(domain, false) != SUCCESS) {
+        ERROR("Failure to coalesce after an mprotect");
+        RELEASE_DOM(true);
+        goto failure;
+      }
       RELEASE_DOM(true);
       break;
     case TYCHE_TRANSITION:
+      if (arg == 0 || copy_from_user(&switch_params, (msg_switch_t*) arg, sizeof(msg_switch_t))) {
+        ERROR("Unable to copy msg switch arguments from user, arg is %ld.", arg);
+        goto failure;
+      }
       ACQUIRE_DOM(false);
-      if (driver_switch_domain(domain, arg) != SUCCESS) {
-        ERROR("Unable to switch to domain %p", handle);
+      if (driver_switch_domain(domain, &switch_params) != SUCCESS) {
+        DEBUG("Unconventional return from switch to domain %p", handle);
         RELEASE_DOM(false);
         goto failure;
       }
       RELEASE_DOM(false);
+      if (copy_to_user((msg_switch_t*)arg, &switch_params, sizeof(msg_switch_t))) {
+        ERROR("Unable to copy switch result to user.");
+        goto failure;
+      }
       break;
     case TYCHE_CREATE_PIPE:
       if (copy_from_user(&pipe, (msg_create_pipe_t*) arg,
@@ -314,6 +331,32 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy attestation results");
         goto failure;
       }
+      break;
+    case TYCHE_GET_MGMT_INDEX:
+      ACQUIRE_DOM(false);
+      if (driver_get_mgmt_capa(domain, &mgmt_handle) != SUCCESS) {
+        ERROR("Unable to get the mgmt capa");
+        RELEASE_DOM(false);
+        goto failure;
+      }
+      RELEASE_DOM(false);
+      if (copy_to_user((capa_index_t*)arg, &mgmt_handle, sizeof(capa_index_t))) {
+        ERROR("Unable to copy the management handle");
+        goto failure;
+      }
+      break;
+    case TYCHE_REGISTER_REGION:
+      ACQUIRE_DOM(true);
+      if (copy_from_user(&info, (msg_info_t*) arg, sizeof(msg_info_t))) {
+        ERROR("Unable to copy info arguments from user.");
+        goto failure;
+      }
+      if (tyche_register_mmap(domain, info.virtaddr, info.size) != SUCCESS) {
+        RELEASE_DOM(true);
+        goto failure;
+      }
+      RELEASE_DOM(true);
+      //TODO(aghosn): do we need to get the physoffset?
       break;
     default:
       ERROR("The command is not valid! %d", cmd);

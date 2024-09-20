@@ -7,6 +7,34 @@
 
 #include "vmx.h"
 
+//TODO(aghosn): both macros are disabled for now because linux complains
+//that we call them with irq disabled and rw_semaphores can sleep.
+#define ACQUIRE_DOM(dom, write)                                            \
+	do {                                                               \
+		if (in_interrupt()) {                                      \
+			printk(KERN_ERR "In interrupt at %s:%d", __FILE__, \
+			       __LINE__);                                  \
+		}                                                          \
+		if (write) {                                               \
+			/*down_write(&(dom->rwlock));*/                    \
+		} else {                                                   \
+			/*down_read(&(dom->rwlock));*/                     \
+		}                                                          \
+	} while (0);
+
+#define RELEASE_DOM(dom, write)                                            \
+	do {                                                               \
+		if (in_interrupt()) {                                      \
+			printk(KERN_ERR "In interrupt at %s:%d", __FILE__, \
+			       __LINE__);                                  \
+		}                                                          \
+		if (write) {                                               \
+			/*up_write(&(dom->rwlock));*/                      \
+		} else {                                                   \
+			/*up_read(&(dom->rwlock));*/                       \
+		}                                                          \
+	} while (0);
+
 /// Write the domain's core configuration field.
 int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value);
 

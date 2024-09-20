@@ -8,6 +8,8 @@ TARGET_MODULE:=contalloc
 ccflags-y += -I $(srctree)/drivers/contalloc/include 
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/common/include
 ccflags-y += -I $(srctree)/drivers/tyche/libraries/dll/include
+ccflags-y += -I $(srctree)/drivers/tyche/libraries/capabilities/include
+ccflags-y += -I $(srctree)/drivers/tyche/include
 
 obj-y += $(TARGET_MODULE).o
 $(TARGET_MODULE)-objs += src/driver.o src/ioctl.o src/allocs.o 

@@ -28,6 +28,8 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_ENCLAVE_ATTESTATION = 20,
 	TYCHE_REVOKE_ALIASED_REGION = 21,
 	TYCHE_SERIALIZE_ATTESTATION = 22,
+	TYCHE_RETURN_TO_MANAGER = 23,
+	TYCHE_GET_HPA = 24,
 	TYCHE_TEST_CALL = 30,
 } tyche_monitor_call_t;
 
@@ -35,7 +37,17 @@ typedef enum tyche_configurations_t {
 	TYCHE_CONFIG_PERMISSIONS = 0,
 	TYCHE_CONFIG_TRAPS = 1,
 	TYCHE_CONFIG_CORES = 2,
-	TYCHE_NR_CONFIGS = 3,
+	TYCHE_CONFIG_R16 = 3,
+	TYCHE_CONFIG_W16 = 4,
+	TYCHE_CONFIG_R32 = 5,
+	TYCHE_CONFIG_W32 = 6,
+	TYCHE_CONFIG_R64 = 7,
+	TYCHE_CONFIG_W64 = 8,
+	TYCHE_CONFIG_RNAT = 9,
+	TYCHE_CONFIG_WNAT = 10,
+	TYCHE_CONFIG_RGP = 11,
+	TYCHE_CONFIG_WGP = 12,
+	TYCHE_NR_CONFIGS = 13,
 } tyche_configurations_t;
 
 typedef enum tyche_perm_value_t {
@@ -44,6 +56,7 @@ typedef enum tyche_perm_value_t {
 	TYCHE_PERM_DUPLICATE = (1 << 2),
 	TYCHE_PERM_ALIAS = (1 << 3),
 	TYCHE_PERM_CARVE = (1 << 4),
+	TYCHE_PERM_CPUID = (1 << 5),
 } tyche_perm_value_t;
 
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
@@ -90,9 +103,10 @@ int tyche_set_domain_core_config(capa_index_t management, usize core, usize idx,
 int tyche_get_domain_core_config(capa_index_t management, usize core, usize idx,
 				 usize *value);
 
-int tyche_alloc_core_context(capa_index_t management, usize core);
+int tyche_alloc_core_context(capa_index_t management, usize core,
+			     capa_index_t *trans);
 
-int tyche_seal(capa_index_t *transition, capa_index_t management);
+int tyche_seal(capa_index_t management);
 
 int tyche_segment_region(usize is_shared, capa_index_t capa,
 			 capa_index_t *to_send, capa_index_t *revoke,
@@ -113,7 +127,7 @@ int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa,
 
 int tyche_serialize_attestation(usize addr, usize size, usize *written);
 
-int tyche_switch(capa_index_t *transition_handle,
+int tyche_switch(capa_index_t *transition_handle, usize delta,
 		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);
 
 int tyche_read_gp_registers(capa_index_t management, usize core,
@@ -123,5 +137,7 @@ int tyche_write_fields(capa_index_t management, usize core, usize *fields,
 		       usize *values, int size);
 
 int tyche_duplicate(capa_index_t *new_capa, capa_index_t capa);
+
+int tyche_get_hpa(usize gpa, usize gpa_size, usize *hpa, usize *hpa_size);
 
 #endif

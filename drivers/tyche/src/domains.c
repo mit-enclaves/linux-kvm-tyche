@@ -1,5 +1,11 @@
 #include "arch_cache.h"
+#include "asm-generic/memory_model.h"
+#include "asm/page_types.h"
+#include "asm/uaccess.h"
 #include "dll.h"
+#include "linux/export.h"
+#include "linux/gfp_types.h"
+#include "linux/nmi.h"
 #include "linux/rwsem.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
@@ -133,6 +139,13 @@ failure:
   return NULL;
 }
 
+static void dump_list(segment_list_t* l) {
+  segment_t* iter = NULL;
+  dll_foreach(l, iter, list) {
+    printk(KERN_ERR "[0x%llx, 0x%llx] -> [0x%llx, 0x%llx]", iter->va, iter->va + iter->size,
+        iter->pa, iter->pa + iter->size);
+  }
+}
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
@@ -206,11 +219,123 @@ failure:
 
 EXPORT_SYMBOL(driver_create_domain);
 
-int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
+int driver_get_mgmt_capa(driver_domain_t* dom, capa_index_t* capa)
+{
+  CHECK_RLOCK(dom, failure);
+  if (capa == NULL) {
+    ERROR("Capa pointer is null");
+    goto failure;
+  }
+  if (get_domain_capa(dom->domain_id, capa) != SUCCESS) {
+    ERROR("Unable to read the management capa.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_tyche_check_coalesce(driver_domain_t* dom, bool raw)
+{
+  segment_list_t* l = NULL;
+  segment_t* curr = NULL;
+  if (dom == NULL) {
+    ERROR("Nul domain");
+    goto failure;
+  }
+  l = (raw)? &(dom->raw_segments) : &(dom->segments);
+  curr = l->head;
+  while (curr != NULL && curr->list.next != NULL) {
+    segment_t* n = curr->list.next;
+    // Is it ordered?
+    if (curr->va >= n->va) {
+      ERROR("The list (%d) is not ordered: curr_va: %llx, n_va: %llx",
+          raw, curr->va, n->va);
+      dump_list(l);
+      goto failure;
+    }
+    // Does it overlap? Allow overlaps with KVM
+    if (dom->handle != NULL && dll_overlap(curr->va, (curr->va + curr->size),
+          n->va, (n->va + n->size))) {
+      ERROR("Overlap detected %d.", raw);
+      ERROR("[%llx, %llx] overlaps [%llx, %llx]", curr->va, curr->va + curr->size,
+          n->va, n->va + n->size);
+      dump_list(l);
+      goto failure;
+    }
+    // Can we merge? vas and pas need to be contiguous
+    if ((curr->va + curr->size) == n->va &&
+        (curr->pa + curr->size) == n->pa &&
+        (raw || (curr->tpe == n->tpe && curr->flags == n->flags))) {
+      curr->size += n->size;
+      dll_remove(l, n, list);
+      // Free the merged region.
+      kfree(n);
+      n = NULL;
+      continue;
+    }
+    // Done, proceed to the next.
+    curr = curr->list.next;
+  }
+
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_tyche_check_coalesce);
+
+int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
 {
   void* allocation = NULL;
   usize size = 0;
+  unsigned long vaddr = 0, max_size = 0x400000;
   int order;
+  if (vma == NULL || raw == NULL) {
+    ERROR("Arguments are null.");
+    goto failure;
+  }
+  size = vma->vm_end - vma->vm_start;
+  vaddr = vma->vm_start;
+  while (vaddr < vma->vm_end) {
+    usize left_to_map = vma->vm_end - vaddr, to_map = 0;
+    unsigned long pfn = 0;
+    order = get_order(left_to_map);
+    to_map = (order < MAX_ORDER)? left_to_map : max_size;
+    allocation = alloc_pages_exact(to_map, GFP_KERNEL);
+    if (allocation == NULL) {
+      ERROR("alloc_pages_exact failed to allocated %llu bytes", to_map);
+      goto failure;
+    }
+    memset(allocation, 0, to_map);
+    for (int i = 0; i < (to_map/PAGE_SIZE); i++) {
+      char* mem = ((char*)allocation) + i * PAGE_SIZE;
+      SetPageReserved(virt_to_page((unsigned long)mem));
+    }
+    pfn = virt_to_phys(allocation) >> PAGE_SHIFT;
+    if (remap_pfn_range(vma, vaddr, pfn, to_map, vma->vm_page_prot) < 0) {
+      ERROR("remap_pfn_range failed with vaddr %lx, pfn %lx, size %llx",
+          vaddr, pfn, to_map);
+      goto failure;
+    }
+    // Add the segment to the domain.
+    if (driver_add_raw_segment(
+        raw, (usize) vaddr,
+        (usize) virt_to_phys(allocation), to_map) != SUCCESS) {
+      ERROR("Unable to allocate a segment");
+      goto failure;
+    }
+    /* Update the vaddr */
+    vaddr += to_map;
+    allocation = NULL;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(driver_tyche_mmap);
+
+int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
+{
   if (vma == NULL || dom->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
@@ -231,88 +356,274 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     ERROR("Unable to find the right domain.");
     goto failure;
   }
+
+  //TODO(aghosn): we accept adding segments.
+  /*
   if (!dll_is_empty(&(dom->segments))) {
     ERROR("The domain has already been initialized.");
     goto failure;
-  }
+  }*/
 
-  // Allocate a contiguous memory region.
-  // If the order of the size requested is too big, fail.
-  // This should be handled inside the loader, not the driver.
-  size = vma->vm_end - vma->vm_start;
-  order = get_order(size);
-  if (order >= MAX_ORDER) {
-    ERROR("The requested size of: %llx has order %d while max order is %d",
-        size, order, MAX_ORDER);
+  if (driver_tyche_mmap(&(dom->raw_segments), vma) != SUCCESS) {
+    ERROR("Unable to mmap vma 0x%lx - 0x%lx", vma->vm_start, vma->vm_end);
     goto failure;
   }
-  allocation = alloc_pages_exact(size, GFP_KERNEL); 
-  if (allocation == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", size);
+
+  /* Attempt a cleanup of the domain.*/
+  if (driver_tyche_check_coalesce(dom, true) != SUCCESS) {
+    ERROR("Something went wrong with check and coalesce.\n");
     goto failure;
-  }
-  memset(allocation, 0, size);
-  // Prevent pages from being collected.
-  for (int i = 0; i < (size/PAGE_SIZE); i++) {
-    char* mem = ((char*)allocation) + i * PAGE_SIZE;
-    SetPageReserved(virt_to_page((unsigned long)mem));
-  }
-
-  LOG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
-  if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
-    ERROR("Unable to map the memory...");
-    goto fail_free_pages;
-  }
-
-  if (driver_add_raw_segment(
-        dom, (usize) vma->vm_start, 
-        (usize) virt_to_phys(allocation), size) != SUCCESS) {
-    ERROR("Unable to allocate a segment");
-    goto fail_free_pages;
   }
   return SUCCESS;
-fail_free_pages:
-  free_pages_exact(allocation, size);
 failure:
   return FAILURE;
 }
 
-int driver_add_raw_segment(
-    driver_domain_t *dom,
-    usize va,
-    usize pa,
-    usize size)
+int tyche_internal_register_mmap(segment_list_t* raw, usize virtaddr, usize vsize)
 {
-  segment_t *segment = NULL;
-  if (dom == NULL) {
-    ERROR("Provided domain is null.");
+  struct page **pages;
+  unsigned long start_addr, end_addr;
+  unsigned long page_count, i, idx_start;
+  unsigned long pfn_prev, pfn_curr, pfn_start;
+  int ret;
+  if (raw == NULL) {
+    ERROR("The raw segment list is null");
     goto failure;
   }
-  // Expects to be w-locked.
+  // Nothing to do if size is null.
+  if (vsize == 0) {
+    goto success;
+  }
+  // Check this is a valid address range.
+  if (!access_ok((void*) virtaddr, vsize)) {
+    ERROR("Invalid range of addresses");
+    goto failure;
+  }
+
+  // Go through the entire region and split physically contiguous ranges.
+  // Register each contiguous range as a raw segment in the domain.
+  // First we compute the number of pages (page_count).
+  // Then, we use linux to give us every page in the range.
+  // This process pins the pages in the address space.
+  // After that, we can go through the list of pages to find contiguous ranges.
+  start_addr = virtaddr & PAGE_MASK;
+  end_addr = (virtaddr + vsize + PAGE_SIZE -1) & PAGE_MASK;
+  page_count = (end_addr - start_addr) >> PAGE_SHIFT;
+  pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
+  if (!pages) {
+    ERROR("Unable to allocate the pages.");
+    goto failure;
+  }
+  // This will pin the pages in the address space.
+  ret = get_user_pages_fast(virtaddr, page_count, 1, pages);
+  if (ret != page_count) {
+    ERROR("Unable to get user pages");
+    goto failure_free;
+  }
+
+  // Look for contiguous ranges.
+  pfn_prev = page_to_pfn(pages[0]);
+  pfn_start = pfn_prev;
+  idx_start = 0;
+  start_addr = virtaddr & PAGE_MASK;
+  for (i = 0; i < page_count; i++) {
+    pfn_curr = page_to_pfn(pages[i]);
+    // we have a split or we are the last entry.
+    if ((i != 0 && (pfn_curr != pfn_prev + 1)) || i == (page_count-1)) {
+      // Compute the end of the range (no -1 because we add the size of the page).
+      // We also need to account for the page at index i being included or not.
+      unsigned long incr = (i == (page_count -1))? 1 : 0;
+      unsigned long size = (i - idx_start + incr) * PAGE_SIZE;
+      if (driver_add_raw_segment(raw, (usize) start_addr,
+           (usize)(pfn_start << PAGE_SHIFT), size) != SUCCESS) {
+        ERROR("Unable to add raw segment.");
+        goto failure_free;
+      }
+      // Update the start.
+      start_addr = virtaddr + (i * PAGE_SIZE);
+      pfn_start = pfn_curr;
+      idx_start = i;
+    }
+    pfn_prev = pfn_curr;
+  }
+  // Unpin the pages now.
+  for (i = 0; i < page_count; i++) {
+    put_page(pages[i]);
+  }
+  kfree(pages);
+  // All done!
+success:
+  return SUCCESS;
+failure_free:
+  kfree(pages);
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(tyche_internal_register_mmap);
+
+int tyche_register_mmap(driver_domain_t* dom, usize virtaddr, usize vsize)
+{
+  if (dom == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  }
+  // Check we have the lock on the domain.
   CHECK_WLOCK(dom, failure);
 
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
+  // Nothing to do if size is null.
+  if (vsize == 0) {
+    goto success;
+  }
+  // Call the internal function.
+  if (tyche_internal_register_mmap(&(dom->raw_segments), virtaddr, vsize)
+      != SUCCESS) {
+    ERROR("Unable to do the internal register mmap");
+    goto failure;
+  }
+
+success:
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+static segment_t* create_segment(usize va, usize hpa, usize size) {
+  segment_t *segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
   if (segment == NULL) {
     ERROR("Unable to allocate a segment");
     goto failure;
   }
   memset(segment, 0, sizeof(segment_t));
   segment->va = va;
-  segment->pa = pa;
+  segment->pa = hpa;
   segment->size = size;
   segment->state = DRIVER_NOT_COMMITED;
   dll_init_elem(segment, list);
-  dll_add(&(dom->raw_segments), segment, list);
+  return segment;
+failure:
+  return NULL;
+}
+
+static int translate_gpa_hpas(segment_list_t* res, usize va, usize gpa, usize size)
+{
+  usize curr_size = size, curr_gpa = gpa, curr_va = va;
+  if (res == NULL) {
+    ERROR("Result is null");
+    goto failure;
+  }
+  dll_init_list(res);
+  do {
+    usize hpa = 0, hpa_size = 0;
+    segment_t* seg = NULL;
+    if (tyche_get_hpa(curr_gpa, curr_size, &hpa, &hpa_size) != SUCCESS) {
+      ERROR("Call to monitor get hpa failed");
+      goto failure_free;
+    }
+    seg = create_segment(curr_va, hpa, hpa_size);
+    if (seg == NULL) {
+      ERROR("Unable to allocate segment");
+      goto failure_free;
+    }
+    // Add the segment.
+    dll_add(res, seg, list);
+    if (curr_size < hpa_size) {
+      ERROR("curr size is smaller than hpa_size")
+      goto failure_free;
+    }
+    curr_size -= hpa_size;
+    curr_va += hpa_size;
+    curr_gpa += hpa_size;
+  } while(curr_size > 0);
   return SUCCESS;
+failure_free:
+  while(!dll_is_empty(res)) {
+    segment_t* seg = res->head;
+    dll_remove(res, seg, list);
+    kfree(seg);
+  }
+failure:
+  return FAILURE;
+}
+
+static int add_single_raw_segment(segment_list_t* segments, segment_t* segment)
+{
+  segment_t* curr = NULL;
+  // The list is empty.
+  if (dll_is_empty(segments)) {
+    dll_add(segments, segment, list);
+    goto finish;
+  }
+  // The list is not empty, we look for the right spot.
+  dll_foreach(segments, curr, list) {
+    if (dll_overlap(curr->va, (curr->va + curr->size),
+          segment->va, (segment->va + segment->size))) {
+      goto failure;
+    }
+    // curr is last and we come after..
+    if (curr->va + curr->size <= segment->va && curr->list.next == NULL) {
+      dll_add_after(segments, segment, list, curr);
+      break;
+    }
+
+    if ((segment->va + segment->size) <= curr->va) {
+      dll_add_before(segments, segment, list, curr);
+      break;
+    }
+  }
+
+  // We failed to insert.
+  if (curr == NULL) {
+    ERROR("Unable to find the correct position in the queue");
+    goto failure;
+  }
+
+finish:
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int driver_add_raw_segment(
+    segment_list_t *segments,
+    usize va,
+    usize pa,
+    usize size)
+{
+  segment_list_t to_add;
+  if (segments == NULL) {
+    ERROR("Provided domain is null.");
+    goto failure;
+  }
+  if (translate_gpa_hpas(&to_add, va, pa, size) != SUCCESS) {
+    ERROR("Failure to translate gpa to hpa");
+    goto failure;
+  }
+
+  while(!dll_is_empty(&to_add)) {
+    segment_t* seg = to_add.head;
+    dll_remove(&to_add, seg, list);
+    if (add_single_raw_segment(segments, seg) != SUCCESS) {
+      ERROR("Failure to add one segment.");
+      kfree(seg);
+      goto failure_free;
+    }
+  }
+  // All done.
+  return SUCCESS;
+failure_free:
+  while(!dll_is_empty(&to_add)) {
+    segment_t* seg = to_add.head;
+    dll_remove(&to_add, seg, list);
+    kfree(seg);
+  }
 failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_add_raw_segment);
 
-int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phys_offset)
+int driver_get_physoffset_domain(driver_domain_t *dom, usize vaddr, usize* phys_offset)
 {
   segment_t *seg = NULL;
-  usize slot_counter = 0;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -324,18 +635,25 @@ int driver_get_physoffset_domain(driver_domain_t *dom, usize slot_id, usize* phy
   // We expect to have a r-lock on the domain.
   CHECK_RLOCK(dom, failure);
 
-  if (dll_is_empty(&(dom->raw_segments))) {
+  if (dll_is_empty(&(dom->raw_segments)) && dll_is_empty(&(dom->segments))) {
     ERROR("The domain %p has not been initialized, call mmap first!", dom);
     goto failure;
   }
+  // Check the raw segments.
   dll_foreach(&(dom->raw_segments), seg, list) {
-    if (slot_counter == slot_id) {
-      *phys_offset = seg->pa;
+    if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
+      *phys_offset = seg->pa + (vaddr - seg->va);
       return SUCCESS;
     }
-    slot_counter++;
   }
-  ERROR("Failure to find the right memslot %lld.\n", slot_id);
+  // Check the segments.
+  dll_foreach(&(dom->segments), seg, list) {
+    if (seg->va <= vaddr && ((seg->va + seg->size) > vaddr)) {
+      *phys_offset = seg->pa + (vaddr - seg->va);
+      return SUCCESS;
+    }
+  }
+  ERROR("Failure to find the right memslot %llx.\n", vaddr);
 failure:
   return FAILURE;
 }
@@ -348,12 +666,16 @@ int driver_mprotect_domain(
     segment_type_t tpe,
     usize alias)
 {
-  segment_t* head = NULL, *segment = NULL; 
+  segment_t* raw = NULL;
+  usize curr_vaddr = vstart, curr_size = size;
+  // The list of segments we are creating.
+  dll_list(segment_t, segments);
+  dll_init_list(&segments);
 
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
-  } 
+  }
 
   /// Expects the domain to be write-locked.
   CHECK_WLOCK(dom, failure);
@@ -363,61 +685,153 @@ int driver_mprotect_domain(
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  /// The logic here is as follows:
-  /// 1. We can only mprotect the top address of raw segments.
-  /// 2. When we do so, we carve out the memory segment and add it to segments.
-  /// 3. We adapt the raw segment to point to the next raw address if any.
+  /// We allow arbitrary regions inside the raw segment to be mprotected
+  /// out-of-order (NEW). One region might span several raw ones, 
+  /// with different PAs. The algorithm carves out the correct pieces one by one
+  /// and creates a list of segments to be added to the dom->segments.
   if (dll_is_empty(&(dom->raw_segments))) {
     ERROR("The domain %p doesn't have mmaped memory.", dom);
     goto failure;
   }
 
-  // Check the properties on the segment.
-  head = dll_head(&(dom->raw_segments));
+  // Find the right part of the raw segments and start carving.
+  raw = dom->raw_segments.head;
+  while(raw != NULL && curr_size != 0) {
+    usize raw_end = raw->va + raw->size;
+    if (!((raw->va <= curr_vaddr) && (raw_end > curr_vaddr))) {
+      // Not the right one.
+      goto next_iter;
+    }
+    
+    // Three cases are possible.
+    // 1. full overlap with optional remainder.
+    //    [xxxxxxx]
+    //    [yyyyyyy]
+    // 2. Left overlap
+    //    [xxxxxxx]
+    //    [yyyy]
+    // 3. Right overlap with optional remainder.
+    //    [xxxxxxxx]
+    //          [yyy----]
+    if (raw->va == curr_vaddr) {
+      segment_t* seg = kmalloc(sizeof(segment_t), GFP_KERNEL);
+      if (seg == NULL) {
+        ERROR("Unable to allocate new segment");
+        goto failure;
+      }
+      memset(seg, 0, sizeof(segment_t));
+      seg->va = curr_vaddr;
+      seg->pa = raw->pa;
+      seg->flags = flags;
+      seg->tpe = tpe;
+      seg->alias = alias;
+      seg->state = DRIVER_NOT_COMMITED;
+      dll_init_elem(seg, list);
+      dll_add(&segments, seg, list);
+      // Is the raw segment completely consumed?
+      if (raw->size <= curr_size) {
+        segment_t* next = raw->list.next;
+        // Update the pointers.
+        curr_size -= raw->size;
+        curr_vaddr += raw->size;
+        seg->size = raw->size;
+        dll_remove(&(dom->raw_segments), raw, list);
+        kfree(raw);
+        raw = next; 
+        // Skip the update of raw.
+        continue;
+      } else if (raw->size > curr_size) {
+        // Update the current raw segment.
+        raw->va += curr_size;
+        raw->pa += curr_size;
+        raw->size -= curr_size;
+        // Update the pointers.
+        curr_vaddr += curr_size;
+        seg->size = curr_size;
+        curr_size = 0;
+      }
+    } else {
+      // Split the current segment into two.
+      usize diff = curr_vaddr - raw->va;
+      segment_t* split = kmalloc(sizeof(segment_t), GFP_KERNEL);
+      if (split == NULL) {
+        ERROR("Unable to allocate the split segment.");
+        goto failure;
+      }
+      memset(split, 0, sizeof(segment_t));
+      dll_init_elem(split, list);
+      split->va = curr_vaddr;
+      split->pa = raw->pa + diff; 
+      split->size = raw->size - diff;
+      split->state = DRIVER_NOT_COMMITED;
+      // Update raw.
+      raw->size = diff;
+      // Add the new segment to queue.
+      dll_add_after(&(dom->raw_segments), split, list, raw);
+      goto next_iter;
+    }
 
-  // Check the mprotect has the correct bounds.
-  if (head->va != vstart) {
-    ERROR("Out of order specification of segment: wrong start");
-    ERROR("Expected: %llx, got: %llx", head->va, vstart);
-    goto failure;
-  }
-
-  if (head->va + head->size < vstart + size) {
-    ERROR("The specified segment is not contained in the raw one.");
-    ERROR("Raw: start(%llx) size(%llx)", head->va, head->size);
-    ERROR("Prot: start(%llx) size(%llx)", vstart, size);
-    goto failure;
-  }
-
-  // Add the segment.
-  segment = kmalloc(sizeof(segment_t), GFP_KERNEL);
-  if (segment == NULL) {
-    ERROR("Unable to allocate new segment");
-  }
-
-  memset(segment, 0, sizeof(segment_t));
-  segment->va = vstart;
-  segment->pa = head->pa;
-  segment->size = size;
-  segment->flags = flags;
-  segment->tpe = tpe;
-  segment->alias = alias;
-  segment->state = DRIVER_NOT_COMMITED;
-  dll_init_elem(segment, list);
-  dll_add(&(dom->segments), segment, list);
-
-  // Adjust the head.
-  // Easy case, we just remove the head.
-  if (segment->size == head->size) {
-    dll_remove(&(dom->raw_segments), head, list);
-    kfree(head);
-  } else {
-    head->va += size;
-    head->pa += size;
-    head->size -= size;
+  next_iter:
+    raw = raw->list.next;
   } 
-  LOG("Mprotect success for domain %lld, start: %llx, end: %llx", 
-      dom, vstart, vstart + size);
+
+  if ((curr_vaddr != vstart + size) || (curr_size != 0)) {
+    ERROR("Something went wrong during the mapping\n"
+        "curr_vaddr: %llx, curr_size: %llx\n"
+        "expected addr: %llx", curr_vaddr, curr_size, vstart + size);
+    goto failure;
+  }
+
+  // Add the segments. They are ordered, we need to find where to put them.
+  // Easy case:
+  if (dll_is_empty(&(dom->segments))) {
+    dom->segments.head = segments.head;
+    dom->segments.tail = segments.tail;
+    return SUCCESS;
+  }
+
+  // Find the right spot.
+  dll_foreach(&(dom->segments), raw, list) {
+    // We are too far.
+    if (raw->va > vstart) {
+      raw = NULL;
+      break;
+    }
+
+    // Next one is null or greater than our start.
+    if (raw->list.next == NULL || 
+        (raw->list.next != NULL && raw->list.next->va > vstart)) {
+      break;
+    }
+  }
+
+  // Add everything to the head.
+  if (raw == NULL) {
+    segment_t* prev_head = dom->segments.head;
+    dom->segments.head = segments.head;
+    prev_head->list.prev = segments.tail;
+    segments.tail->list.next = prev_head;
+  } else {
+    // Add everything after raw.
+    segment_t* prev_next = raw->list.next;
+    raw->list.next = segments.head;
+    segments.head->list.prev = raw;
+    segments.tail->list.next = prev_next;
+    if (prev_next != NULL) {
+      prev_next->list.prev = segments.tail;
+    } else {
+      // Update the segments tail.
+      dom->segments.tail = segments.tail;
+    }
+  }
+
+  /*if (driver_tyche_check_coalesce(dom, false) != SUCCESS) {
+    ERROR("Problem coalescing non-raw segments.");
+    goto failure;
+  }*/
+
+  DEBUG("Mprotect success  start: %llx, end: %llx",
+      vstart, vstart + size);
   return SUCCESS;
 failure:
   return FAILURE;
@@ -451,7 +865,9 @@ EXPORT_SYMBOL(driver_set_domain_configuration);
 
 /// Expose the domain's own configuration for allowed selected fields.
 int driver_set_self_core_config(usize field, usize value) {
-  return tyche_set_self_core_config(field, value);
+  //TODO disable this for now.
+  //return tyche_set_self_core_config(field, value);
+  return 0;
 }
 EXPORT_SYMBOL(driver_set_self_core_config);
 
@@ -636,13 +1052,20 @@ int driver_commit_regions(driver_domain_t *dom)
     goto failure;
   }*/
   if (!dll_is_empty(&(dom->raw_segments))) {
-    ERROR("The domain %p's memory is not correctly initialized.", dom);
-    goto failure;
+    ERROR("The domain still has raw segments");
+    dump_list(&(dom->raw_segments));
+    //goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
     ERROR("Missing segments for domain %p", dom);
     goto failure;
   }
+
+ /* LOG("Dumping segments.");
+  dll_foreach(&(dom->segments), segment, list) {
+    LOG("Segment [addr: %llx, size: %llx, pa: %llx]", segment->va, segment->size, segment->pa);
+  }
+  segment = NULL;*/
   // Add the segments.
   dll_foreach(&(dom->segments), segment, list) {
     // Skip segments already commited;
@@ -667,8 +1090,8 @@ int driver_commit_regions(driver_domain_t *dom)
               segment->pa,
               segment->size,
               segment->flags, segment->alias) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%x}", segment->va,
-              segment->size, segment->flags);
+          ERROR("Unable to grant segment %llx -- %llx {%x} | pa: %llx alias: %llx", segment->va,
+              segment->size, segment->flags, segment->pa, segment->alias);
           goto failure;
         }
         break;
@@ -740,10 +1163,10 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     ERROR("Expected: %d, got: %d", dom->pid, current->pid);
     goto failure;
   }
-  if (!dll_is_empty(&(dom->raw_segments))) {
-    ERROR("The domain %p's memory is not correctly initialized.", dom);
+  /*if (!dll_is_empty(&(dom->raw_segments))) {
+    ERROR("The domain still has raw segments at commit time");
     goto failure;
-  }
+  }*/
   if (dll_is_empty(&dom->segments)) {
     //ERROR("WARNING: the domain %p has no segment.", dom);
     //goto failure;
@@ -864,6 +1287,30 @@ failure:
   return FAILURE;
 }
 
+static exit_reason_t convert_exit_reason(usize exit[TYCHE_EXIT_FRAME_SIZE]) {
+#if defined(CONFIG_X86) || defined(__x86_64__)
+  /// VM_EXIT_REASON index.
+  switch (exit[4]) {
+    case EXIT_REASON_EPT_VIOLATION:
+    case EXIT_REASON_EPT_MISCONFIG:
+      return MEM_FAULT;
+    case EXIT_REASON_EXCEPTION_NMI:
+      return EXCEPTION;
+    case EXIT_REASON_EXTERNAL_INTERRUPT:
+      return INTERRUPT;
+    case EXIT_REASON_PREEMPTION_TIMER:
+      return TIMER;
+    case DOMAIN_REVOKED:
+      return REVOKED;
+    default:
+      return UNKNOWN;
+  }
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+  return UNKNOWN;
+#endif
+  return UNKNOWN;
+}
+
 const usize GP_REGS_FIELDS[TYCHE_GP_REGS_SIZE] = {
   REG_GP_RAX,
   REG_GP_RBX,
@@ -896,7 +1343,8 @@ failure:
   return FAILURE;
 }
 
-int driver_switch_domain(driver_domain_t * dom, usize core) {
+
+int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
   usize exit_frame[TYCHE_EXIT_FRAME_SIZE] = {0};
   usize gp_frame[TYCHE_GP_REGS_SIZE] = {0};
   int local_cpuid = 0;
@@ -904,28 +1352,32 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
     ERROR("The domain is null.");
     goto failure;
   }
+  if (params == NULL) {
+    ERROR("Switch received a null param, that's unexpected.");
+    goto failure;
+  }
   // Expects the domain to be R-locked.
   CHECK_RLOCK(dom, failure);
 
-  if (core >= ENTRIES_PER_DOMAIN) {
+  if (params->core >= ENTRIES_PER_DOMAIN) {
     ERROR("Invalid core.");
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
-      dom->contexts[core] == NULL) {
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << params->core)) == 0 ||
+      dom->contexts[params->core] == NULL) {
     ERROR("Invalid core.");
     goto failure;
   }
 
   // Lock the core.
-  down_write(&(dom->contexts[core]->rwlock));
+  down_write(&(dom->contexts[params->core]->rwlock));
 
   // This disables preemption to guarantee we remain on the same core after the
   // check.
   local_cpuid = get_cpu();
   // Check we are on the right core.
-  if (core != local_cpuid) {
-    ERROR("Attempt to switch on core %lld from cpu %d", core, local_cpuid);
+  if (params->core != local_cpuid) {
+    ERROR("Attempt to switch on core %lld from cpu %d", params->core, local_cpuid);
     goto failure_unlock;
   }
 
@@ -935,33 +1387,52 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
 
   /* Deactivate for Rhino (no need to protect agaisnt side channels)
   // Let's flush the caches.
-  if (flush_caches(dom, core) != SUCCESS) {
+  if (flush_caches(dom, params->core) != SUCCESS) {
     ERROR("Unable to flush caches.");
     goto failure_unlock;
   }
 
   // We can clear the cache now.
-  cache_clear(&(dom->contexts[core]->cache), 1);
+  cache_clear(&(dom->contexts[params->core]->cache), 1);
   */
 
+  // In case there is a delta, we should tell the linux watchdog to backoff.
+  // This will avoid receiving spurious NMIs in the child.
+  if (params->delta != 0) {
+    touch_nmi_watchdog();
+  }
+
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
-  if (switch_domain(dom->domain_id, exit_frame) != SUCCESS) {
-    ERROR("Unable to switch to domain %p", dom->handle);
+  params->error = 0;
+  if (switch_domain(dom->domain_id, params->delta, exit_frame, local_cpuid) != SUCCESS) {
+    params->error = convert_exit_reason(exit_frame);
+    if (params->error == REVOKED) {
+      ERROR("The domain has been revoked!");
+      // We only have a read lock BUT all threads will try to write
+      // the same value to this field. Anyone trying to do another operation
+      // will have to acquire the write lock and is therefore blocked.
+      dom->state = DRIVER_DEAD;
+    } else {
+      ERROR("Error(%d) in switch to domain %p", params->error, dom->handle);
+    }
     goto failure_unlock;
   }
 
-  // Update the exit frame.
-  if (update_set_exit(dom, core, exit_frame) != SUCCESS) {
+  if (update_set_exit(dom, params->core, exit_frame) != SUCCESS) {
     ERROR("Unable to update the exit frame.");
     goto failure_unlock;
   }
+
+  // Provide the exit information.
+  params->error = convert_exit_reason(exit_frame);
+
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
-  if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) {
+  if (read_gp_domain(dom->domain_id, params->core, gp_frame) != SUCCESS) {
     ERROR("Unable to read the domain's general purpose registers.");
     goto failure_unlock;
   }
-  if (update_set_gp(dom, core, gp_frame) != SUCCESS) {
+  if (update_set_gp(dom, params->core, gp_frame) != SUCCESS) {
     ERROR("Unable to set the domain's general purpose registers.");
     goto failure_unlock;
   }
@@ -969,11 +1440,11 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
   // Reenable the preemption.
   put_cpu();
   // UNLOCK THE CORE CONTEXT.
-  up_write(&(dom->contexts[core]->rwlock));
+  up_write(&(dom->contexts[params->core]->rwlock));
   return SUCCESS;
 failure_unlock:
   put_cpu();
-  up_write(&(dom->contexts[core]->rwlock));
+  up_write(&(dom->contexts[params->core]->rwlock));
 failure:
   return FAILURE;
 }
@@ -987,10 +1458,9 @@ int driver_delete_domain(driver_domain_t *dom)
     ERROR("The domain is null.");
     goto failure;
   }
-
   /// We cannot delete if we do not have exclusive access to the domain.
   CHECK_WLOCK(dom, failure);
-  if (dom->domain_id == UNINIT_DOM_ID) {
+  if (dom->domain_id == UNINIT_DOM_ID || dom->state == DRIVER_DEAD) {
     goto delete_dom_struct;
   }
   if (revoke_domain(dom->domain_id) != SUCCESS) {

@@ -21,12 +21,27 @@
 // —————————————————————— Types Exposed by the Library —————————————————————— //
 typedef struct file *domain_handle_t;
 
+/// Information about the exit.
+typedef enum exit_reason_t {
+	UNKNOWN = 0,
+	MEM_FAULT = 1,
+	EXCEPTION = 2,
+	INTERRUPT = 3,
+	TIMER = 4,
+	REVOKED = 5,
+} exit_reason_t;
+
+typedef enum monitor_errors_t {
+	DOMAIN_REVOKED = 66,
+} monitor_errors_t;
+
 // ———————————————————————————————— Messages ———————————————————————————————— //
 
 /// Default message used to communicate with the driver.
 typedef struct {
 	usize virtaddr;
 	usize physoffset;
+	usize size;
 } msg_info_t;
 
 /// Message type to add a new region.
@@ -45,9 +60,12 @@ typedef struct {
 } msg_mprotect_t;
 
 /// Structure to perform a transition.
+/// Encapsulates the core and an optional non-zero delta quantum of time.
+/// Embeds an error code (0 when ioctl returns success).
 typedef struct {
-	/// The args, will end up in r11 on x86.
-	void *args;
+	usize core;
+	uint32_t delta;
+	exit_reason_t error;
 } msg_switch_t;
 
 /// Structure to set permissions, i.e., traps or cores.
@@ -76,14 +94,14 @@ typedef struct {
 
 /// Information about the attestation buffer.
 typedef struct {
-    /// Virtual address of the start of the buffer.
-    usize start;
+	/// Virtual address of the start of the buffer.
+	usize start;
 
-    /// Size of the buffer.
-    usize size;
+	/// Size of the buffer.
+	usize size;
 
-    /// How many bytes were written by Tyche.
-    usize written;
+	/// How many bytes were written by Tyche.
+	usize written;
 } attest_buffer_t;
 
 // ———————————————————————————— Tyche IOCTL API ————————————————————————————— //
@@ -99,5 +117,7 @@ typedef struct {
 #define TYCHE_CREATE_PIPE _IOWR('a', 'o', msg_create_pipe_t)
 #define TYCHE_ACQUIRE_PIPE _IOR('a', 'p', usize)
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
+#define TYCHE_GET_MGMT_INDEX _IOW('a', 'r', capa_index_t *)
+#define TYCHE_REGISTER_REGION _IOWR('a', 's', msg_info_t *)
 
 #endif

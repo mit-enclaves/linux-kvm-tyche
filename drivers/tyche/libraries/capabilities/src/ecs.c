@@ -46,6 +46,7 @@ int enumerate_capa(capa_index_t idx, capa_index_t *next, capability_t *capa) {
     break;
   case Switch:
     capa->info.transition.id = frame.value_1;
+    capa->info.transition.core = frame.value_2;
     break;
   }
   

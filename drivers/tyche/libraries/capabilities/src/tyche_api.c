@@ -337,35 +337,35 @@ failure:
   return FAILURE;
 }
 
-int tyche_alloc_core_context(capa_index_t management, usize core) {
+int tyche_alloc_core_context(capa_index_t management, usize core, capa_index_t* trans) {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_ALLOC_CORE_CONTEXT,
     .arg_1 = management,
     .arg_2 = core,
   };
+  if (trans == NULL) {
+    goto failure;
+  }
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   }
+  *trans = frame.value_1;
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
 
-int tyche_seal(capa_index_t* transition, capa_index_t management)
+int tyche_seal(capa_index_t management)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEAL_DOMAIN,
     .arg_1 = management,
   };
-  if (transition == NULL) {
-    goto failure;
-  }
 
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   }
-  *transition = frame.value_1;
   return SUCCESS;
 failure:
   return FAILURE;
@@ -472,6 +472,7 @@ failure:
 
 int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_t size)
 {
+#if defined(CONFIG_X86) || defined(__x86_64__)
   vmcall_frame_t frame = {
     .vmcall = TYCHE_REVOKE_ALIASED_REGION,
     .arg_1 = id,
@@ -485,6 +486,9 @@ int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa, paddr_
   return SUCCESS;
 failure:
   return FAILURE;
+#else
+  return tyche_revoke(id);
+#endif
 }
 
 int tyche_serialize_attestation(usize addr, usize size, usize *written)
@@ -593,11 +597,11 @@ int tyche_read_gp_registers(capa_index_t management, usize core, usize regs[TYCH
 //TODO rewrite to use the right registers.
 /// TODO there is an opportunity for unused registers here.
 /// That could be part of a write registers if we need it.
-int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
+int tyche_switch(capa_index_t* transition_handle, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE])
 {
 #if defined(CONFIG_X86) || defined(__x86_64__)
   int result = FAILURE;
-  usize results[2] = {TYCHE_SWITCH, 0};
+  usize results[3] = {TYCHE_SWITCH, 0, delta};
   if (transition_handle == NULL) {
     ERROR("Received null handle");
     return FAILURE;
@@ -628,9 +632,12 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
     "movq %0, %%rax\n\t"
     "pushq %%rax\n\t"
     // Set the arguments.
+    // rdx -> delta, rdi -> transition handle, rsi -> rax -> TYCHE_SWITCH
+    "movq 16(%%rax), %%rdx\n\t"
     "movq 8(%%rax), %%rdi\n\t"
     "movq 0(%%rax), %%rsi\n\t"
     "movq %%rsi, %%rax\n\t"
+    "movq %%rdx, %%rsi\n\t"
     // Do the call.
     "vmcall\n\t"
     // We are back. Let's save the values.
@@ -689,6 +696,7 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SWITCH,
     .arg_1 = 0,
+    .arg_2 = 0,
   };
   if (transition_handle == NULL) {
     ERROR("Received null handle");
@@ -705,4 +713,23 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   exit_frame[3] = frame.value_5;
 #endif
   return result;
+}
+
+int tyche_get_hpa(usize gpa, usize gpa_size, usize* hpa, usize* hpa_size) {
+  vmcall_frame_t frame = {
+      .vmcall = TYCHE_GET_HPA,
+      .arg_1 = gpa,
+      .arg_2 = gpa_size,
+  };
+  if (hpa == NULL || hpa_size == NULL) {
+    goto failure;
+  }
+  if (tyche_call(&frame) != SUCCESS) {
+      goto failure;
+  }
+  *hpa = frame.value_1;
+  *hpa_size = frame.value_2;
+  return SUCCESS;
+failure:
+    return FAILURE;
 }

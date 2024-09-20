@@ -166,6 +166,23 @@ fail:
   return FAILURE;
 }
 
+int get_domain_capa(domain_id_t id, capa_index_t* capa)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found.");
+    goto failure;
+  }
+  if (capa == NULL) {
+    ERROR("Supplied capability is null.");
+    goto failure;
+  }
+  *capa = child->management->local_id;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int set_domain_configuration(domain_id_t id, tyche_configurations_t idx, usize value)
 {
   child_domain_t *child = find_child(id);
@@ -214,17 +231,45 @@ failure:
 }
 
 int alloc_core_context(domain_id_t id, usize core) {
+  capability_t *transition = NULL;
+  transition_t *trans_wrapper = NULL;
   child_domain_t *child = find_child(id);
   if (child == NULL) {
     ERROR("Child not found");
     goto failure;
   }
+  transition = (capability_t *) local_domain.alloc(sizeof(capability_t));
+  if (transition == NULL) {
+    ERROR("Could not allocate transition capa.");
+    goto failure;
+  }
+  trans_wrapper = (transition_t *)local_domain.alloc(sizeof(transition_t));
+  if (trans_wrapper == NULL) {
+    ERROR("Unable to allocate transition_t wrapper");
+    goto failure_free;
+  }
 
-  if (tyche_alloc_core_context(child->management->local_id, core) != SUCCESS) {
+  if (tyche_alloc_core_context(child->management->local_id, core, &(transition->local_id)) != SUCCESS) {
     ERROR("Unable to allocate the core context.");
     goto failure;
   }
+  // Enumerate the transition capability.
+  if (enumerate_capa(transition->local_id, NULL, transition) != SUCCESS) {
+    ERROR("Unable to read the transition capability.");
+    goto failure_dealloc;
+  }
+  // Initialize the transition wrapper.
+  trans_wrapper->transition = transition;
+  trans_wrapper->lock = TRANSITION_UNLOCKED;
+  dll_init_elem(trans_wrapper, list);
+
+  // Add the transition wrapper to the child.
+  dll_add(&(child->transitions), trans_wrapper, list);
   return SUCCESS;
+failure_dealloc:
+  local_domain.dealloc(trans_wrapper);
+failure_free:
+  local_domain.dealloc(transition);
 failure:
   return FAILURE;
 }
@@ -250,8 +295,6 @@ failure:
 
 int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
-  capability_t *transition = NULL;
-  transition_t *trans_wrapper = NULL;
 
   DEBUG("start");
   // Find the target domain.
@@ -263,64 +306,34 @@ int seal_domain(domain_id_t id) {
     goto failure;
   }
 
-  transition = (capability_t *)local_domain.alloc(sizeof(capability_t));
-  if (transition == NULL) {
-    ERROR("Could not allocate transition capa.");
-    goto failure;
-  }
-
-  trans_wrapper = (transition_t *)local_domain.alloc(sizeof(transition_t));
-  if (trans_wrapper == NULL) {
-    ERROR("Unable to allocate transition_t wrapper");
-    goto failure_transition;
-  }
-
   // Create the transfer.
   if (child->management == NULL) {
     ERROR("The child's management is null");
-    goto failure_dealloc;
-  }
+    goto failure;
+ }
   if (child->management->capa_type != Management ||
       child->management->info.management.status != Unsealed ) {
     ERROR("we do not have a valid unsealed capa.");
     ERROR("management capa: type: 0x%x  -- status 0x%x",
         child->management->info.management.status,
         child->management->info.management.status);
-    goto failure_dealloc;
+    goto failure;
   }
 
-  if (tyche_seal(&(transition->local_id), child->management->local_id) != SUCCESS) {
-    ERROR("Unable to create a channel.");
-    goto failure_dealloc;
-  }
-
-  // Enumerate the transition capability.
-  if (enumerate_capa(transition->local_id, NULL, transition) != SUCCESS) {
-    ERROR("Unable to read the transition capability.");
-    goto failure_dealloc;
+  if (tyche_seal(child->management->local_id) != SUCCESS) {
+    ERROR("Unable to seal domain.");
+    goto failure;
   }
 
   // Update the management capability.
   if (enumerate_capa(child->management->local_id, NULL, child->management) != SUCCESS) {
     ERROR("Unable to update the management capa.");
-    goto failure_dealloc;
+    goto failure;
   }
-
-  // Initialize the transition wrapper.
-  trans_wrapper->transition = transition;
-  trans_wrapper->lock = TRANSITION_UNLOCKED;
-  dll_init_elem(trans_wrapper, list);
-
-  // Add the transition wrapper to the child.
-  dll_add(&(child->transitions), trans_wrapper, list);
 
   // All done !
   DEBUG("Success");
   return SUCCESS;
-failure_dealloc:
-  local_domain.dealloc(trans_wrapper);
-failure_transition:
-  local_domain.dealloc(transition);
 failure:
   return FAILURE;
 }
@@ -357,7 +370,7 @@ int segment_region_capa(
         &((*to_send)->local_id),
         &((*revoke)->local_id),
         start, end, prot) != SUCCESS) {
-    ERROR("Duplicate rejected.");
+    ERROR("Duplicate rejected at start %llx, end %llx.", start, end);
     goto fail_revoke;
   }
 
@@ -502,14 +515,13 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   capability_t* revoke = NULL;
   memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
   memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
+  usize aliased_start = (alias == NO_ALIAS)? start : alias;
+  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
   if ((basic_access | send_access) != access) {
     ERROR("Problem partitioning access right flags. Expected %x, got: %x",
         access, (basic_access | send_access));
     goto failure;
   }
-
-  usize aliased_start = (alias == NO_ALIAS)? start : alias;
-  paddr_t end = (!is_repeat)? start + size : start + 0x1000;
 
   // Quick checks.
   if (start >= end) {
@@ -546,13 +558,12 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa: %llx -- %llx | repeat: %d.",
         start, end, is_repeat);
-    /*asm volatile (
-      "movq $11, %%rax\n\t"
-      "vmcall\n\t"
-      :
-      :
-      : "rax", "memory"
-        );*/
+    dll_foreach(&(local_domain.capabilities), capa, list) {
+      if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
+        continue;
+      }
+      ERROR("Capa %lld: [s: %llx -- %llx | ar: %x]", capa->local_id, capa->info.region.start, capa->info.region.end, capa->info.region.flags);
+    }
     goto failure;
   }
 
@@ -692,7 +703,7 @@ failure:
 }
 
 // TODO nothing thread safe in this implementation for the moment.
-int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
+int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE], usize local_cpuid) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
   DEBUG("start");
@@ -719,17 +730,18 @@ int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
 
   // Acquire a transition handle.
   dll_foreach(&(child->transitions), wrapper, list) {
-    if (wrapper->lock == TRANSITION_UNLOCKED) {
+    if (wrapper->transition->info.transition.core == local_cpuid &&  wrapper->lock == TRANSITION_UNLOCKED) {
       wrapper->lock = TRANSITION_LOCKED;
       break;
-    } else if (wrapper->lock != TRANSITION_LOCKED) {
-      ERROR("There is an invalid lock value %d (%p) (child: %p)", wrapper->lock,
-            (void *)wrapper, (void *)child);
-      goto failure;
     }
   }
   if (wrapper == NULL) {
     ERROR("Unable to find a transition handle!");
+    // Let's have a look at the transitions.
+    dll_foreach(&(child->transitions), wrapper, list) {
+      ERROR("A transition handle with value %d", wrapper->lock);
+    }
+    ERROR("Done dumping transitions");
     goto failure;
   }
   DEBUG("Found a handle for domain %lld, id %lld", id,
@@ -740,9 +752,9 @@ int switch_domain(domain_id_t id, usize exit_frame[TYCHE_EXIT_FRAME_SIZE]) {
     ERROR("failed to write all the registers.");
     goto failure;
   }*/
-  if (tyche_switch(&(wrapper->transition->local_id), exit_frame) !=
+  if (tyche_switch(&(wrapper->transition->local_id), delta, exit_frame) !=
       SUCCESS) {
-    ERROR("failed to perform a switch on capa %lld",
+    DEBUG("failed to perform a switch on capa %lld",
           wrapper->transition->local_id);
     goto failure;
   }
