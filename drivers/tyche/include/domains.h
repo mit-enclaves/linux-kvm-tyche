@@ -98,6 +98,10 @@ typedef struct driver_domain_t {
 	/// The access rights have been set.
 	segment_list_t segments;
 
+	/// Segments tracked by the driver to be freed when deleting a domain.
+	/// This just tracks calls to alloc_pages_exact to make sure we free them.
+	segment_list_t to_free_on_delete;
+
 	/// Domains are stored in a global list by the driver.
 	dll_elem(struct driver_domain_t, list);
 
@@ -139,6 +143,11 @@ void driver_init_domains(void);
 /// Initializes the capability library.
 int driver_init_capabilities(void);
 
+/// For Linux kernels running as confidential VMs.
+/// This call transitions from shared to confidential by revoking the manager's
+/// access to the current domain's memory regions.
+int driver_revoke_manager_access(void);
+
 /// Create a new domain with handle.
 /// If ptr is not null, it points to the newly created driver domain.
 int driver_create_domain(domain_handle_t handle, driver_domain_t **ptr,
@@ -156,7 +165,10 @@ int driver_mmap_segment(driver_domain_t *domain, struct vm_area_struct *vma);
 
 /// Mmaps a raw segment from a vm.
 /// This function is also called from contalloc.
-int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct *vma);
+/// The free_list get the list of allocations that must be freed at the end
+/// of the execution of the domain or when the driver is closed.
+int driver_tyche_mmap(segment_list_t *raw, segment_list_t *free_list,
+		      struct vm_area_struct *vma);
 
 /// Internal implementation of registering a foreign mmap.
 int tyche_internal_register_mmap(segment_list_t *raw, usize virtaddr,
@@ -236,6 +248,9 @@ int driver_delete_domain(driver_domain_t *domain);
 /// Delete the domain's regions.
 /// @warning: requires a W-lock on the domain.
 int driver_delete_domain_regions(driver_domain_t *dom);
+
+/// Used internally and by contalloc to unreserve and free memory pages.
+int tyche_free_memory(segment_list_t *to_free);
 
 /// Create a pipe.
 /// The pipe starts at phys_addr for size bytes, will be carved with flags

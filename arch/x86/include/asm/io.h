@@ -46,15 +46,58 @@
 #include <asm/pgtable_types.h>
 #include <asm/shared/io.h>
 
+#ifdef CONFIG_CONFIDENTIAL_VM
+extern int tyche_confidential_mmio;
+#include "../../../../include/uapi/linux/kvm_para.h"
+#include <linux/vmalloc.h>
+#endif
+
+#ifdef CONFIG_CONFIDENTIAL_VM
+#define build_mmio_read(name, size, type, reg, barrier) \
+static inline type name(const volatile void __iomem *addr) \
+{ \
+	if (tyche_confidential_mmio) { \
+		u64 ret; \
+		struct vm_struct *p; \
+		volatile void __iomem* aligned_addr = (volatile void __iomem *)(PAGE_MASK & (unsigned long __force)addr); \
+		unsigned long offset = ((unsigned long __force) addr) - ((unsigned long __force) aligned_addr); \
+		p = find_vm_area((void __force *)addr); \
+		BUG_ON(!p); \
+		HC_DO_READ_MMIO(p->phys_addr + offset, ret, sizeof(type)); \
+		return (type) ret; \
+	} else { \
+	type ret; asm volatile("mov" size " %1,%0":reg (ret) \
+	:"m" (*(volatile type __force *)addr) barrier); return ret;} \
+}
+#else
 #define build_mmio_read(name, size, type, reg, barrier) \
 static inline type name(const volatile void __iomem *addr) \
 { type ret; asm volatile("mov" size " %1,%0":reg (ret) \
 :"m" (*(volatile type __force *)addr) barrier); return ret; }
+#endif
 
+#ifdef CONFIG_CONFIDENTIAL_VM
+#define build_mmio_write(name, size, type, reg, barrier) \
+static inline void name(type val, volatile void __iomem *addr) \
+{ \
+	if (tyche_confidential_mmio) { \
+		struct vm_struct *p; \
+		volatile void __iomem* aligned_addr = (volatile void __iomem *)(PAGE_MASK & (unsigned long __force)addr); \
+		unsigned long offset = ((unsigned long __force) addr) - ((unsigned long __force) aligned_addr); \
+		p = find_vm_area((void __force *)addr); \
+		BUG_ON(!p); \
+		HC_DO_WRITE_MMIO(p->phys_addr + offset, val, sizeof(type)); \
+	} else { \
+		asm volatile("mov" size " %0,%1": :reg (val), \
+		"m" (*(volatile type __force *)addr) barrier); \
+	} \
+}
+#else
 #define build_mmio_write(name, size, type, reg, barrier) \
 static inline void name(type val, volatile void __iomem *addr) \
 { asm volatile("mov" size " %0,%1": :reg (val), \
 "m" (*(volatile type __force *)addr) barrier); }
+#endif
 
 build_mmio_read(readb, "b", unsigned char, "=q", :"memory")
 build_mmio_read(readw, "w", unsigned short, "=r", :"memory")

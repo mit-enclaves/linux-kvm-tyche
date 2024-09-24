@@ -31,6 +31,44 @@
 #define KVM_HC_SCHED_YIELD		11
 #define KVM_HC_MAP_GPA_RANGE		12
 
+//@aghosn: Added for Tyche
+#define KVM_HC_WRITE_MMIO 13
+#define KVM_HC_READ_MMIO 14
+
+/* Call from a confidential TD into the KVM hypercall routine. */
+#define TYCHE_CALL_MGMT 25
+
+extern int tyche_turned_confidential;
+
+/* Helper functions to invoke the hypercall mmio. */
+
+#define HC_DO_WRITE_MMIO(addr, val, size) do { \
+	asm volatile( \
+		"movq %0, %%rdi\n\t" \
+		"movq %1, %%rbx\n\t" \
+		"movq %2, %%rcx\n\t" \
+		"movq %3, %%rdx\n\t" \
+		"movq $25, %%rax\n\t" \
+		"vmcall\n\t" \
+		: \
+		: "rm" ((uint64_t) KVM_HC_WRITE_MMIO), "rm" (addr), \
+				"rm" ((uint64_t) val), "rm" ((uint64_t)size) \
+		: "rdi", "rbx", "rcx", "rdx", "rax", "memory"); \
+} while(0);
+
+#define HC_DO_READ_MMIO(addr, dest, size) do { \
+	asm volatile( \
+		"movq %1, %%rdi\n\t" \
+		"movq %2, %%rbx\n\t" \
+		"movq %3, %%rcx\n\t" \
+		"movq $25, %%rax\n\t" \
+		"vmcall\n\t" \
+		"movq %%rax, %0\n\t" \
+		: "=rm" (dest) \
+		: "rm" ((uint64_t) KVM_HC_READ_MMIO), "rm" (addr), "rm" ((uint64_t)size) \
+		: "rdi", "rbx", "rcx", "rax", "memory"); \
+} while(0);
+
 /*
  * hypercalls use architecture specific
  */

@@ -7,6 +7,7 @@
 #include "linux/gfp_types.h"
 #include "linux/nmi.h"
 #include "linux/rwsem.h"
+#include "linux/swiotlb.h"
 #include "tyche_api.h"
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -146,6 +147,11 @@ static void dump_list(segment_list_t* l) {
         iter->pa, iter->pa + iter->size);
   }
 }
+// ——————————————————————————————— Parameters ——————————————————————————————— //
+static bool tyche_coco = false;
+
+module_param(tyche_coco, bool, 000);
+MODULE_PARM_DESC(tyche_coco, "Transition into a confidential VM.");
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
@@ -159,6 +165,41 @@ void driver_init_domains(void)
   driver_init_capabilities();
 }
 
+#ifdef CONFIG_CONFIDENTIAL_VM
+extern int tyche_confidential_mmio;
+#endif
+
+int driver_revoke_manager_access(void)
+{
+  capability_t* capa = local_domain.capabilities.head;
+  int revoked = 0;
+  while(capa != NULL) {
+    capability_t* to_revoke = NULL;
+    if (capa->capa_type != RegionRevoke) {
+      capa = capa->list.next;
+      continue;
+    }
+    to_revoke = capa;
+    capa = capa->list.next;
+    if (tyche_revoke(to_revoke->local_id) != SUCCESS) {
+      ERROR("Unable to revoke ");
+      goto failure;
+    }
+    dll_remove(&(local_domain.capabilities), to_revoke, list);
+    local_domain.dealloc(to_revoke);
+    revoked++;
+  }
+#ifdef CONFIG_CONFIDENTIAL_VM
+  if (revoked > 0 || tyche_coco) {
+    tyche_confidential_mmio = 1;
+    swiotlb_print_info();
+    pr_err("Tyche driver transitionned into confidential mmio.\n");
+  }
+#endif
+  return revoked;
+failure:
+  return 0;
+}
 
 int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int aliased)
 {
@@ -190,6 +231,7 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   init_rwsem(&(dom->rwlock));
   dll_init_list(&(dom->raw_segments));
   dll_init_list(&(dom->segments));
+  dll_init_list(&(dom->to_free_on_delete));
   dll_init_elem(dom, list);
 
   // Call tyche to create the domain.
@@ -284,7 +326,7 @@ failure:
 }
 EXPORT_SYMBOL(driver_tyche_check_coalesce);
 
-int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
+int driver_tyche_mmap(segment_list_t *raw, segment_list_t* free_list, struct vm_area_struct* vma)
 {
   void* allocation = NULL;
   usize size = 0;
@@ -299,6 +341,7 @@ int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
   while (vaddr < vma->vm_end) {
     usize left_to_map = vma->vm_end - vaddr, to_map = 0;
     unsigned long pfn = 0;
+    segment_t* to_free = NULL;
     order = get_order(left_to_map);
     to_map = (order < MAX_ORDER)? left_to_map : max_size;
     allocation = alloc_pages_exact(to_map, GFP_KERNEL);
@@ -324,6 +367,18 @@ int driver_tyche_mmap(segment_list_t *raw, struct vm_area_struct* vma)
       ERROR("Unable to allocate a segment");
       goto failure;
     }
+    to_free = (segment_t*) kmalloc(sizeof(segment_t), GFP_KERNEL);
+    if (to_free == NULL) {
+      ERROR("Unable to allocate segment to free.");
+      goto failure;
+    }
+    memset(to_free, 0, sizeof(segment_t));
+    dll_init_elem(to_free, list);
+    to_free->va = (usize) allocation;
+    to_free->size = to_map;
+    to_free->pa = virt_to_phys(allocation);
+    dll_add(free_list, to_free, list);
+
     /* Update the vaddr */
     vaddr += to_map;
     allocation = NULL;
@@ -364,7 +419,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     goto failure;
   }*/
 
-  if (driver_tyche_mmap(&(dom->raw_segments), vma) != SUCCESS) {
+  if (driver_tyche_mmap(&(dom->raw_segments), &(dom->to_free_on_delete), vma) != SUCCESS) {
     ERROR("Unable to mmap vma 0x%lx - 0x%lx", vma->vm_start, vma->vm_end);
     goto failure;
   }
@@ -1095,17 +1150,28 @@ int driver_commit_regions(driver_domain_t *dom)
           goto failure;
         }
         break;
-  case SHARED_REPEAT:
-    if (share_repeat_region(dom->domain_id,
+      case SHARED_REPEAT:
+        if (share_repeat_region(dom->domain_id,
           segment->pa,
           segment->size,
           segment->flags,
           segment->alias) != SUCCESS) {
-      ERROR("Unable to share repeat segment %llx -- %llx {%x}",
-          segment->va, segment->size, segment->flags);
-      goto failure;
-    }
-    break;
+          ERROR("Unable to share repeat segment %llx -- %llx {%x}",
+            segment->va, segment->size, segment->flags);
+          goto failure;
+        }
+        break;
+      case CONFIDENTIALIZABLE:
+        if (grant_shared_region(dom->domain_id,
+              segment->pa,
+              segment->size,
+              segment->flags,
+              segment->alias) != SUCCESS) {
+          ERROR("Unable to share confidentializable segment %llx -- %llx {%x}",
+              segment->pa, segment->pa + segment->size, segment->flags);
+          goto failure;
+        }
+        break;
       default:
         ERROR("Invalid tpe for segment!");
         goto failure;
@@ -1447,10 +1513,36 @@ failure:
 }
 EXPORT_SYMBOL(driver_switch_domain);
 
+int tyche_free_memory(segment_list_t* to_free)
+{
+  segment_t* segment = NULL;
+  int i = 0;
+  if (to_free == NULL) {
+    // Nothing to do.
+    goto failure;
+  }
+  // Delete the memory mappings.
+  while(!dll_is_empty(to_free)) {
+    segment = dll_head(to_free);
+    dll_remove(to_free, segment, list);
+    for (i = 0; i < (segment->size / PAGE_SIZE); i++) {
+      char* mem = ((char*) segment->va) + i * PAGE_SIZE;
+      ClearPageReserved(virt_to_page((unsigned long) mem));
+    }
+    free_pages_exact((void*) (segment->va), segment->size);
+    kfree(segment);
+    segment = NULL;
+  }
+
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+EXPORT_SYMBOL(tyche_free_memory);
+
 int driver_delete_domain(driver_domain_t *dom)
 {
   segment_t* segment = NULL;
-  usize size = 0;
   if (dom == NULL) {
     ERROR("The domain is null.");
     goto failure;
@@ -1470,16 +1562,15 @@ delete_dom_struct:
   // Delete all segments;
   while(!dll_is_empty(&(dom->segments))) {
     segment = dll_head(&(dom->segments));
-    size += segment->size;
     dll_remove(&(dom->segments), segment, list);
-    //TODO: this creates a bug if user code calls munmap.
-    /*if (dom->handle != NULL) {
-      free_pages_exact(phys_to_virt((phys_addr_t)(segment->pa)), size);
-    }*/
     kfree(segment);
     segment = NULL;
   }
 
+  if (tyche_free_memory(&(dom->to_free_on_delete)) != SUCCESS) {
+    ERROR("Unable to free the reserved pages.");
+    ERROR("Keep going with the deallocation to avoid memory leaks");
+  }
   // Delete the contexts.
   for (int i = 0; i < ENTRIES_PER_DOMAIN; i++) {
     if (dom->contexts[i] != NULL) {

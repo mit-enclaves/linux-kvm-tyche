@@ -60,6 +60,11 @@ static void bad_io_access(unsigned long port, const char *access)
 		bad_io_access(port, #is_pio );			\
 } while (0)
 
+#ifdef CONFIG_CONFIDENTIAL_VM
+int tyche_confidential_mmio = 0;
+EXPORT_SYMBOL(tyche_confidential_mmio);
+#endif
+
 #ifndef pio_read16be
 #define pio_read16be(port) swab16(inw(port))
 #define pio_read32be(port) swab32(inl(port))

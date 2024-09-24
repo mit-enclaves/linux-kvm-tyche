@@ -2,6 +2,8 @@
 #include "asm/kvm_host.h"
 #include "domains.h"
 #include "linux/kvm_host.h"
+#include "linux/printk.h"
+#include "tyche_capabilities_types.h"
 #include "vmx.h"
 #include "../mmu/mmu_internal.h"
 #include "common_kvm.h"
@@ -88,7 +90,7 @@ int write_domain_config(struct vcpu_vmx *vmx, usize idx, usize value)
 
 	ACQUIRE_DOM(kvm_vmx->domain, true);
 	if (driver_set_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id,
-					  idx, value) != SUCCESS) {
+						idx, value) != SUCCESS) {
 		ERROR("Unable to set the domain core config");
 		RELEASE_DOM(kvm_vmx->domain, true);
 		goto failure;
@@ -113,7 +115,7 @@ usize read_domain_config(struct vcpu_vmx *vmx, usize idx)
 	}
 	ACQUIRE_DOM(kvm_vmx->domain, false);
 	if (driver_get_domain_core_config(kvm_vmx->domain, vmx->vcpu.vcpu_id,
-					  idx, &value) != SUCCESS) {
+						idx, &value) != SUCCESS) {
 		ERROR("Unable to get the domain core config.");
 		RELEASE_DOM(kvm_vmx->domain, false);
 		goto failure;
@@ -186,7 +188,7 @@ void write_all_gp_registers(struct vcpu_vmx *vmx)
 static int mmu_pages_are_contiguous(struct kvm_memory_slot *slot, bool write)
 {
 	kvm_pfn_t pfn = __gfn_to_pfn_memslot(slot, slot->base_gfn, false, false,
-					     NULL, write, NULL, NULL);
+							 NULL, write, NULL, NULL);
 	int i = 0;
 	if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
 		// For the moment ignore these entries.
@@ -197,7 +199,7 @@ static int mmu_pages_are_contiguous(struct kvm_memory_slot *slot, bool write)
 	for (i = 1; i < slot->npages; i++) {
 		gfn_t gfn = slot->base_gfn + i;
 		kvm_pfn_t npfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
-						      NULL, write, NULL, NULL);
+									NULL, write, NULL, NULL);
 		if (npfn != (pfn + i)) {
 			return 0;
 		}
@@ -210,7 +212,7 @@ static int mmu_pages_all_the_same(struct kvm_memory_slot *slot, bool write)
 {
 	int i = 0;
 	kvm_pfn_t pfn = __gfn_to_pfn_memslot(slot, slot->base_gfn, false, false,
-					     NULL, write, NULL, NULL);
+							 NULL, write, NULL, NULL);
 	if (pfn == KVM_PFN_NOSLOT || pfn == KVM_PFN_ERR_RO_FAULT) {
 		// For the moment ignore these entries.
 		pr_err("Wrong type of memory segment %llx\n", pfn);
@@ -219,7 +221,7 @@ static int mmu_pages_all_the_same(struct kvm_memory_slot *slot, bool write)
 	for (i = 1; i < slot->npages; i++) {
 		gfn_t gfn = slot->base_gfn + i;
 		kvm_pfn_t npfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
-						      NULL, write, NULL, NULL);
+									NULL, write, NULL, NULL);
 		if (npfn != pfn) {
 			return 0;
 		}
@@ -232,19 +234,19 @@ static void mmu_pages_dump(struct kvm_memory_slot *slot, bool write)
 {
 	int i = 0;
 	pr_err("[Dumping] base gfn: %llx, npages: %ld\n", slot->base_gfn,
-	       slot->npages);
+				 slot->npages);
 	for (i = 0; i < slot->npages; i++) {
 		gfn_t gfn = slot->base_gfn + i;
 		kvm_pfn_t pfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
-						     NULL, write, NULL, NULL);
+								 NULL, write, NULL, NULL);
 		pr_err("[Mapping] gpa: %llx, hpa: %llx, i: %d\n", gfn, pfn, i);
 	}
 	BUG_ON(1);
 }*/
 
 static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
-		       usize gfn, usize npages, segment_type_t tpe,
-		       memory_access_right_t rights)
+					 usize gfn, usize npages, segment_type_t tpe,
+					 memory_access_right_t rights)
 {
 	segment_t* seg = NULL;
 	// Special case for PIPEs.
@@ -281,13 +283,13 @@ static int map_segment(driver_domain_t *dom, usize user_addr, usize hfn,
 	}
 
 	if (driver_add_raw_segment(&(dom->raw_segments), user_addr, hfn << PAGE_SHIFT,
-				   npages << PAGE_SHIFT) != SUCCESS) {
+					 npages << PAGE_SHIFT) != SUCCESS) {
 		ERROR("Unable to addr raw segment");
 		return FAILURE;
 	}
 
 	if (driver_mprotect_domain(dom, user_addr, npages << PAGE_SHIFT, rights,
-				   tpe, gfn << PAGE_SHIFT) != SUCCESS) {
+					 tpe, gfn << PAGE_SHIFT) != SUCCESS) {
 		ERROR("Unable to mprotect the segment.");
 		return FAILURE;
 	}
@@ -300,14 +302,14 @@ unlock:
 	up_write(&(dom->rwlock));
 
 	/*pr_err("[PF mapped] hpa: %llx, gpa: %llx, hva: %llx | npages: %lld | tpe: %d | prot: %d\n",
-	       hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe,
-	       rights);*/
+				 hfn << PAGE_SHIFT, gfn << PAGE_SHIFT, user_addr, npages, tpe,
+				 rights);*/
 
 	return SUCCESS;
 }
 
 static int parse_kvm_flags(u32 flags, memory_access_right_t *rights,
-			   segment_type_t *tpe)
+				 segment_type_t *tpe)
 {
 	if (rights == NULL || tpe == NULL) {
 		ERROR("Rights or tpe is NULL");
@@ -324,9 +326,9 @@ static int parse_kvm_flags(u32 flags, memory_access_right_t *rights,
 	}
 	// When we have an encoding.
 	*tpe = (flags & KVM_FLAGS_SEGMENT_TYPE_MASK) >>
-	       KVM_FLAGS_SEGMENT_TYPE_IDX;
+				 KVM_FLAGS_SEGMENT_TYPE_IDX;
 	*rights = (flags & KVM_FLAGS_MEM_ACCESS_RIGHTS_MASK) >>
-		  KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX;
+			KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX;
 	// Quick check for consistency between mem readonly and mem access rights.
 	if (((flags & KVM_MEM_READONLY) != 0) && ((*rights & MEM_WRITE) != 0)) {
 		ERROR("KVM mem readonly but mem access right has write access");
@@ -338,7 +340,7 @@ failure:
 }
 
 static int map_eager(driver_domain_t *dom, struct kvm_memory_slot *slot,
-		     bool write)
+				 bool write)
 {
 	int i = 0;
 	unsigned int seg_count = 0;
@@ -347,18 +349,20 @@ static int map_eager(driver_domain_t *dom, struct kvm_memory_slot *slot,
 	gfn_t base_gfn = slot->base_gfn;
 	usize nb_pages = 1;
 	segment_type_t tpe = 0;
+	segment_type_t slot_tpe = 0;
 	memory_access_right_t rights = 0;
 
 	if (parse_kvm_flags(slot->flags, &rights, &tpe) != SUCCESS) {
 		ERROR("Unable to parse the flags...");
 		return FAILURE;
 	}
+	slot_tpe = tpe;
 
 	for (i = 1; i <= slot->npages; i++) {
 		gfn_t gfn = slot->base_gfn + i;
 		usize gnpages = gfn - base_gfn;
 		kvm_pfn_t npfn = __gfn_to_pfn_memslot(slot, gfn, false, false,
-						      NULL, write, NULL, NULL);
+									NULL, write, NULL, NULL);
 		if (i == slot->npages) {
 			goto perform_mapping;
 		}
@@ -396,7 +400,7 @@ perform_mapping:
 		nb_pages = 1;
 		base_gfn = gfn;
 		base_pfn = npfn;
-		tpe = SHARED;
+		tpe = slot_tpe;
 	}
 	//pr_err("eager mapper used %u segments\n", seg_count);
 	return SUCCESS;
@@ -427,7 +431,7 @@ int tyche_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	rcu_read_lock();
 
 	if (unlikely(!fault->slot)) {
-		//pr_err("This is probably mmio: %llx.", fault->addr);
+		//pr_err("This is probably mmio: %llx.\n\n", fault->addr);
 		//tyche_print_all_slots(vcpu);
 		rcu_read_unlock();
 		return RET_PF_EMULATE;
@@ -467,13 +471,13 @@ map_segment:
 			break;
 		default:
 			ERROR("We detected a repeat but base type is already repeat %d",
-			      tpe);
+						tpe);
 			ret = RET_PF_INVALID;
 			goto unlock;
 		}
 	}
 	pfn = __gfn_to_pfn_memslot(fault->slot, fault->slot->base_gfn, false,
-				   false, NULL, fault->write, NULL, NULL);
+					 false, NULL, fault->write, NULL, NULL);
 	if (map_segment(vmx->domain, fault->slot->userspace_addr, pfn,
 			fault->slot->base_gfn, fault->slot->npages, tpe,
 			rights) != SUCCESS) {
@@ -511,9 +515,9 @@ void tyche_print_all_slots(struct kvm_vcpu *vcpu)
 	int bkt = 0;
 	kvm_for_each_memslot(slot, bkt, slots) {
 		pr_err("[PAS] gpa: %llx, hva: %lx, npages: %ld | prot: %u | cont: %d, repeat: %d\n",
-		       slot->base_gfn << PAGE_SHIFT, slot->userspace_addr,
-		       slot->npages, slot->flags,
-		       mmu_pages_are_contiguous(slot, false),
-		       mmu_pages_all_the_same(slot, false));
+					 slot->base_gfn << PAGE_SHIFT, slot->userspace_addr,
+					 slot->npages, slot->flags,
+					 mmu_pages_are_contiguous(slot, false),
+					 mmu_pages_all_the_same(slot, false));
 	}
 }

@@ -358,6 +358,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       RELEASE_DOM(true);
       //TODO(aghosn): do we need to get the physoffset?
       break;
+    case TYCHE_REVOKE_MGMT_ACCESS:
+      if (driver_revoke_manager_access() != SUCCESS) {
+        ERROR("Unable to transition to confidential setting.\n");
+        goto failure;
+      }
+      break;
     default:
       ERROR("The command is not valid! %d", cmd);
       goto failure;

@@ -5,6 +5,13 @@
 #
 mainmenu "Linux/$(ARCH) $(KERNELVERSION) Kernel Configuration"
 
+# Define whether the kernel is meant to run confidentially
+config CONFIDENTIAL_VM
+    bool "Enable confidential VM support"
+    default n
+    help
+      This signals paravirtualization for confidential VMs.
+
 source "scripts/Kconfig.include"
 
 source "init/Kconfig"

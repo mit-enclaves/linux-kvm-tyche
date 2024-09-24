@@ -16,6 +16,7 @@
  *   Ben-Ami Yassour <benami@il.ibm.com>
  */
 
+#include "linux/kvm_para.h"
 #include <linux/kvm_host.h>
 #include "irq.h"
 #include "ioapic.h"
@@ -9606,6 +9607,8 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
 	int op_64_bit;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
+	uint64_t reading_value = 0;
 
 	if (kvm_xen_hypercall_enabled(vcpu->kvm))
 		return kvm_xen_hypercall(vcpu);
@@ -9613,11 +9616,15 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	if (kvm_hv_hypercall_enabled(vcpu))
 		return kvm_hv_hypercall(vcpu);
 
-	nr = kvm_rax_read(vcpu);
-	a0 = kvm_rbx_read(vcpu);
-	a1 = kvm_rcx_read(vcpu);
-	a2 = kvm_rdx_read(vcpu);
-	a3 = kvm_rsi_read(vcpu);
+	if (tyche_enabled) {
+		nr = kvm_rdi_read(vcpu);
+	} else {
+	  nr = kvm_rax_read(vcpu);
+  }
+	  a0 = kvm_rbx_read(vcpu);
+	  a1 = kvm_rcx_read(vcpu);
+	  a2 = kvm_rdx_read(vcpu);
+	  a3 = kvm_rsi_read(vcpu);
 
 	trace_kvm_hypercall(nr, a0, a1, a2, a3);
 
@@ -9638,6 +9645,21 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	ret = -KVM_ENOSYS;
 
 	switch (nr) {
+	case KVM_HC_WRITE_MMIO:
+		init_emulate_ctxt(vcpu);
+		ctxt->gpa_available = true;
+		ctxt->gpa_val = a0;
+		ret = ctxt->ops->write_emulated(ctxt, a0, &a1, a2, NULL);
+		BUG_ON(ret != X86EMUL_CONTINUE);
+		return 0;
+		break;
+  case KVM_HC_READ_MMIO:
+		init_emulate_ctxt(vcpu);
+		ctxt->gpa_available = true;
+		ctxt->gpa_val = a0;
+		ret = ctxt->ops->read_emulated(ctxt, a0, &reading_value, a1, NULL);
+		kvm_rax_write(vcpu, reading_value);
+		return 0;
 	case KVM_HC_VAPIC_POLL_IRQ:
 		ret = 0;
 		break;

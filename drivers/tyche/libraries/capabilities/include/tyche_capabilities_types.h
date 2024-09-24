@@ -34,6 +34,8 @@ typedef enum segment_type_t {
 	SHARED_REPEAT = 2,
 	CONFIDENTIAL_REPEAT = 3,
 	PIPE = 4,
+	// Shared but own a way to revoke from manager.
+	CONFIDENTIALIZABLE = 5,
 } segment_type_t;
 
 /// Type of a capability

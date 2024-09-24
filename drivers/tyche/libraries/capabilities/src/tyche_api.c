@@ -410,10 +410,6 @@ int tyche_send(capa_index_t dest, capa_index_t capa) {
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
   }
-  // Check that the revocation handle is the original one.
-  if (frame.value_1 != capa) {
-    goto failure;
-  }
   return SUCCESS;
 failure:
   return FAILURE;

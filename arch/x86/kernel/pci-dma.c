@@ -63,6 +63,11 @@ static void __init pci_swiotlb_detect(void)
 		x86_swiotlb_enable = true;
 		x86_swiotlb_flags |= SWIOTLB_FORCE;
 	}
+#ifdef CONFIG_CONFIDENTIAL_VM
+	pr_err("Confidential VM forcing x86_SWIOTLB_enable\n");
+	x86_swiotlb_enable = true;
+	x86_swiotlb_flags |= SWIOTLB_FORCE;
+#endif
 }
 #else
 static inline void __init pci_swiotlb_detect(void)

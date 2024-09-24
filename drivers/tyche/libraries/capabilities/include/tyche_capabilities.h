@@ -62,6 +62,12 @@ int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
 int share_region(domain_id_t id, paddr_t start, usize size,
 		 memory_access_right_t access, usize alias);
 
+/// Create a shared memory region owned by the domain.
+/// This cuts the region, duplicated it, keeps the duplicate but gives
+/// the revocation to the domain.
+int grant_shared_region(domain_id_t id, paddr_t start, usize size,
+			memory_access_right_t access, usize alias);
+
 /// Share a memory region that is aliased and repeats.
 /// This leads to one physical page starting at start, mapped from alias to alias + size.
 int share_repeat_region(domain_id_t id, paddr_t start, usize size,

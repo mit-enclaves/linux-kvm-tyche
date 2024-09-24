@@ -119,5 +119,6 @@ typedef struct {
 #define TYCHE_GET_ATTESTATION _IOWR('a', 'q', attest_buffer_t *)
 #define TYCHE_GET_MGMT_INDEX _IOW('a', 'r', capa_index_t *)
 #define TYCHE_REGISTER_REGION _IOWR('a', 's', msg_info_t *)
+#define TYCHE_REVOKE_MGMT_ACCESS _IOWR('a', 't', void *)
 
 #endif

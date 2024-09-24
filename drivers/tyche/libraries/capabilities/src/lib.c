@@ -601,7 +601,66 @@ int grant_region(domain_id_t id, paddr_t start, usize size,
 int share_region(domain_id_t id, paddr_t start, usize size,
                  memory_access_right_t access, usize alias) {
   return internal_carve_region(id, start, size, access, 1, 0, alias);
-} 
+}
+
+int grant_shared_region(domain_id_t id, paddr_t start, usize size,
+                 memory_access_right_t access, usize alias) {
+  // We need 4 capabilities:
+  // 1. to_send: the region for the child domain.
+  // 2. revoke: revocation of 1, owned by the current domain.
+  // 3. duplicated: a duplicated of 1, owned by the current domain.
+  // 4. revoke_duplicated: revocation of 3, owned by the child domain.
+  capability_t* to_send = NULL, *revoke = NULL, *duplicated = NULL,
+    *revoke_duplicated = NULL;
+  child_domain_t *child = NULL;
+  usize aliased_start = (alias == NO_ALIAS)? start : alias;
+  memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
+  memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
+
+  child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+
+  if (cut_region(start, size, basic_access, &to_send, &revoke) != SUCCESS) {
+    ERROR("Unable to cut the region");
+    goto failure;
+  }
+
+  if (dup_region(to_send, &duplicated, &revoke_duplicated) != SUCCESS) {
+    ERROR("Unable to duplicate the region");
+    goto failure;
+  }
+
+  // Send the region to the domain.
+  if (tyche_send_aliased(child->management->local_id, to_send->local_id,
+        0, aliased_start, size, send_access >> 2) != SUCCESS) {
+    ERROR("Unable to send the capability.");
+    goto failure;
+  }
+  // Send the duplicated revocation.
+  if (tyche_send(child->management->local_id, revoke_duplicated->local_id) != SUCCESS) {
+    ERROR("Unable to send the duplicated revocation.");
+    goto failure;
+  }
+
+  // Store the local information.
+  revoke->info.revoke_region.alias_start = aliased_start;
+  revoke->info.revoke_region.alias_size = size;
+  revoke->info.revoke_region.is_repeat = 0;
+  dll_add(&(child->revocations), revoke, list);
+
+  // Deallocate the lost/ignored capabilities.
+  // @info: the capabilities should not be in any list.
+  local_domain.dealloc(to_send);
+  local_domain.dealloc(revoke_duplicated);
+  local_domain.dealloc(duplicated);
+  // All done!
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
 
 int share_repeat_region(domain_id_t id, paddr_t start, usize size,
     memory_access_right_t access, usize alias)

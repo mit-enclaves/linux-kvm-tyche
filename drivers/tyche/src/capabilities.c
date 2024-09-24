@@ -28,5 +28,6 @@ static void local_print(const char *msg)
 
 int driver_init_capabilities(void)
 {
-  return init(local_allocator, local_free); 
+  int ret = init(local_allocator, local_free);
+  return ret;
 } 
