@@ -15,6 +15,8 @@
 
 #include "asm/kvm_host.h"
 #include "domains.h"
+#include "tyche.h"
+#include "tyche_capabilities.h"
 #include "tyche_api.h"
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
@@ -8701,6 +8703,29 @@ static void vmx_vm_destroy(struct kvm *kvm)
 		   vmx_get_pid_table_order(kvm));
 }
 
+static int tyche_install_cpuid_entries(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2) {
+    struct kvm_vmx *kvm_vmx = to_kvm_vmx(vcpu->kvm);
+    int res;
+    capa_index_t management;
+    res = get_domain_capa(kvm_vmx->domain->domain_id, &management);
+    if (res != SUCCESS) goto fail;
+    res = tyche_set_cpuid_entry(
+            management,
+            e2-> function,
+            e2->index,
+            e2->flags,
+            e2->eax,
+            e2->ebx,
+            e2->ecx,
+            e2->edx);
+    if (res != SUCCESS) goto fail;
+
+    return SUCCESS;
+fail:
+    ERROR("Failled to install CPUID entry");
+    return FAILURE;
+}
+
 static struct kvm_x86_ops vmx_x86_ops __initdata = {
 	.name = "kvm_intel",
 
@@ -8838,6 +8863,7 @@ static struct kvm_x86_ops vmx_x86_ops __initdata = {
 	.complete_emulated_msr = kvm_complete_insn_gp,
 
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
+    .tyche_install_cpuid_entries = tyche_install_cpuid_entries,
 };
 
 static unsigned int vmx_handle_intel_pt_intr(void)
