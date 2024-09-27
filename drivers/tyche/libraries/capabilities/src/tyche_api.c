@@ -622,6 +622,7 @@ int tyche_switch(capa_index_t* transition_handle, usize delta, usize exit_frame[
     "pushq %%r13\n\t"
     "pushq %%r14\n\t"
     "pushq %%r15\n\t"
+    "pushq %%rbp\n\t"
     // Push the arrays, first the main one, then the result one.
     "movq %1, %%rax\n\t"
     "pushq %%rax\n\t"
@@ -663,8 +664,13 @@ int tyche_switch(capa_index_t* transition_handle, usize delta, usize exit_frame[
     "movq %%r9, 40(%%rax)\n\t" // vm exit intr info.
     "movq %%r10, 48(%%rax)\n\t" // vm exit intr error code.
     "movq %%r11, 56(%%rax)\n\t" // vm exit instruction len.
-    "movq %%r12, 64(%%rax)\n\t" // vm instruction error.
+    "movq %%r12, 64(%%rax)\n\t" // idt vectoring info field.
+    "movq %%r13, 72(%%rax)\n\t" // guest pml index
+    "movq %%r14, 80(%%rax)\n\t" // guest interruptibility info
+    "movq %%r15, 88(%%rax)\n\t" // exit qualification
+    "movq %%rbp, 96(%%rax)\n\t" // guest interrupt status
     // Now put back all the registers.
+    "popq %%rbp\n\t"
     "popq %%r15\n\t"
     "popq %%r14\n\t"
     "popq %%r13\n\t"

@@ -9,7 +9,7 @@
 #include "dll.h"
 
 #if defined(CONFIG_X86) || defined(__x86_64__)
-#define TYCHE_EXIT_FRAME_SIZE 9
+#define TYCHE_EXIT_FRAME_SIZE 13
 #elif defined(CONFIG_RISCV) || defined(__riscv)
 #define TYCHE_EXIT_FRAME_SIZE 4
 #endif

@@ -201,6 +201,9 @@ static inline bool virtio_has_dma_quirk(const struct virtio_device *vdev)
 	 * Note the reverse polarity of the quirk feature (compared to most
 	 * other features), this is for compatibility with legacy systems.
 	 */
+#ifdef CONFIG_CONFIDENTIAL_VM
+	return false;
+#endif
 	return !virtio_has_feature(vdev, VIRTIO_F_ACCESS_PLATFORM);
 }
 
