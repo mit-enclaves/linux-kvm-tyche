@@ -6,3 +6,5 @@ CFLAGS_core.o		+= -fno-stack-protector
 obj-y += core.o
 
 obj-$(CONFIG_INTEL_TDX_GUEST)	+= tdx/
+
+obj-$(CONFIG_TYCHE_GUEST)	+= tyche/
