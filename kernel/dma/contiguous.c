@@ -312,8 +312,11 @@ struct page *dma_alloc_contiguous(struct device *dev, size_t size, gfp_t gfp)
 		return NULL;
 	if (dev->cma_area)
 		return cma_alloc_aligned(dev->cma_area, size, gfp);
+// @aghosn: otherwise virtio console gets allocated elsewhere.
+#ifndef CONFIG_CONFIDENTIAL_VM
 	if (size <= PAGE_SIZE)
 		return NULL;
+#endif
 
 #ifdef CONFIG_DMA_PERNUMA_CMA
 	if (nid != NUMA_NO_NODE && !(gfp & (GFP_DMA | GFP_DMA32))) {

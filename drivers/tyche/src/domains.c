@@ -18,6 +18,9 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 #include <linux/fs.h>
+#include <linux/swiotlb.h>
+#include <linux/dma-map-ops.h>
+#include <linux/cma.h>
 
 #if defined(CONFIG_X86) || defined(__x86_64__)
 #include <asm/vmx.h>
@@ -108,6 +111,10 @@ failure:
   return FAILURE;
 }
 
+// ——————————————————————————— Helpers prototypes ——————————————————————————— //
+
+static int translate_gpa_hpas(segment_list_t* res, usize va, usize gpa, usize size);
+
 // ———————————————————————————— Helper Functions ———————————————————————————— //
 
 driver_domain_t* find_domain(domain_handle_t handle, bool write)
@@ -169,10 +176,86 @@ void driver_init_domains(void)
 extern int tyche_confidential_mmio;
 #endif
 
+// Enables to share a region through a channel.
+// For now it does not support aliases but we might eventually need to.
+// The main reason we use this function rather than directly call the capability
+// library is because we might be aliased ourself.
+static int share_region_channel(capability_t* channel, phys_addr_t start, phys_addr_t end)
+{
+  segment_list_t fake_list;
+  memory_access_right_t access = MEM_ACTIVE | MEM_READ | MEM_WRITE | MEM_EXEC
+    | MEM_SUPER;
+  dll_init_list(&fake_list);
+  // Translate all the gpa pages into hpas.
+  if (translate_gpa_hpas(&fake_list, start, start, end-start) != SUCCESS) {
+    ERROR("Unable to translate GPAs to HPAS for shared region through channel.");
+    goto failure;
+  }
+
+  // Now iterate through the segments and share them.
+  // Delete the segments at the same time.
+  while(!dll_is_empty(&fake_list)) {
+    segment_t* head = fake_list.head;
+    dll_remove(&fake_list, head, list);
+    pr_err("Shared region w/ channel: 0x%llx -- 0x%llx\n",
+        head->pa, head->pa + head->size);
+    if (internal_carved_region_with_capa(channel->local_id,
+          head->pa, head->size, access,
+          /*is_shared*/ 1, /*is_repeat*/ 0, head->pa, /*ret_revoke*/ NULL) != SUCCESS) {
+      ERROR("Unable to send the segment back to the parent...");
+      goto failure;
+    }
+    kfree(head);
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int driver_revoke_manager_access(void)
 {
   capability_t* capa = local_domain.capabilities.head;
+  capability_t* chan = NULL;
   int revoked = 0;
+  // Revoking manager access is a careful dance:
+  // 1. Find the manager channel. It should be the only channel available for now.
+  //    If not, UPDATE THIS CODE.
+  // 2. Find the swiotbl and cma buffers, and share them with the parent.
+  // 3. Finally revoke the parental access to the rest of the VM.
+
+  // Step 1: TODO we should improve this somehow... we don't even check for the
+  // identity on the other side of the channel.
+  dll_foreach(&(local_domain.capabilities), chan, list) {
+    if (chan->capa_type == Channel) {
+      // Found it.
+      break;
+    }
+  }
+
+  if (chan == NULL) {
+    ERROR("Unable to find the parent channel!");
+    goto failure;
+  }
+
+#ifdef CONFIG_SWIOTLB
+  // Step 2: Find and share the swiotlb and cma.
+  if (share_region_channel(chan, io_tlb_default_mem.start,
+        io_tlb_default_mem.end) != SUCCESS) {
+    ERROR("Unable to share the swiotlb region.\n");
+    goto failure;
+  }
+#endif
+
+#ifdef CONFIG_CMA
+  if (dma_contiguous_default_area == NULL ||
+      (share_region_channel(chan,cma_get_base(dma_contiguous_default_area),
+        cma_get_base(dma_contiguous_default_area) +
+        cma_get_size(dma_contiguous_default_area)) != SUCCESS)) {
+      ERROR("Unable to share the cma region for virtqueue.");
+      goto failure;
+  }
+#endif
+  // Step 3: remove the manager's access to VM.
   while(capa != NULL) {
     capability_t* to_revoke = NULL;
     if (capa->capa_type != RegionRevoke) {
@@ -1474,7 +1557,34 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
 
   DEBUG("About to try to switch to domain %lld", dom->domain_id);
   params->error = 0;
-  if (switch_domain(dom->domain_id, params->delta, exit_frame, real_cpuid) != SUCCESS) {
+  switch (switch_domain(dom->domain_id, params->delta, exit_frame, real_cpuid)) {
+    case SWITCH_SYNC:
+      // Synchronous call back to us.
+      // The exit frame is not valid.
+      // We set a fake value for the exit reason for KVM to return to user-space.
+#if defined(CONFIG_X86) || defined(__x86_64__)
+    arch_cache_t* cache = &(dom->contexts[params->core]->cache);
+    if (cache_set_any(cache, VM_EXIT_REASON, TYCHE_SYNTHETHIC_EXIT_REASON) != SUCCESS) {
+      ERROR("Unable to set a cache values?");
+      goto failure;
+    }
+#endif
+    break;
+  case SWITCH_EXCEPTION:
+    // Interrupted/Exception.
+    if (update_set_exit(dom, params->core, exit_frame) != SUCCESS) {
+      ERROR("Unable to update the exit frame.");
+      goto failure_unlock;
+    }
+
+    // Provide the exit information.
+    params->error = convert_exit_reason(exit_frame);
+    break;
+  case SWITCH_ERROR:
+    //fallthrough
+  case FAILURE:
+    //fallthrough
+  default:
     params->error = convert_exit_reason(exit_frame);
     if (params->error == REVOKED) {
       ERROR("The domain has been revoked!");
@@ -1486,15 +1596,8 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
       ERROR("Error(%d) in switch to domain %p", params->error, dom->handle);
     }
     goto failure_unlock;
+    break;
   }
-
-  if (update_set_exit(dom, params->core, exit_frame) != SUCCESS) {
-    ERROR("Unable to update the exit frame.");
-    goto failure_unlock;
-  }
-
-  // Provide the exit information.
-  params->error = convert_exit_reason(exit_frame);
 
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.

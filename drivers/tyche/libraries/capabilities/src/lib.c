@@ -506,10 +506,10 @@ failure:
   return FAILURE;
 }
 
-int internal_carve_region(domain_id_t id, paddr_t start, usize size,
-    memory_access_right_t access, int is_shared, int is_repeat,
-     usize alias) {
-  child_domain_t *child = NULL;
+int internal_carved_region_with_capa(capa_index_t capa_idx, paddr_t start, usize size,
+    memory_access_right_t access, int is_shared, int is_repeat, usize alias,
+    capability_t** ret_revoke)
+{
   capability_t *capa = NULL;
   capability_t* to_send = NULL;
   capability_t* revoke = NULL;
@@ -526,15 +526,6 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   // Quick checks.
   if (start >= end) {
     ERROR("Start is greater or equal to end.\n");
-    goto failure;
-  }
-
-  // Find the target domain.
-  child = find_child(id); 
-
-  // We were not able to find the child.
-  if (child == NULL) {
-    ERROR("Child not found.");
     goto failure;
   }
 
@@ -572,7 +563,7 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
     ERROR("Unable to segment the region !");
     goto failure;
   }
-  if (tyche_send_aliased(child->management->local_id, to_send->local_id,
+  if (tyche_send_aliased(capa_idx, to_send->local_id,
       is_repeat, aliased_start, size, send_access >> 2) != SUCCESS) {
       ERROR("Unable to send an aliased capability!");
       goto failure;
@@ -585,8 +576,37 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   // Sort things out in the different lists.
   dll_remove(&(local_domain.capabilities), to_send, list);
   dll_remove(&(local_domain.capabilities), revoke, list);
-  dll_add(&(child->revocations), revoke, list);
   local_domain.dealloc(to_send);
+
+  if (ret_revoke != NULL) {
+    *ret_revoke = revoke;
+  } else {
+    local_domain.dealloc(revoke);
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int internal_carve_region(domain_id_t id, paddr_t start, usize size,
+    memory_access_right_t access, int is_shared, int is_repeat,
+     usize alias) {
+  child_domain_t *child = find_child(id);
+  capability_t* revoke = NULL;
+
+  // We were not able to find the child.
+  if (child == NULL) {
+    ERROR("Child not found.");
+    goto failure;
+  }
+
+  if (internal_carved_region_with_capa(child->management->local_id,
+        start, size, access, is_shared, is_repeat, alias, &revoke) != SUCCESS ||
+      revoke == NULL) {
+    ERROR("Failed to do internal carved region with capa!");
+    goto failure;
+  }
+  dll_add(&(child->revocations), revoke, list);
   return SUCCESS;
 failure:
   return FAILURE;
@@ -765,6 +785,7 @@ failure:
 int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME_SIZE], usize local_cpuid) {
   child_domain_t *child = NULL;
   transition_t *wrapper = NULL;
+  int res = 0;
   DEBUG("start");
 
   if (exit_frame == NULL) {
@@ -805,26 +826,11 @@ int switch_domain(domain_id_t id, usize delta, usize exit_frame[TYCHE_EXIT_FRAME
   DEBUG("Found a handle for domain %lld, id %lld", id,
         wrapper->transition->local_id);
 
-  //TODO remove the tyche_write_gp_registers.
-  /*if (args != NULL && tyche_write_gp_registers(child->management->local_id, args) != SUCCESS) {
-    ERROR("failed to write all the registers.");
-    goto failure;
-  }*/
-  if (tyche_switch(&(wrapper->transition->local_id), delta, exit_frame) !=
-      SUCCESS) {
-    DEBUG("failed to perform a switch on capa %lld",
-          wrapper->transition->local_id);
-    goto failure;
-  }
-  DEBUG("[switch_domain] Came back from the switch");
-  //TODO(aghosn) remove this from capabilities.
-  /*if (args != NULL && tyche_read_gp_registers(child->management->local_id, args) != SUCCESS) {
-    ERROR("Unable to read gp registers.");
-    goto failure;
-  }*/
+  res = tyche_switch(&(wrapper->transition->local_id), delta, exit_frame);
+
   // We are back from the switch, unlock the wrapper.
   wrapper->lock = TRANSITION_UNLOCKED;
-  return SUCCESS;
+  return res;
 failure:
   return FAILURE;
 }

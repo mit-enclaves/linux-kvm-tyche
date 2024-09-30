@@ -359,8 +359,8 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       //TODO(aghosn): do we need to get the physoffset?
       break;
     case TYCHE_REVOKE_MGMT_ACCESS:
-      if (driver_revoke_manager_access() != SUCCESS) {
-        ERROR("Unable to transition to confidential setting.\n");
+      if (driver_revoke_manager_access() == 0) {
+        ERROR("No revocation performed while transitioning into a confidential VM.\n");
         goto failure;
       }
       break;

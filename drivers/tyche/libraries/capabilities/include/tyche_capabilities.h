@@ -77,6 +77,16 @@ int share_repeat_region(domain_id_t id, paddr_t start, usize size,
 /// Start and end must match existing bounds on a capability.
 int revoke_region(domain_id_t id, paddr_t start, paddr_t end);
 
+/// Internal function that acts on the capa rather than looking for a child.
+/// Called by the share/grant functions but also to send regions through channels
+/// directly.
+/// If ret_revoke is not null, return the handle for the revocation.
+/// capa_idx must be management or channel.
+int internal_carved_region_with_capa(capa_index_t capa_idx, paddr_t start,
+				     usize size, memory_access_right_t access,
+				     int is_shared, int is_repeat, usize alias,
+				     capability_t **ret_revoke);
+
 /// Switch to the target domain.
 /// If args is not null, registers will be dumped there upon return.
 /// Fails if all transition handles are used.
