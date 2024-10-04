@@ -1601,13 +1601,15 @@ int driver_switch_domain(driver_domain_t * dom, msg_switch_t* params) {
 
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
-  if (read_gp_domain(dom->domain_id, params->core, gp_frame) != SUCCESS) {
-    ERROR("Unable to read the domain's general purpose registers.");
-    goto failure_unlock;
-  }
-  if (update_set_gp(dom, params->core, gp_frame) != SUCCESS) {
-    ERROR("Unable to set the domain's general purpose registers.");
-    goto failure_unlock;
+  if (dom->handle == NULL) {
+    if (read_gp_domain(dom->domain_id, params->core, gp_frame) != SUCCESS) {
+      ERROR("Unable to read the domain's general purpose registers.");
+      goto failure_unlock;
+    }
+    if (update_set_gp(dom, params->core, gp_frame) != SUCCESS) {
+      ERROR("Unable to set the domain's general purpose registers.");
+      goto failure_unlock;
+    }
   }
 
   // Reenable the preemption.
