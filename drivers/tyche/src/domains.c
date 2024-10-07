@@ -3,8 +3,11 @@
 #include "asm/page_types.h"
 #include "asm/uaccess.h"
 #include "dll.h"
+#include "linux/bitmap.h"
 #include "linux/export.h"
+#include "linux/gfp.h"
 #include "linux/gfp_types.h"
+#include "linux/io.h"
 #include "linux/nmi.h"
 #include "linux/rwsem.h"
 #include "linux/swiotlb.h"
@@ -34,6 +37,16 @@
 #include "tyche_capabilities.h"
 #include "tyche_capabilities_types.h"
 #include "arch_cache.h"
+
+// —————————————————————————————— Local types ——————————————————————————————— //
+
+typedef struct {
+  usize base_vaddr;
+  usize base_paddr;
+  usize size;
+  unsigned long *bitmap;
+  unsigned int nbits;
+} reserved_mem_t;
 
 // ————————————————————————— Helpers for lock state ————————————————————————— //
 
@@ -72,6 +85,29 @@ typedef struct global_state_t {
 
 static global_state_t state;
 
+// Reserved allocator for Tyche reserved memory
+reserved_mem_t tyche_pool = {0};
+
+// ——————————————————————————————— Parameters ——————————————————————————————— //
+static bool tyche_coco = false;
+static bool use_reserved_memory = false;
+
+static unsigned long long reserved_base = 0x0;
+static unsigned long long reserved_size = 0x0;
+
+module_param(tyche_coco, bool, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(tyche_coco, "Transition into a confidential VM.");
+
+module_param(use_reserved_memory, bool, 0);
+MODULE_PARM_DESC(use_reserved_memory, "Y if the driver should use a memmap reserved area.");
+
+module_param(reserved_base, ullong, 0);
+MODULE_PARM_DESC(reserved_base, "Base address for the reserved memory region for Tyche.");
+
+module_param(reserved_size, ullong, 0);
+MODULE_PARM_DESC(reserved_size, "Size of the reserved memory region for Tyche in GB.");
+
+// ———————————————————————————————— Helpers ————————————————————————————————— //
 
 static int state_add_domain(driver_domain_t* dom) {
   if (dom == NULL) {
@@ -110,6 +146,100 @@ static int state_remove_domain(driver_domain_t * dom) {
 failure:
   return FAILURE;
 }
+
+// ——————————————————————————— Allocator Helpers ———————————————————————————— //
+
+static void* reserved_mem_mmap(usize size) {
+  void *allocation = NULL;
+  unsigned long idx = bitmap_find_next_zero_area(tyche_pool.bitmap,
+      tyche_pool.nbits, 0, (size/PAGE_SIZE), 0);
+  if (idx >= tyche_pool.nbits) {
+    ERROR("Unable to allocate 0x%llx in our memory map", size);
+    return NULL;
+  }
+  bitmap_set(tyche_pool.bitmap, idx, (size/ PAGE_SIZE));
+  allocation = (void*)(tyche_pool.base_vaddr + (idx * PAGE_SIZE));
+  return allocation;
+}
+
+static void reserved_mem_munmap(void* ptr, size_t size) {
+  usize offset = ((usize)ptr) - tyche_pool.base_vaddr;
+  bitmap_clear(tyche_pool.bitmap, offset / PAGE_SIZE, size / PAGE_SIZE);
+}
+
+static phys_addr_t internal_virt_to_phys(void* addr) {
+  if (use_reserved_memory) {
+    usize offset = ((usize)addr) - tyche_pool.base_vaddr;
+    return tyche_pool.base_paddr + offset;
+  }
+  return virt_to_phys(addr);
+}
+
+
+static void* internal_alloc_pages(usize size, usize *mapped)  {
+  int order = 0, i = 0;
+  size_t max_size = 0x400000;
+  void* allocation = NULL;
+
+  if (mapped == NULL) {
+    ERROR("Wrong argument: mapped null or pages null!");
+    return NULL;
+  }
+  if ((size % PAGE_SIZE) != 0) {
+    ERROR("Attempt to allocate a size that's not a multiple of page size.");
+    return NULL;
+  }
+
+  // Do not use cma
+  if (use_reserved_memory == false) {
+    order = get_order(size);
+    *mapped = (order < MAX_ORDER)? size : max_size;
+    allocation = alloc_pages_exact(*mapped, GFP_KERNEL);
+    if (allocation == NULL) {
+      ERROR("Alloc pages exact returned null for size 0x%llx.\n", *mapped);
+      return NULL;
+    }
+    //TODO: figure out if we need to reserve the pages for reserved mem.
+    for (i = 0; i < (*mapped/PAGE_SIZE); i++) {
+      char* mem = ((char*)allocation) + i * PAGE_SIZE;
+      SetPageReserved(virt_to_page((unsigned long)mem));
+    }
+  } else {
+    *mapped = size;
+    allocation = reserved_mem_mmap(size);
+    if (allocation == NULL) {
+      ERROR("Failed to allocate from genalloc region, size: 0x%llx | casted: 0x%lx!", size, (size_t) size);
+      return NULL;
+    }
+  }
+
+  memset(allocation, 0, *mapped);
+  return allocation;
+}
+
+int internal_free_pages(void* addr, size_t size) {
+  if (addr == NULL) {
+    ERROR("The address is null.");
+    return FAILURE;
+  }
+  if ((size % PAGE_SIZE) != 0){
+    ERROR("The provided size is not a multiple of page size.");
+    return FAILURE;
+  }
+
+  if (use_reserved_memory == false) {
+    for (int i = 0; i < (size/PAGE_SIZE); i++) {
+      char* mem = ((char*) addr) + i * PAGE_SIZE;
+      ClearPageReserved(virt_to_page((unsigned long) mem));
+    }
+    free_pages_exact(addr, size);
+    return SUCCESS;
+  }
+
+  reserved_mem_munmap(addr, size);
+  return SUCCESS;
+}
+
 
 // ——————————————————————————— Helpers prototypes ——————————————————————————— //
 
@@ -154,22 +284,56 @@ static void dump_list(segment_list_t* l) {
         iter->pa, iter->pa + iter->size);
   }
 }
-// ——————————————————————————————— Parameters ——————————————————————————————— //
-static bool tyche_coco = false;
-
-module_param(tyche_coco, bool, 000);
-MODULE_PARM_DESC(tyche_coco, "Transition into a confidential VM.");
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
 void driver_init_domains(void)
 {
+  void* memory = NULL;
   init_rwsem(&(state.rwlock));
   dll_init_list((&(state.domains)));
   state.next_pipe_id = 0;
   init_rwsem(&(state.rwlock));
   dll_init_list(&(state.pipes));
   driver_init_capabilities();
+
+  // The kernel command line requested to use reserved memory.
+  if (use_reserved_memory) {
+    size_t size_in_bytes = (size_t)(reserved_size * (1024ULL*1024ULL*1024ULL));
+    if (reserved_base == 0 || size_in_bytes <= 0) {
+      ERROR("use_reserved_memory selected but base(0x%llx) or size(0x%lx) is 0.",
+          reserved_base, size_in_bytes);
+      goto failure;
+    }
+    // Attempt to map the memory.
+    memory = memremap(reserved_base, size_in_bytes,
+        MEMREMAP_WB);
+    if (memory == NULL) {
+      ERROR("We failed to map the reserved memory region. Default to alloc_pages");
+      goto failure;
+    }
+    memset(&tyche_pool, 0, sizeof(reserved_mem_t));
+    tyche_pool.size = size_in_bytes;
+    tyche_pool.base_paddr = reserved_base;
+    tyche_pool.base_vaddr = (usize) memory;
+    // We use one bit per page.
+    tyche_pool.nbits = size_in_bytes / PAGE_SIZE;
+    tyche_pool.bitmap = bitmap_alloc(tyche_pool.nbits, GFP_KERNEL);
+    if (tyche_pool.bitmap == NULL) {
+      ERROR("Unable to allocate the bitmap");
+      goto failure;
+    }
+    bitmap_zero(tyche_pool.bitmap, tyche_pool.nbits);
+    LOG("Tyche driver is using reserved memory [0x%llx -- 0x%llx]",
+        reserved_base, reserved_base + (unsigned long long) (size_in_bytes));
+    LOG("Tyche mapped reserved range at [0x%llx - 0x%llx]",
+        ((usize) memory), (usize) memory + ((usize) size_in_bytes));
+    return;
+  }
+failure:
+  LOG("Tyche driver is using pages_alloc_exact");
+  use_reserved_memory = false;
+  return;
 }
 
 #ifdef CONFIG_CONFIDENTIAL_VM
@@ -246,7 +410,7 @@ int driver_revoke_manager_access(void)
   }
 #endif
 
-#ifdef CONFIG_CMA
+#if IS_ENABLED(CONFIG_CMA) && IS_ENABLED(CONFIG_DMA_CMA) && IS_ENABLED(CONFIG_CONFIDENTIAL_VM)
   if (dma_contiguous_default_area == NULL ||
       (share_region_channel(chan,cma_get_base(dma_contiguous_default_area),
         cma_get_base(dma_contiguous_default_area) +
@@ -413,8 +577,7 @@ int driver_tyche_mmap(segment_list_t *raw, segment_list_t* free_list, struct vm_
 {
   void* allocation = NULL;
   usize size = 0;
-  unsigned long vaddr = 0, max_size = 0x400000;
-  int order;
+  unsigned long vaddr = 0;
   if (vma == NULL || raw == NULL) {
     ERROR("Arguments are null.");
     goto failure;
@@ -422,31 +585,25 @@ int driver_tyche_mmap(segment_list_t *raw, segment_list_t* free_list, struct vm_
   size = vma->vm_end - vma->vm_start;
   vaddr = vma->vm_start;
   while (vaddr < vma->vm_end) {
-    usize left_to_map = vma->vm_end - vaddr, to_map = 0;
+    usize left_to_map = vma->vm_end - vaddr;
+    usize mapped = 0;
     unsigned long pfn = 0;
     segment_t* to_free = NULL;
-    order = get_order(left_to_map);
-    to_map = (order < MAX_ORDER)? left_to_map : max_size;
-    allocation = alloc_pages_exact(to_map, GFP_KERNEL);
+    allocation = internal_alloc_pages(left_to_map, &mapped);
     if (allocation == NULL) {
-      ERROR("alloc_pages_exact failed to allocated %llu bytes", to_map);
+      ERROR("Allocation of internal pages failed");
       goto failure;
     }
-    memset(allocation, 0, to_map);
-    for (int i = 0; i < (to_map/PAGE_SIZE); i++) {
-      char* mem = ((char*)allocation) + i * PAGE_SIZE;
-      SetPageReserved(virt_to_page((unsigned long)mem));
-    }
-    pfn = virt_to_phys(allocation) >> PAGE_SHIFT;
-    if (remap_pfn_range(vma, vaddr, pfn, to_map, vma->vm_page_prot) < 0) {
+    pfn = internal_virt_to_phys(allocation) >> PAGE_SHIFT;
+    if (remap_pfn_range(vma, vaddr, pfn, mapped, vma->vm_page_prot) < 0) {
       ERROR("remap_pfn_range failed with vaddr %lx, pfn %lx, size %llx",
-          vaddr, pfn, to_map);
+          vaddr, pfn, mapped);
       goto failure;
     }
     // Add the segment to the domain.
     if (driver_add_raw_segment(
         raw, (usize) vaddr,
-        (usize) virt_to_phys(allocation), to_map) != SUCCESS) {
+        (usize) internal_virt_to_phys(allocation), mapped) != SUCCESS) {
       ERROR("Unable to allocate a segment");
       goto failure;
     }
@@ -458,12 +615,12 @@ int driver_tyche_mmap(segment_list_t *raw, segment_list_t* free_list, struct vm_
     memset(to_free, 0, sizeof(segment_t));
     dll_init_elem(to_free, list);
     to_free->va = (usize) allocation;
-    to_free->size = to_map;
-    to_free->pa = virt_to_phys(allocation);
+    to_free->size = mapped;
+    to_free->pa = internal_virt_to_phys(allocation);
     dll_add(free_list, to_free, list);
 
     /* Update the vaddr */
-    vaddr += to_map;
+    vaddr += mapped;
     allocation = NULL;
   }
   return SUCCESS;
@@ -1628,7 +1785,6 @@ EXPORT_SYMBOL(driver_switch_domain);
 int tyche_free_memory(segment_list_t* to_free)
 {
   segment_t* segment = NULL;
-  int i = 0;
   if (to_free == NULL) {
     // Nothing to do.
     goto failure;
@@ -1637,11 +1793,15 @@ int tyche_free_memory(segment_list_t* to_free)
   while(!dll_is_empty(to_free)) {
     segment = dll_head(to_free);
     dll_remove(to_free, segment, list);
-    for (i = 0; i < (segment->size / PAGE_SIZE); i++) {
+    /*for (i = 0; i < (segment->size / PAGE_SIZE); i++) {
       char* mem = ((char*) segment->va) + i * PAGE_SIZE;
       ClearPageReserved(virt_to_page((unsigned long) mem));
     }
-    free_pages_exact((void*) (segment->va), segment->size);
+    free_pages_exact((void*) (segment->va), segment->size);*/
+    if (internal_free_pages((void*) (segment->va), segment->size) != SUCCESS) {
+      ERROR("Failed to free segment.");
+      goto failure;
+    }
     kfree(segment);
     segment = NULL;
   }
