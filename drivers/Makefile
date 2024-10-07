@@ -195,4 +195,5 @@ obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 obj-$(CONFIG_DRM_ACCEL)		+= accel/
 obj-$(CONFIG_TYCHE_DRIVER)	+= tyche/
+obj-$(CONFIG_KEYSTONE_DRIVER)	+= keystone/
 obj-$(CONFIG_CONTALLOC_DRIVER) += contalloc/

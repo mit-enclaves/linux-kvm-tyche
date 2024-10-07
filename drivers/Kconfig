@@ -141,6 +141,8 @@ source "drivers/virt/Kconfig"
 
 source "drivers/tyche/Kconfig"
 
+source "drivers/keystone/Kconfig"
+
 source "drivers/contalloc/Kconfig"
 
 source "drivers/virtio/Kconfig"

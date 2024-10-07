@@ -16,6 +16,8 @@
 #define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE - 1))
 
+#define PAGE_UP(addr)	(((addr)+((PAGE_SIZE)-1))&(~((PAGE_SIZE)-1)))
+
 #ifdef CONFIG_64BIT
 #define HUGE_MAX_HSTATE		2
 #else

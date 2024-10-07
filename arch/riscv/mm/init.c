@@ -1214,6 +1214,7 @@ void __init paging_init(void)
 {
 	setup_bootmem();
 	setup_vm_final();
+	dma_contiguous_reserve(memblock_end_of_DRAM());
 }
 
 void __init misc_mem_init(void)
