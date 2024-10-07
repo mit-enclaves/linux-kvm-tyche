@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Virtualization support drivers
+#
+
+config KEYSTONE_DRIVER
+	tristate "Keystone driver"
+	help
+	  Say Y here to enable the keystone driver
+
