@@ -4,6 +4,7 @@
 //------------------------------------------------------------------------------
 #include <linux/dma-mapping.h>
 #include "keystone.h"
+#include "domains.h"
 /* idr for enclave UID to struct enclave */
 DEFINE_IDR(idr_enclave);
 DEFINE_MUTEX(idr_enclave_lock);
@@ -55,7 +56,11 @@ int destroy_enclave(struct enclave* enclave)
   return 0;
 }
 
+#if defined(TYCHE)
+struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain)
+#else
 struct enclave* create_enclave(unsigned long min_pages)
+#endif
 {
   struct enclave* enclave;
 
@@ -69,7 +74,8 @@ struct enclave* create_enclave(unsigned long min_pages)
   enclave->utm = NULL;
   enclave->close_on_pexit = 1;
 
-  enclave->epm = kmalloc(sizeof(struct epm), GFP_KERNEL);
+  enclave->epm = kmalloc(sizeof(struct epm), GFP_KERNEL);  
+  //enclave->epm = alloc_pages_exact(sizeof(struct epm), GFP_KERNEL);
   enclave->is_init = true;
   if (!enclave->epm)
   {
@@ -77,10 +83,16 @@ struct enclave* create_enclave(unsigned long min_pages)
     goto error_destroy_enclave;
   }
 
+#if defined(TYCHE)
+  enclave->tyche_domain = tyche_domain;
+  enclave->min_pages = min_pages;
+  // Neelu: The epm_init is now called from the mmap. 
+#else 
   if(epm_init(enclave->epm, min_pages)) {
     keystone_err("failed to initialize epm\n");
     goto error_destroy_enclave;
   }
+#endif
   return enclave;
 
  error_destroy_enclave:

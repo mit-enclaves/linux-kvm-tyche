@@ -49,6 +49,15 @@ int keystone_mmap(struct file* filp, struct vm_area_struct *vma)
     return -EINVAL;
   }
 
+#if defined(TYCHE)
+  //Neelu: Here is where we would like to init ourrrrr EPM! 
+  if(epm_init(enclave->epm, enclave->min_pages, enclave->tyche_domain, vma)) {
+    keystone_err("failed to initialize epm\n");
+    destroy_enclave(enclave);
+  }
+
+#endif
+
   utm = enclave->utm;
   epm = enclave->epm;
   vsize = vma->vm_end - vma->vm_start;

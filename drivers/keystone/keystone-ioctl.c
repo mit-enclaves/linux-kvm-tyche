@@ -7,6 +7,7 @@
 #include "keystone_user.h"
 #include <asm/sbi.h>
 #include <linux/uaccess.h>
+#include "domains.h"
 
 int __keystone_destroy_enclave(unsigned int ueid);
 
@@ -16,15 +17,30 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
 
   struct enclave *enclave;
+  
+#if defined(TYCHE)
+  driver_domain_t* ptr;
+  //Neelu TODO: Not sure if aliased should be 1 or not 
+  //I'm following the KVM guideline atm 
+  if (driver_create_domain(NULL, &ptr, 1) != SUCCESS) {
+		keystone_err("Unable to create a domain VM.\n");
+		return -ENOMEM;
+	}
+  enclave = create_enclave(enclp->min_pages, ptr);
+#else 
   enclave = create_enclave(enclp->min_pages);
+#endif 
 
   if (enclave == NULL) {
     return -ENOMEM;
   }
 
+#if !defined(TYCHE)
+ // Neelu: I guess these aren't used anyway? Not sure...
   /* Pass base page table */
-  enclp->pt_ptr = __pa(enclave->epm->root_page_table);
-  enclp->epm_size = enclave->epm->size;
+ // enclp->pt_ptr = __pa(enclave->epm->root_page_table);
+  //enclp->epm_size = enclave->epm->size;
+#endif
 
   /* allocate UID */
   enclp->eid = enclave_idr_alloc(enclave);

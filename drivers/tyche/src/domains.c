@@ -179,12 +179,14 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   dll_init_list(&(dom->segments));
   dll_init_elem(dom, list);
 
+  //ERROR("Monitor about to create domain with handle: %lx",dom->handle);
+
   // Call tyche to create the domain.
    if (create_domain(&(dom->domain_id), aliased) != SUCCESS) {
     ERROR("Monitor rejected the creation of a domain for domain %p", dom);
     goto failure_free;
   }
-
+  //ERROR("Monitor created domain with handle: %lx",dom->handle);
   // Add the domain to the list if it has a handle.
   // Domains without handles come from KVM.
   if (handle != NULL && ptr == NULL) {
@@ -211,7 +213,9 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
   void* allocation = NULL;
   usize size = 0;
   int order;
-  if (vma == NULL || dom->handle == NULL) {
+  //Neelu: I am removing dom->handle == NULL check since I call it from Keystone driver 
+  //if (vma == NULL || dom->handle == NULL) {
+  if (vma == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
   }
