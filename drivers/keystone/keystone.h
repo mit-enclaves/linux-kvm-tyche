@@ -22,8 +22,15 @@
 /* IMPORTANT: This code assumes Sv39 */
 #include "riscv64.h"
 
+
+#define TYCHE
+#if defined(TYCHE)
+#include "tyche_capabilities_types.h"
+#include "domains.h"
+#endif
+
 typedef uintptr_t vaddr_t;
-typedef uintptr_t paddr_t;
+//typedef uintptr_t paddr_t;
 
 extern struct miscdevice keystone_dev;
 
@@ -56,6 +63,10 @@ struct enclave
   struct utm* utm;
   struct epm* epm;
   bool is_init;
+#if defined(TYCHE)
+  driver_domain_t* tyche_domain;
+  unsigned long min_pages;
+#endif 
 };
 
 
@@ -71,7 +82,14 @@ int keystone_rtld_init_app(struct enclave* enclave, void* __user app_ptr, size_t
 int keystone_rtld_init_untrusted(struct enclave* enclave, void* untrusted_ptr, size_t untrusted_size);
 
 struct enclave* get_enclave_by_id(unsigned int ueid);
+
+#if defined(TYCHE)
+struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain);
+#else
 struct enclave* create_enclave(unsigned long min_pages);
+#endif
+
+
 int destroy_enclave(struct enclave* enclave);
 
 unsigned int enclave_idr_alloc(struct enclave* enclave);
@@ -83,7 +101,14 @@ static inline uintptr_t  epm_satp(struct epm* epm) {
 }
 
 int epm_destroy(struct epm* epm);
+
+#if defined(TYCHE)
+int epm_init(struct epm* epm, unsigned int count, driver_domain_t* tyche_domain, struct vm_area_struct* vma);
+#else
 int epm_init(struct epm* epm, unsigned int count);
+#endif
+
+
 int utm_destroy(struct utm* utm);
 int utm_init(struct utm* utm, size_t untrusted_size);
 paddr_t epm_va_to_pa(struct epm* epm, vaddr_t addr);

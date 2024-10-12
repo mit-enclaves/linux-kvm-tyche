@@ -6,6 +6,9 @@
 #include <linux/kernel.h>
 #include "keystone.h"
 #include <linux/dma-mapping.h>
+#include <linux/mm.h>
+
+#include "domains.h"
 
 /* Destroy all memory associated with an EPM */
 int epm_destroy(struct epm* epm) {
@@ -27,7 +30,11 @@ int epm_destroy(struct epm* epm) {
 }
 
 /* Create an EPM and initialize the free list */
+#if defined(TYCHE)
+int epm_init(struct epm* epm, unsigned int min_pages, driver_domain_t* tyche_domain, struct vm_area_struct* vma)
+#else
 int epm_init(struct epm* epm, unsigned int min_pages)
+#endif
 {
   vaddr_t epm_vaddr = 0;
   unsigned long order = 0;
@@ -39,12 +46,39 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   order = ilog2(min_pages - 1) + 1;
   count = 0x1 << order;
 
+#if defined(TYCHE)
+
+  int alloc_result = driver_mmap_segment(tyche_domain, vma); 
+ //(NULL, (size_t) (slot->size), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->handle, 0);
+
+  if (alloc_result) {
+    keystone_err("failed to allocate %lu page(s)\n", count);
+    return -ENOMEM;
+  }
+
+  segment_t* segment = dll_tail(&tyche_domain->raw_segments);
+  if (segment == NULL) {
+    keystone_err("failed to get domain segment\n");
+    return -ENOMEM;
+  }
+
+  epm_vaddr = segment->va;
+
+  keystone_err("KEYSTONE_DRIVER: The phys address %llx, virt: %llx", (usize) __pa(epm_vaddr), (usize) epm_vaddr);
+#else
+  epm_vaddr = alloc_pages_exact(order, GFP_KERNEL); 
+  if (epm_vaddr == NULL) {
+    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", order);
+    goto failure;
+  }
+  memset(epm_vaddr, 0, size);
+
   /* prevent kernel from complaining about an invalid argument */
   if (order <= MAX_ORDER)
     epm_vaddr = (vaddr_t) __get_free_pages(GFP_HIGHUSER, order);
 
 #ifdef CONFIG_CMA
-  /* If buddy allocator fails, we fall back to the CMA */
+   /* If buddy allocator fails, we fall back to the CMA */
   if (!epm_vaddr) {
     epm->is_cma = 1;
     count = min_pages;
@@ -57,6 +91,7 @@ int epm_init(struct epm* epm, unsigned int min_pages)
     if(!device_phys_addr)
       epm_vaddr = 0;
   }
+#endif
 #endif
 
   if(!epm_vaddr) {

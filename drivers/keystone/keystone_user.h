@@ -10,6 +10,10 @@
 // Linux generic TEE subsystem magic defined in <linux/tee.h>
 #define KEYSTONE_IOC_MAGIC  0xa4
 
+
+#define TYCHE 
+#include "domains.h"
+
 // ioctl definition
 #define KEYSTONE_IOC_CREATE_ENCLAVE \
   _IOR(KEYSTONE_IOC_MAGIC, 0x00, struct keystone_ioctl_create_enclave)
