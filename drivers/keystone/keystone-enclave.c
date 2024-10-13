@@ -86,13 +86,13 @@ struct enclave* create_enclave(unsigned long min_pages)
 #if defined(TYCHE)
   enclave->tyche_domain = tyche_domain;
   enclave->min_pages = min_pages;
-  // Neelu: The epm_init is now called from the mmap. 
-#else 
+#endif
+
   if(epm_init(enclave->epm, min_pages)) {
     keystone_err("failed to initialize epm\n");
     goto error_destroy_enclave;
   }
-#endif
+
   return enclave;
 
  error_destroy_enclave:

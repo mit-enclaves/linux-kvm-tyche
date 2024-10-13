@@ -146,6 +146,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_create_pipe_t pipe = {0};
   attest_buffer_t attest_buff = {0, 0, 0};
   char *buff;
+  usize core = (usize) arg;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
       if (copy_from_user(
@@ -218,7 +219,6 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       RELEASE_DOM(false);
       break;
     case TYCHE_ALLOC_CONTEXT:
-      usize core = (usize) arg;
       ACQUIRE_DOM(true);
       if (driver_alloc_core_context(domain, core) != SUCCESS) {
         ERROR("Unable to allocate core context!");

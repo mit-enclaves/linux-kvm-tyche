@@ -22,6 +22,7 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   driver_domain_t* ptr;
   //Neelu TODO: Not sure if aliased should be 1 or not 
   //I'm following the KVM guideline atm 
+  keystone_err("Creating domain.\n");
   if (driver_create_domain(NULL, &ptr, 1) != SUCCESS) {
 		keystone_err("Unable to create a domain VM.\n");
 		return -ENOMEM;
@@ -34,19 +35,21 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   if (enclave == NULL) {
     return -ENOMEM;
   }
-
-#if !defined(TYCHE)
+  keystone_err("Done creating domain.\n");
+//#if !defined(TYCHE)
  // Neelu: I guess these aren't used anyway? Not sure...
   /* Pass base page table */
- // enclp->pt_ptr = __pa(enclave->epm->root_page_table);
-  //enclp->epm_size = enclave->epm->size;
-#endif
-
+  enclp->pt_ptr = __pa(enclave->epm->root_page_table);
+  keystone_err("Done creating domain.\n");
+  enclp->epm_size = enclave->epm->size;
+  keystone_err("Done creating domain.\n");
+//#endif
+  keystone_err("Done creating domain.\n");
   /* allocate UID */
   enclp->eid = enclave_idr_alloc(enclave);
-
+  keystone_err("Done creating domain.\n");
   filep->private_data = (void *) enclp->eid;
-
+  keystone_err("Returning from keystone_create_enclave.\n");
   return 0;
 }
 
