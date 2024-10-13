@@ -213,9 +213,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
   void* allocation = NULL;
   usize size = 0;
   int order;
-  //Neelu: I am removing dom->handle == NULL check since I call it from Keystone driver 
-  //if (vma == NULL || dom->handle == NULL) {
-  if (vma == NULL) {
+  if (vma == NULL || dom->handle == NULL) {
     ERROR("The provided vma is null or handle is null.");
     goto failure;
   }

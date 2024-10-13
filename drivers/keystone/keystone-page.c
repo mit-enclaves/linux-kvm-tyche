@@ -31,7 +31,7 @@ int epm_destroy(struct epm* epm) {
 
 /* Create an EPM and initialize the free list */
 #if defined(TYCHE)
-int epm_init(struct epm* epm, unsigned int min_pages, driver_domain_t* tyche_domain, struct vm_area_struct* vma)
+int epm_init(struct epm* epm, unsigned int min_pages)
 #else
 int epm_init(struct epm* epm, unsigned int min_pages)
 #endif
@@ -46,32 +46,34 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   order = ilog2(min_pages - 1) + 1;
   count = 0x1 << order;
 
-#if defined(TYCHE)
+// #if defined(TYCHE)
 
-  int alloc_result = driver_mmap_segment(tyche_domain, vma); 
- //(NULL, (size_t) (slot->size), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->handle, 0);
+//   int alloc_result = driver_mmap_segment(tyche_domain, vma); 
+//  //(NULL, (size_t) (slot->size), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->handle, 0);
 
-  if (alloc_result) {
-    keystone_err("failed to allocate %lu page(s)\n", count);
-    return -ENOMEM;
-  }
+//   if (alloc_result) {
+//     keystone_err("failed to allocate %lu page(s)\n", count);
+//     return -ENOMEM;
+//   }
 
-  segment_t* segment = dll_tail(&tyche_domain->raw_segments);
-  if (segment == NULL) {
-    keystone_err("failed to get domain segment\n");
-    return -ENOMEM;
-  }
+//   segment_t* segment = dll_tail(&tyche_domain->raw_segments);
+//   if (segment == NULL) {
+//     keystone_err("failed to get domain segment\n");
+//     return -ENOMEM;
+//   }
 
-  epm_vaddr = segment->va;
+//   epm_vaddr = segment->va;
 
-  keystone_err("KEYSTONE_DRIVER: The phys address %llx, virt: %llx", (usize) __pa(epm_vaddr), (usize) epm_vaddr);
-#else
-  epm_vaddr = alloc_pages_exact(order, GFP_KERNEL); 
-  if (epm_vaddr == NULL) {
-    ERROR("Alloca pages exact failed to allocate the pages for size %llx.", order);
-    goto failure;
-  }
-  memset(epm_vaddr, 0, size);
+//   keystone_err("KEYSTONE_DRIVER: The phys address %llx, virt: %llx", (usize) __pa(epm_vaddr), (usize) epm_vaddr);
+// #else
+  keystone_err("Alloca pages exact to allocate the pages for size %llx.", order);
+  // epm_vaddr = alloc_pages_exact(order, GFP_KERNEL); 
+  // if (epm_vaddr == NULL) {
+  //   keystone_err("Alloca pages exact failed to allocate the pages for size %llx.", order);
+  //   return -ENOMEM;
+  // }
+  //memset(epm_vaddr, 0, order);
+
 
   /* prevent kernel from complaining about an invalid argument */
   if (order <= MAX_ORDER)
@@ -83,16 +85,20 @@ int epm_init(struct epm* epm, unsigned int min_pages)
     epm->is_cma = 1;
     count = min_pages;
 
+    keystone_err("Alloca pages exact to allocate the pages for count %llx.", count << PAGE_SHIFT);
+
     epm_vaddr = (vaddr_t) dma_alloc_coherent(keystone_dev.this_device,
       count << PAGE_SHIFT,
       &device_phys_addr,
       GFP_KERNEL | __GFP_DMA32);
 
+    keystone_err("Alloca pages exact with epm_vaddr %llx.", epm_vaddr);
+
     if(!device_phys_addr)
       epm_vaddr = 0;
   }
 #endif
-#endif
+// #endif
 
   if(!epm_vaddr) {
     keystone_err("failed to allocate %lu page(s)\n", count);
