@@ -31,7 +31,7 @@ int epm_destroy(struct epm* epm) {
 
 /* Create an EPM and initialize the free list */
 #if defined(TYCHE)
-int epm_init(struct epm* epm, unsigned int min_pages)
+int epm_init(struct epm* epm, unsigned int min_pages, driver_domain_t* tyche_domain)
 #else
 int epm_init(struct epm* epm, unsigned int min_pages)
 #endif
@@ -40,6 +40,7 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   unsigned long order = 0;
   unsigned long count = min_pages;
   phys_addr_t device_phys_addr = 0;
+  int ret;
 
   /* try to allocate contiguous memory */
   epm->is_cma = 0;
@@ -66,7 +67,7 @@ int epm_init(struct epm* epm, unsigned int min_pages)
 
 //   keystone_err("KEYSTONE_DRIVER: The phys address %llx, virt: %llx", (usize) __pa(epm_vaddr), (usize) epm_vaddr);
 // #else
-  keystone_err("Alloca pages exact to allocate the pages for size %llx.", order);
+  keystone_info("Alloca pages exact to allocate the pages for size %llx.", order);
   // epm_vaddr = alloc_pages_exact(order, GFP_KERNEL); 
   // if (epm_vaddr == NULL) {
   //   keystone_err("Alloca pages exact failed to allocate the pages for size %llx.", order);
@@ -85,14 +86,14 @@ int epm_init(struct epm* epm, unsigned int min_pages)
     epm->is_cma = 1;
     count = min_pages;
 
-    keystone_err("Alloca pages exact to allocate the pages for count %llx.", count << PAGE_SHIFT);
+    keystone_info("Alloca pages exact to allocate the pages for count %llx.", count << PAGE_SHIFT);
 
     epm_vaddr = (vaddr_t) dma_alloc_coherent(keystone_dev.this_device,
       count << PAGE_SHIFT,
       &device_phys_addr,
       GFP_KERNEL | __GFP_DMA32);
 
-    keystone_err("Alloca pages exact with epm_vaddr %llx.", epm_vaddr);
+    keystone_info("Alloca pages exact with epm_vaddr %llx.", epm_vaddr);
 
     if(!device_phys_addr)
       epm_vaddr = 0;
@@ -113,6 +114,13 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   epm->order = order;
   epm->size = count << PAGE_SHIFT;
   epm->ptr = epm_vaddr;
+
+  // Create a corresponding segment in Tyche
+  ret = driver_add_raw_segment(tyche_domain, epm_vaddr, epm->pa, PAGE_SIZE * count);
+  if (ret) {
+    keystone_err("Failled to add raw segment");
+    return FAILURE;
+  }
 
   return 0;
 }

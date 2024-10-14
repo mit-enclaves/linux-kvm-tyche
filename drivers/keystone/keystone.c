@@ -43,27 +43,20 @@ int keystone_mmap(struct file* filp, struct vm_area_struct *vma)
   struct enclave* enclave;
   unsigned long vsize, psize;
   vaddr_t paddr;
+  
+  /* keystone_info("mmap enclave"); */
+
   enclave = get_enclave_by_id((unsigned long) filp->private_data);
   if(!enclave) {
     keystone_err("invalid enclave id\n");
     return -EINVAL;
   }
 
-#if defined(TYCHE)
-  //Neelu: Here is where we would like to init ourrrrr EPM! NOPE, not really.
-  // if(epm_init(enclave->epm, enclave->min_pages, enclave->tyche_domain, vma)) {
-  //   keystone_err("failed to initialize epm\n");
-  //   destroy_enclave(enclave);
-  // }
-
-#endif
-
   utm = enclave->utm;
   epm = enclave->epm;
   vsize = vma->vm_end - vma->vm_start;
 
-
-  driver_add_raw_segment(enclave->tyche_domain, vma->vm_start, __pa(vma->vm_start), vsize);
+  keystone_info("mmmap [%x, %x]", vma->vm_start, vma->vm_end);
 
   if(enclave->is_init){
     if (vsize > PAGE_SIZE)

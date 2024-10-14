@@ -103,7 +103,7 @@ static inline uintptr_t  epm_satp(struct epm* epm) {
 int epm_destroy(struct epm* epm);
 
 #if defined(TYCHE)
-int epm_init(struct epm* epm, unsigned int count);
+int epm_init(struct epm* epm, unsigned int count, driver_domain_t* tyche_domain);
 #else
 int epm_init(struct epm* epm, unsigned int count);
 #endif
