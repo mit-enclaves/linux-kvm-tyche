@@ -22,7 +22,7 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   driver_domain_t* ptr;
   //Neelu TODO: Not sure if aliased should be 1 or not 
   //I'm following the KVM guideline atm 
-  keystone_err("Creating domain.\n");
+  keystone_info("Creating domain\n");
   if (driver_create_domain(NULL, &ptr, 1) != SUCCESS) {
 		keystone_err("Unable to create a domain VM.\n");
 		return -ENOMEM;
@@ -35,21 +35,18 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   if (enclave == NULL) {
     return -ENOMEM;
   }
-  keystone_err("Done creating domain.\n");
+
 //#if !defined(TYCHE)
  // Neelu: I guess these aren't used anyway? Not sure...
   /* Pass base page table */
   enclp->pt_ptr = __pa(enclave->epm->root_page_table);
-  keystone_err("Done creating domain.\n");
   enclp->epm_size = enclave->epm->size;
-  keystone_err("Done creating domain.\n");
 //#endif
-  keystone_err("Done creating domain.\n");
   /* allocate UID */
   enclp->eid = enclave_idr_alloc(enclave);
-  keystone_err("Done creating domain.\n");
+  keystone_err("Done creating domain\n");
   filep->private_data = (void *) enclp->eid;
-  keystone_err("Returning from keystone_create_enclave.\n");
+  keystone_err("Returning from keystone_create_enclave\n");
   return 0;
 }
 
@@ -60,8 +57,9 @@ int keystone_finalize_enclave(unsigned long arg)
   struct enclave *enclave;
   struct utm *utm;
   struct keystone_sbi_create_t create_args;
-
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
+
+  keystone_info("Keystone finalize enclave");
 
   enclave = get_enclave_by_id(enclp->eid);
   if(!enclave) {
@@ -92,12 +90,35 @@ int keystone_finalize_enclave(unsigned long arg)
 
   create_args.params = enclp->params;
 
-  ret = sbi_sm_create_enclave(&create_args);
 
-  if (ret.error) {
-    keystone_err("keystone_create_enclave: SBI call failed with error codd %ld\n", ret.error);
+  // First we prepare the memory
+  if (driver_mprotect_domain(
+    enclave->tyche_domain,
+    enclave->epm->ptr,
+    enclave->epm->size,
+    MEM_READ | MEM_WRITE | MEM_EXEC,
+    SHARED, // TODO: set as confidential later
+    1)) {
+    keystone_err("Failed to mprotect domain");
+    ret.error = -1;
     goto error_destroy_enclave;
   }
+
+  // And then we commit the domain
+  if (driver_commit_domain(enclave->tyche_domain, 1)) {
+    keystone_err("Failed to commit domain");
+    ret.error = -1;
+    goto error_destroy_enclave;
+  }
+  ret.error = 0;
+  ret.value = 0;
+
+  /* ret = sbi_sm_create_enclave(&create_args); */
+
+  /* if (ret.error) { */
+  /*   keystone_err("keystone_create_enclave: SBI call failed with error codd %ld\n", ret.error); */
+  /*   goto error_destroy_enclave; */
+  /* } */
 
   enclave->eid = ret.value;
 
@@ -113,10 +134,12 @@ error_destroy_enclave:
 
 int keystone_run_enclave(unsigned long data)
 {
-  struct sbiret ret;
+  /* struct sbiret ret; */
   unsigned long ueid;
   struct enclave* enclave;
   struct keystone_ioctl_run_enclave *arg = (struct keystone_ioctl_run_enclave*) data;
+
+  keystone_info("Keystone run enclave");
 
   ueid = arg->eid;
   enclave = get_enclave_by_id(ueid);
@@ -131,10 +154,17 @@ int keystone_run_enclave(unsigned long data)
     return -EINVAL;
   }
 
-  ret = sbi_sm_run_enclave(enclave->eid);
+  /* ret = sbi_sm_run_enclave(enclave->eid); */
 
-  arg->error = ret.error;
-  arg->value = ret.value;
+  /* arg->error = ret.error; */
+  /* arg->value = ret.value; */
+
+  keystone_info("Switching domain!");
+  if (driver_switch_domain(enclave->tyche_domain, get_cpu())) {
+    keystone_err("Failed to switch domain");
+    arg->error = -1;
+    // TODO: pass return value :)
+  }
 
   return 0;
 }
@@ -146,6 +176,8 @@ int utm_init_ioctl(struct file *filp, unsigned long arg)
   struct enclave *enclave;
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
   long long unsigned untrusted_size = enclp->params.untrusted_size;
+
+  keystone_info("Keystone UTM init");
 
   enclave = get_enclave_by_id(enclp->eid);
 
@@ -176,6 +208,8 @@ int keystone_destroy_enclave(struct file *filep, unsigned long arg)
   int ret;
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
   unsigned long ueid = enclp->eid;
+
+  keystone_info("Keystone destroy enclave");
 
   ret = __keystone_destroy_enclave(ueid);
   if (!ret) {
@@ -219,6 +253,8 @@ int keystone_resume_enclave(unsigned long data)
   unsigned long ueid = arg->eid;
   struct enclave* enclave;
   enclave = get_enclave_by_id(ueid);
+
+  keystone_info("Keystone resume enclave");
 
   if (!enclave)
   {
@@ -279,8 +315,11 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       ret = utm_init_ioctl(filep, (unsigned long) data);
       break;
     default:
+      keystone_err("Invalid ioctl");
       return -ENOSYS;
   }
+
+  keystone_info("Return to user");
 
   if (copy_to_user((void __user*) arg, data, ioc_size))
     return -EFAULT;
@@ -291,6 +330,8 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 int keystone_release(struct inode *inode, struct file *file) {
   unsigned long ueid = (unsigned long)(file->private_data);
   struct enclave *enclave;
+
+  keystone_info("Keystone release");
 
   /* enclave has been already destroyed */
   if (!ueid) {

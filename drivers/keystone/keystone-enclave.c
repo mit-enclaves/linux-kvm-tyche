@@ -36,6 +36,9 @@ int destroy_enclave(struct enclave* enclave)
 {
   struct epm* epm;
   struct utm* utm;
+
+  keystone_info("Destroy enclave");
+
   if (enclave == NULL)
     return -ENOSYS;
 
@@ -63,6 +66,7 @@ struct enclave* create_enclave(unsigned long min_pages)
 #endif
 {
   struct enclave* enclave;
+  unsigned long core = get_cpu();
 
   enclave = kmalloc(sizeof(struct enclave), GFP_KERNEL);
   if (!enclave){
@@ -86,12 +90,55 @@ struct enclave* create_enclave(unsigned long min_pages)
 #if defined(TYCHE)
   enclave->tyche_domain = tyche_domain;
   enclave->min_pages = min_pages;
-#endif
+  // With Tyche we do not allocate the EPM directly, we instead wait for the mmap
+  if(epm_init(enclave->epm, min_pages, tyche_domain)) {
+    keystone_err("failed to initialize epm\n");
+    goto error_destroy_enclave;
+  }
 
+  // Grant permissions
+  for (unsigned int p = TYCHE_CONFIG_R16; p < TYCHE_NR_CONFIGS; p++) {
+    if (driver_set_domain_configuration(tyche_domain, p, ~((uint64_t) 0)) != SUCCESS) {
+      keystone_err("Unable to set configuration %u", p);
+      goto error_destroy_enclave;
+    }
+  }
+
+  // Add core permissions
+  if (driver_set_domain_configuration(tyche_domain, TYCHE_CONFIG_CORES, 0xFFFFFFFF)) {
+    keystone_err("Failed to set allowed cores");
+    goto error_destroy_enclave;
+  }
+
+  // Alloc context
+  if (driver_alloc_core_context(tyche_domain, core)) {
+    keystone_err("Failled to allocate core context on cpu %d", core);
+    goto error_destroy_enclave;
+  }
+
+  // Configure enclave initial registers
+  if (driver_set_domain_core_config(tyche_domain, core, GUEST_RIP, 0xffffffffc0000000)) {
+    keystone_err("Failled to set mepc on cpu %d", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(tyche_domain, core, GUEST_CR3, 0x0)) {
+    keystone_err("Failled to set satp on cpu %d", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(tyche_domain, core, GUEST_CR3, __pa(enclave->epm->root_page_table))) {
+    keystone_err("Failled to set satp on cpu %d", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(tyche_domain, core, EXCEPTION_BITMAP, 0xffffffff)) {
+    keystone_err("Failled to set medeleg on cpu %d", core);
+    goto error_destroy_enclave;
+  }
+#else
   if(epm_init(enclave->epm, min_pages)) {
     keystone_err("failed to initialize epm\n");
     goto error_destroy_enclave;
   }
+#endif
 
   return enclave;
 

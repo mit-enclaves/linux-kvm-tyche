@@ -912,12 +912,15 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
   CHECK_RLOCK(dom, failure);
 
   if (core >= ENTRIES_PER_DOMAIN) {
-    ERROR("Invalid core.");
+    ERROR("Invalid core: %s, but max entries is %d", core, ENTRIES_PER_DOMAIN);
     goto failure;
   }
-  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0 ||
-      dom->contexts[core] == NULL) {
-    ERROR("Invalid core.");
+  if ((dom->configs[TYCHE_CONFIG_CORES] & (1 << core)) == 0) {
+    ERROR("Invalid core: missing permission");
+    goto failure;
+  }
+  if (dom->contexts[core] == NULL) {
+    ERROR("Invalid core, context is NULL");
     goto failure;
   }
 
