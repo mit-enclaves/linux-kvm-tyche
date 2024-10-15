@@ -56,7 +56,7 @@ int keystone_mmap(struct file* filp, struct vm_area_struct *vma)
   epm = enclave->epm;
   vsize = vma->vm_end - vma->vm_start;
 
-  keystone_info("mmmap [%x, %x]", vma->vm_start, vma->vm_end);
+  keystone_info("mmmap [%lx, %lx]", vma->vm_start, vma->vm_end);
 
   if(enclave->is_init){
     if (vsize > PAGE_SIZE)
