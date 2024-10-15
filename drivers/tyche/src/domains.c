@@ -460,6 +460,7 @@ EXPORT_SYMBOL(driver_set_self_core_config);
 /// Expose the configuration of fields (write).
 int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
                                    usize value) {
+  int ret;
   if (dom == NULL) {
     ERROR("The domain is null");
     goto failure;
@@ -485,8 +486,9 @@ int driver_set_domain_core_config (driver_domain_t *dom, usize core, usize idx,
   // Lock the core context.
   down_write(&(dom->contexts[core]->rwlock));
 
-  if (cache_write_any(&(dom->contexts[core]->cache), idx, value) != SUCCESS) {
-    ERROR("Unable to write the value in the cache %llx.\n", idx);  
+  ret = cache_write_any(&(dom->contexts[core]->cache), idx, value);
+  if (ret != SUCCESS) {
+    ERROR("Unable to write the value in the cache %llx: error %d\n", idx, ret);  
     up_write(&(dom->contexts[core]->rwlock));
     goto failure;
   }

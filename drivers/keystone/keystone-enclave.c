@@ -116,23 +116,6 @@ struct enclave* create_enclave(unsigned long min_pages)
     goto error_destroy_enclave;
   }
 
-  // Configure enclave initial registers
-  if (driver_set_domain_core_config(tyche_domain, core, GUEST_RIP, 0xffffffffc0000000)) {
-    keystone_err("Failled to set mepc on cpu %d", core);
-    goto error_destroy_enclave;
-  }
-  if (driver_set_domain_core_config(tyche_domain, core, GUEST_CR3, 0x0)) {
-    keystone_err("Failled to set satp on cpu %d", core);
-    goto error_destroy_enclave;
-  }
-  if (driver_set_domain_core_config(tyche_domain, core, GUEST_CR3, __pa(enclave->epm->root_page_table))) {
-    keystone_err("Failled to set satp on cpu %d", core);
-    goto error_destroy_enclave;
-  }
-  if (driver_set_domain_core_config(tyche_domain, core, EXCEPTION_BITMAP, 0xffffffff)) {
-    keystone_err("Failled to set medeleg on cpu %d", core);
-    goto error_destroy_enclave;
-  }
 #else
   if(epm_init(enclave->epm, min_pages)) {
     keystone_err("failed to initialize epm\n");

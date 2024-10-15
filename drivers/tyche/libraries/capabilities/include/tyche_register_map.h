@@ -27,6 +27,15 @@ typedef enum reg_gp_t {
 	REG_GP_CR3 = 0x00006802,
 } reg_gp_t;
 
+#define REG_GP_A0 REG_GP_RAX
+#define REG_GP_A1 REG_GP_RBX
+#define REG_GP_A2 REG_GP_RCX
+#define REG_GP_A3 REG_GP_RDX
+#define REG_GP_A4 REG_GP_RBP
+#define REG_GP_A5 REG_GP_RSI
+#define REG_GP_A6 REG_GP_RDI
+#define REG_GP_A7 REG_GP_R8
+
 #if defined(TYCHE_USER_SPACE) || defined(CONFIG_RISCV) || defined(__riscv)
 /* VMCS Encodings */
 typedef enum vmcs_field_t {
@@ -223,6 +232,9 @@ typedef enum vmcs_field_t {
 	HOST_RSP = 0x00006c14,
 	HOST_RIP = 0x00006c16,
 } vmcs_field_t;
+
+#define SEPC     GUEST_GDTR_BASE
+#define MSTATUS  GUEST_IDTR_BASE
 #endif
 
 #endif /*__INCLUDE_TYCHE_REGISTER_MAP_H__*/

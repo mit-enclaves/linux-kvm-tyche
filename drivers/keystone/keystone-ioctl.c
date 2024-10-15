@@ -58,6 +58,7 @@ int keystone_finalize_enclave(unsigned long arg)
   struct utm *utm;
   struct keystone_sbi_create_t create_args;
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
+  unsigned long core = get_cpu();
 
   keystone_info("Keystone finalize enclave");
 
@@ -120,12 +121,66 @@ int keystone_finalize_enclave(unsigned long arg)
   /*   goto error_destroy_enclave; */
   /* } */
 
+  // Configure enclave initial registers
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, GUEST_RIP, create_args.params.runtime_entry)) {
+    keystone_err("Failled to set mepc on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, SEPC, create_args.params.user_entry)) {
+    keystone_err("Failed to set sepc on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, MSTATUS, 1 << 11)) {
+    keystone_err("Failed to set SEPC on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, GUEST_CR3, create_args.epm_region.paddr)) {
+    keystone_err("Failled to set satp on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, EXCEPTION_BITMAP, 0xffffff5d /*0xffffffff*/)) { // Do not delegated access/store faults
+    keystone_err("Failled to set medeleg on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A1, create_args.epm_region.paddr)) {
+    keystone_err("Failed to set a1 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A2, create_args.epm_region.size)) {
+    keystone_err("Failed to set a2 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A3, create_args.runtime_paddr)) {
+    keystone_err("Failed to set a3 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A4, create_args.user_paddr)) {
+    keystone_err("Failed to set a4 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A5, create_args.free_paddr)) {
+    keystone_err("Failed to set a5 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A6, create_args.utm_region.paddr)) {
+    keystone_err("Failed to set a6 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A7, create_args.utm_region.size)) {
+    keystone_err("Failed to set a7 on cpu %lu", core);
+    goto error_destroy_enclave;
+  }
+
+  put_cpu();
+
+  // TODO: How should we gat an Enclave ID? Do we even need it?
   enclave->eid = ret.value;
 
   return 0;
 
 error_destroy_enclave:
   /* This can handle partial initialization failure */
+  put_cpu();
   destroy_enclave(enclave);
 
   return -EINVAL;
@@ -166,6 +221,8 @@ int keystone_run_enclave(unsigned long data)
     // TODO: pass return value :)
   }
 
+
+  put_cpu();
   return 0;
 }
 
