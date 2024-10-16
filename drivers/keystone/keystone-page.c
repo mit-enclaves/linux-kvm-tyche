@@ -134,11 +134,12 @@ int utm_destroy(struct utm* utm){
   return 0;
 }
 
-int utm_init(struct utm* utm, size_t untrusted_size)
+int utm_init(struct utm* utm, size_t untrusted_size, driver_domain_t* tyche_domain)
 {
   unsigned long req_pages = 0;
   unsigned long order = 0;
   unsigned long count;
+  int ret;
   req_pages += PAGE_UP(untrusted_size)/PAGE_SIZE;
   order = ilog2(req_pages - 1) + 1;
   count = 0x1 << order;
@@ -157,6 +158,13 @@ int utm_init(struct utm* utm, size_t untrusted_size)
   if (utm->size != untrusted_size) {
     /* Instead of failing, we just warn that the user has to fix the parameter. */
     keystone_warn("shared buffer size is not multiple of PAGE_SIZE\n");
+  }
+
+  // Create a corresponding segment in Tyche
+  ret = driver_add_raw_segment(tyche_domain, utm->ptr, __pa(utm->ptr), utm->size);
+  if (ret) {
+    keystone_err("Failled to add raw segment for UTM");
+    return FAILURE;
   }
 
   return 0;

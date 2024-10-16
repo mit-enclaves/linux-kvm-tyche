@@ -104,6 +104,17 @@ int keystone_finalize_enclave(unsigned long arg)
     ret.error = -1;
     goto error_destroy_enclave;
   }
+  if (driver_mprotect_domain(
+    enclave->tyche_domain,
+    utm->ptr,
+    utm->size,
+    MEM_READ | MEM_WRITE | MEM_EXEC,
+    SHARED,
+    1)) {
+    keystone_err("Failed to mprotect domain");
+    ret.error = -1;
+    goto error_destroy_enclave;
+  }
 
   // And then we commit the domain
   if (driver_commit_domain(enclave->tyche_domain, 1)) {
@@ -217,18 +228,20 @@ int keystone_run_enclave(unsigned long data)
   /* arg->error = ret.error; */
   /* arg->value = ret.value; */
 
-  /* keystone_info("Switching domain!"); */
+  keystone_info("Switching domain!");
   if (driver_switch_domain(enclave->tyche_domain, core)) {
     keystone_err("Failed to switch domain");
     arg->error = -1;
     // TODO: pass return value :)
   }
+  keystone_info("Back from switch!");
   if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A1, &result)) {
     keystone_err("Failed to read a1 after returning from domain");
   }
   if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A2, &is_exit)) {
     keystone_err("Failed to read a1 after returning from domain");
   }
+  keystone_info("Exit with a1: %lx, a2: %lx", result, is_exit);
   arg->error = 0;
   if (is_exit) {
     keystone_info("Exiting enclave successfully");
@@ -286,7 +299,7 @@ int utm_init_ioctl(struct file *filp, unsigned long arg)
     return ret;
   }
 
-  ret = utm_init(utm, untrusted_size);
+  ret = utm_init(utm, untrusted_size, enclave->tyche_domain);
 
   /* prepare for mmap */
   enclave->utm = utm;
