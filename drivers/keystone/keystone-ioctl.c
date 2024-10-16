@@ -138,7 +138,7 @@ int keystone_finalize_enclave(unsigned long arg)
     keystone_err("Failled to set satp on cpu %lu", core);
     goto error_destroy_enclave;
   }
-  if (driver_set_domain_core_config(enclave->tyche_domain, core, EXCEPTION_BITMAP, 0x0 /*0xffffff5d*/ /*0xffffffff*/)) { // Do not delegated access/store faults
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, EXCEPTION_BITMAP, (0 << 15) | (1 << 8) /*0xffffff5d*/ /*0xffffffff*/)) { // Do not delegated access/store faults
     keystone_err("Failled to set medeleg on cpu %lu", core);
     goto error_destroy_enclave;
   }
@@ -162,11 +162,11 @@ int keystone_finalize_enclave(unsigned long arg)
     keystone_err("Failed to set a5 on cpu %lu", core);
     goto error_destroy_enclave;
   }
-  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A6, create_args.utm_region.paddr)) {
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A6, create_args.params.untrusted_ptr)) {
     keystone_err("Failed to set a6 on cpu %lu", core);
     goto error_destroy_enclave;
   }
-  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A7, create_args.utm_region.size)) {
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A7, create_args.params.untrusted_size)) {
     keystone_err("Failed to set a7 on cpu %lu", core);
     goto error_destroy_enclave;
   }
@@ -195,6 +195,7 @@ int keystone_run_enclave(unsigned long data)
   struct keystone_ioctl_run_enclave *arg = (struct keystone_ioctl_run_enclave*) data;
   unsigned long core = get_cpu();
   usize result;
+  usize is_exit;
 
   /* keystone_info("Keystone run enclave"); */
 
@@ -225,26 +226,35 @@ int keystone_run_enclave(unsigned long data)
   if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A1, &result)) {
     keystone_err("Failed to read a1 after returning from domain");
   }
+  if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A2, &is_exit)) {
+    keystone_err("Failed to read a1 after returning from domain");
+  }
   arg->error = 0;
-  switch (result) {
-    case 0:
-        /* keystone_info("Exited due to interrupt"); */
-        arg->value = 0;
-        arg->error = 100002;
-        break;
-    case 1:
-        keystone_info("Exited due to edge call");
-        arg->value = 0;
-        arg->error = 100011;
-        break;
-    case 2:
-        keystone_info("Exited due to enclave exit");
-        arg->value = result;
-        arg->error = 0;
-        break;
-    default:
-        keystone_warn("Invalid return code: %lu", result);
-        arg->value = 0;
+  if (is_exit) {
+    keystone_info("Exiting enclave successfully");
+    arg->value = result;
+    arg->error = 0;
+  } else {
+    switch (result) {
+      case 0:
+          /* keystone_info("Exited due to interrupt"); */
+          arg->value = 0;
+          arg->error = 100002;
+          break;
+      case 1:
+          keystone_info("Exited due to edge call");
+          arg->value = 0;
+          arg->error = 100011;
+          break;
+      case 2:
+          keystone_info("Exited due to enclave exit");
+          arg->value = result;
+          arg->error = 0;
+          break;
+      default:
+          keystone_warn("Invalid return code: %llu", result);
+          arg->value = 0;
+    }
   }
   /* keystone_info("Returned from enclave: value %lu, errror %lu", arg->value, arg->error); */
 
