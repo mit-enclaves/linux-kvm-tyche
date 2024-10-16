@@ -852,7 +852,7 @@ const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
   GUEST_RSP,
   GUEST_CR3,
   EXCEPTION_BITMAP,
-  REG_GP_A0,
+  REG_GP_A1,
 };
 #endif
 // Flush the exit frame.
@@ -861,9 +861,9 @@ static int update_set_exit(driver_domain_t *dom, usize core, usize exit[TYCHE_EX
   int i = 0;
   arch_cache_t* cache = &(dom->contexts[core]->cache);
   for (i = 0; i < TYCHE_EXIT_FRAME_SIZE; i++) {
-    ERROR("Frame[%llx]: %llx", EXIT_FRAME_FIELDS[i], exit[i]);
+    // ERROR("Frame[%llx]: %llx", EXIT_FRAME_FIELDS[i], exit[i]);
     if (cache_set_any(cache, EXIT_FRAME_FIELDS[i], exit[i]) != SUCCESS) {
-      ERROR("Unable to set a cache values?");
+      // ERROR("Unable to set a cache values?");
       goto failure;
     }
   }
