@@ -704,13 +704,13 @@ int tyche_switch(capa_index_t* transition_handle, usize exit_frame[TYCHE_EXIT_FR
   if (result != SUCCESS) {
     return FAILURE;
   }
-  //ERROR("FRAME VALUE 1 - new transition handle: %lx result: %d", frame.value_1, result);
+  // ERROR("FRAME VALUE 1 - new transition handle: %lx result: %d", frame.value_1, result);
   *transition_handle = frame.value_1;
   exit_frame[0] = frame.value_2;
   exit_frame[1] = frame.value_3;
   exit_frame[2] = frame.value_4;
   exit_frame[3] = frame.value_5;
-  exit_frame[4] = result;
+  exit_frame[4] = frame.value_6;
 #endif
   return result;
 }

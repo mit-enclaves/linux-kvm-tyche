@@ -196,7 +196,7 @@ int keystone_run_enclave(unsigned long data)
   unsigned long core = get_cpu();
   usize result;
 
-  keystone_info("Keystone run enclave");
+  /* keystone_info("Keystone run enclave"); */
 
   ueid = arg->eid;
   enclave = get_enclave_by_id(ueid);
@@ -216,22 +216,39 @@ int keystone_run_enclave(unsigned long data)
   /* arg->error = ret.error; */
   /* arg->value = ret.value; */
 
-  keystone_info("Switching domain!");
+  /* keystone_info("Switching domain!"); */
   if (driver_switch_domain(enclave->tyche_domain, core)) {
     keystone_err("Failed to switch domain");
     arg->error = -1;
     // TODO: pass return value :)
   }
-  if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A0, &result)) {
-    keystone_err("Failed to read a0 after returning from domain");
+  if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A1, &result)) {
+    keystone_err("Failed to read a1 after returning from domain");
   }
-  arg->value = result;
-
-  keystone_info("Returned from enclave with request %lx", result);
+  arg->error = 0;
+  switch (result) {
+    case 0:
+        /* keystone_info("Exited due to interrupt"); */
+        arg->value = 0;
+        arg->error = 100002;
+        break;
+    case 1:
+        keystone_info("Exited due to edge call");
+        arg->value = 0;
+        arg->error = 100011;
+        break;
+    case 2:
+        keystone_info("Exited due to enclave exit");
+        arg->value = result;
+        arg->error = 0;
+        break;
+    default:
+        keystone_warn("Invalid return code: %lu", result);
+        arg->value = 0;
+  }
+  /* keystone_info("Returned from enclave: value %lu, errror %lu", arg->value, arg->error); */
 
   put_cpu();
-
-  keystone_info("Done with put_cpu ");
 
   return 0;
 }
@@ -287,7 +304,6 @@ int keystone_destroy_enclave(struct file *filep, unsigned long arg)
 
 int __keystone_destroy_enclave(unsigned int ueid)
 {
-  struct sbiret ret;
   struct enclave *enclave;
   enclave = get_enclave_by_id(ueid);
 
@@ -297,9 +313,8 @@ int __keystone_destroy_enclave(unsigned int ueid)
   }
 
   if (enclave->eid >= 0) {
-    ret = sbi_sm_destroy_enclave(enclave->eid);
-    if (ret.error) {
-      keystone_err("fatal: cannot destroy enclave: SBI failed with error code %ld\n", ret.error);
+    if (driver_delete_domain(enclave->tyche_domain)) {
+      keystone_err("fatal: cannot destroy enclave");
       return -EINVAL;
     }
   } else {
@@ -372,7 +387,8 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       ret = keystone_run_enclave((unsigned long) data);
       break;
     case KEYSTONE_IOC_RESUME_ENCLAVE:
-      ret = keystone_resume_enclave((unsigned long) data);
+      ret = keystone_run_enclave((unsigned long) data);
+      /* ret = keystone_resume_enclave((unsigned long) data); */
       break;
     /* Note that following commands could have been implemented as a part of ADD_PAGE ioctl.
      * However, there was a weird bug in compiler that generates a wrong control flow
@@ -386,12 +402,8 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       return -ENOSYS;
   }
 
-  keystone_info("Return to user");
-
   if (copy_to_user((void __user*) arg, data, ioc_size))
     return -EFAULT;
-
-  keystone_info("Copy to user done.");
 
   return ret;
 }
