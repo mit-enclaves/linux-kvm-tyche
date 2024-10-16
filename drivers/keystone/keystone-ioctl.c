@@ -138,7 +138,7 @@ int keystone_finalize_enclave(unsigned long arg)
     keystone_err("Failled to set satp on cpu %lu", core);
     goto error_destroy_enclave;
   }
-  if (driver_set_domain_core_config(enclave->tyche_domain, core, EXCEPTION_BITMAP, 0xffffff5d /*0xffffffff*/)) { // Do not delegated access/store faults
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, EXCEPTION_BITMAP, 0x0 /*0xffffff5d*/ /*0xffffffff*/)) { // Do not delegated access/store faults
     keystone_err("Failled to set medeleg on cpu %lu", core);
     goto error_destroy_enclave;
   }
@@ -193,6 +193,8 @@ int keystone_run_enclave(unsigned long data)
   unsigned long ueid;
   struct enclave* enclave;
   struct keystone_ioctl_run_enclave *arg = (struct keystone_ioctl_run_enclave*) data;
+  unsigned long core = get_cpu();
+  usize result;
 
   keystone_info("Keystone run enclave");
 
@@ -215,14 +217,22 @@ int keystone_run_enclave(unsigned long data)
   /* arg->value = ret.value; */
 
   keystone_info("Switching domain!");
-  if (driver_switch_domain(enclave->tyche_domain, get_cpu())) {
+  if (driver_switch_domain(enclave->tyche_domain, core)) {
     keystone_err("Failed to switch domain");
     arg->error = -1;
     // TODO: pass return value :)
   }
+  if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A0, &result)) {
+    keystone_err("Failed to read a0 after returning from domain");
+  }
+  arg->value = result;
 
+  keystone_info("Returned from enclave with request %lx", result);
 
   put_cpu();
+
+  keystone_info("Done with put_cpu ");
+
   return 0;
 }
 
@@ -380,6 +390,8 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 
   if (copy_to_user((void __user*) arg, data, ioc_size))
     return -EFAULT;
+
+  keystone_info("Copy to user done.");
 
   return ret;
 }
