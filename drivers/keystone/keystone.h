@@ -110,7 +110,7 @@ int epm_init(struct epm* epm, unsigned int count);
 
 
 int utm_destroy(struct utm* utm);
-int utm_init(struct utm* utm, size_t untrusted_size);
+int utm_init(struct utm* utm, size_t untrusted_size, driver_domain_t* tyche_domain);
 paddr_t epm_va_to_pa(struct epm* epm, vaddr_t addr);
 
 

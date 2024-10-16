@@ -304,7 +304,7 @@ int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize
 #elif defined(CONFIG_RISCV) || defined(__riscv)
   int i = 0;
   // On risc-v we don't care about performance, we write one field at the time.
-  ERROR("Tyche call write fields: size: %lx", size);
+  //ERROR("Tyche call write fields: size: %lx", size);
   for (i = 0; i < size; i++) {
     vmcall_frame_t frame = {
       .vmcall = TYCHE_WRITE_FIELDS,
@@ -313,12 +313,12 @@ int tyche_write_fields(capa_index_t management, usize core, usize* fields, usize
       .arg_3 = fields[i],
       .arg_4 = values[i],
     };
-    ERROR("Tyche call write fields: %lx : %lx",fields[i], values[i]);
+    //ERROR("Tyche call write fields: %lx : %lx",fields[i], values[i]);
     if (tyche_call(&frame) != SUCCESS) {
       goto failure;
     }
   }
-  ERROR("Tyche call write fields done");
+  //ERROR("Tyche call write fields done");
   return SUCCESS;
 #endif
 failure:

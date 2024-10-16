@@ -859,13 +859,16 @@ const usize EXIT_FRAME_FIELDS[TYCHE_EXIT_FRAME_SIZE] = {
 // This is called internally and corner cases should have been checked.
 static int update_set_exit(driver_domain_t *dom, usize core, usize exit[TYCHE_EXIT_FRAME_SIZE]) {
   int i = 0;
+  long long unsigned v;
   arch_cache_t* cache = &(dom->contexts[core]->cache);
   for (i = 0; i < TYCHE_EXIT_FRAME_SIZE; i++) {
-    // ERROR("Frame[%llx]: %llx", EXIT_FRAME_FIELDS[i], exit[i]);
+    /* ERROR("Frame[%llx]: %llx", EXIT_FRAME_FIELDS[i], exit[i]); */
     if (cache_set_any(cache, EXIT_FRAME_FIELDS[i], exit[i]) != SUCCESS) {
-      // ERROR("Unable to set a cache values?");
+      /* ERROR("Unable to set a cache values?"); */
       goto failure;
     }
+    /* cache_read_any(&(dom->contexts[core]->cache), EXIT_FRAME_FIELDS[i], &v); */
+    /*  ERROR("Read Frame[%llx]: %llx", EXIT_FRAME_FIELDS[i], v); */
   }
   return SUCCESS;
 failure:
@@ -965,14 +968,14 @@ int driver_switch_domain(driver_domain_t * dom, usize core) {
   }
   // Get the gp registers.
   // TODO(aghosn) See if it's really necessary or not.
-  if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) {
-    ERROR("Unable to read the domain's general purpose registers.");
-    goto failure_unlock;
-  }
-  if (update_set_gp(dom, core, gp_frame) != SUCCESS) {
-    ERROR("Unable to set the domain's general purpose registers.");
-    goto failure_unlock;
-  }
+  /* if (read_gp_domain(dom->domain_id, core, gp_frame) != SUCCESS) { */
+  /*   ERROR("Unable to read the domain's general purpose registers."); */
+  /*   goto failure_unlock; */
+  /* } */
+  /* if (update_set_gp(dom, core, gp_frame) != SUCCESS) { */
+  /*   ERROR("Unable to set the domain's general purpose registers."); */
+  /*   goto failure_unlock; */
+  /* } */
 
   // Reenable the preemption.
   put_cpu();
