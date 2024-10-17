@@ -31,7 +31,7 @@ int epm_destroy(struct epm* epm) {
 
 /* Create an EPM and initialize the free list */
 #if defined(TYCHE)
-int epm_init(struct epm* epm, unsigned int min_pages, driver_domain_t* tyche_domain)
+int epm_init(struct epm* epm, unsigned int min_pages, driver_domain_t* tyche_domain, unsigned long core)
 #else
 int epm_init(struct epm* epm, unsigned int min_pages)
 #endif
@@ -77,12 +77,16 @@ int epm_init(struct epm* epm, unsigned int min_pages)
 
 
   /* prevent kernel from complaining about an invalid argument */
-  if (order <= MAX_ORDER)
+  if (order <= MAX_ORDER) {
+    keystone_info("Using get_free_pages (order: %d, max: %d)", order, MAX_ORDER);
     epm_vaddr = (vaddr_t) __get_free_pages(GFP_HIGHUSER, order);
+    epm->pa = __pa(epm_vaddr);
+  }
 
 #ifdef CONFIG_CMA
    /* If buddy allocator fails, we fall back to the CMA */
   if (!epm_vaddr) {
+    keystone_info("Using dma_alloc_coherent");
     epm->is_cma = 1;
     count = min_pages;
 
@@ -94,9 +98,13 @@ int epm_init(struct epm* epm, unsigned int min_pages)
       GFP_KERNEL | __GFP_DMA32);
 
     keystone_info("Alloca pages exact with epm_vaddr %llx.", epm_vaddr);
+    keystone_info("Alloca pages exact with dev_phys  %llx.", device_phys_addr);
+    epm->pa = device_phys_addr;
 
-    if(!device_phys_addr)
+    if(!device_phys_addr) {
       epm_vaddr = 0;
+      keystone_err("Failed to alloc from CMA");
+    }
   }
 #endif
 // #endif
@@ -110,7 +118,6 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   memset((void*)epm_vaddr, 0, PAGE_SIZE*count);
 
   epm->root_page_table = (void*)epm_vaddr;
-  epm->pa = __pa(epm_vaddr);
   epm->order = order;
   epm->size = count << PAGE_SHIFT;
   epm->ptr = epm_vaddr;

@@ -60,13 +60,12 @@ int destroy_enclave(struct enclave* enclave)
 }
 
 #if defined(TYCHE)
-struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain)
+struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain, unsigned long core)
 #else
 struct enclave* create_enclave(unsigned long min_pages)
 #endif
 {
   struct enclave* enclave;
-  unsigned long core;
 
   enclave = kmalloc(sizeof(struct enclave), GFP_KERNEL);
   if (!enclave){
@@ -91,11 +90,10 @@ struct enclave* create_enclave(unsigned long min_pages)
   enclave->tyche_domain = tyche_domain;
   enclave->min_pages = min_pages;
   // With Tyche we do not allocate the EPM directly, we instead wait for the mmap
-  if(epm_init(enclave->epm, min_pages, tyche_domain)) {
+  if(epm_init(enclave->epm, min_pages, tyche_domain, core)) {
     keystone_err("failed to initialize epm\n");
     goto error_destroy_enclave;
   }
-
 
   // Grant permissions
   for (unsigned int p = TYCHE_CONFIG_R16; p < TYCHE_NR_CONFIGS; p++) {
@@ -110,9 +108,6 @@ struct enclave* create_enclave(unsigned long min_pages)
     keystone_err("Failed to set allowed cores");
     goto error_destroy_enclave;
   }
-
-  core = get_cpu();
-  put_cpu();
 
   // Alloc context
   if (driver_alloc_core_context(tyche_domain, core)) {
