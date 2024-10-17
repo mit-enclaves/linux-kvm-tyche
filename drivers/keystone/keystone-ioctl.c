@@ -15,8 +15,8 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
 {
   /* create parameters */
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
-
   struct enclave *enclave;
+  long unsigned core = smp_processor_id();
   
 #if defined(TYCHE)
   driver_domain_t* ptr;
@@ -27,7 +27,7 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
 		keystone_err("Unable to create a domain VM.\n");
 		return -ENOMEM;
 	}
-  enclave = create_enclave(enclp->min_pages, ptr);
+  enclave = create_enclave(enclp->min_pages, ptr, core);
 #else 
   enclave = create_enclave(enclp->min_pages);
 #endif 
@@ -39,12 +39,12 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
 //#if !defined(TYCHE)
  // Neelu: I guess these aren't used anyway? Not sure...
   /* Pass base page table */
-  enclp->pt_ptr = __pa(enclave->epm->root_page_table);
+  enclp->pt_ptr = enclave->epm->pa;
   enclp->epm_size = enclave->epm->size;
 //#endif
   /* allocate UID */
   enclp->eid = enclave_idr_alloc(enclave);
-  keystone_err("Done creating domain\n");
+  keystone_err("Done creating domain (phys addr: %llx)\n", enclp->pt_ptr);
   filep->private_data = (void *) enclp->eid;
   keystone_err("Returning from keystone_create_enclave\n");
   return 0;
@@ -58,8 +58,7 @@ int keystone_finalize_enclave(unsigned long arg)
   struct utm *utm;
   struct keystone_sbi_create_t create_args;
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
-  unsigned long core = get_cpu();
-  put_cpu();
+  unsigned long core = smp_processor_id();;
 
   keystone_info("Keystone finalize enclave");
 
@@ -190,7 +189,6 @@ int keystone_finalize_enclave(unsigned long arg)
 
 error_destroy_enclave:
   /* This can handle partial initialization failure */
-  put_cpu();
   destroy_enclave(enclave);
 
   return -EINVAL;
@@ -227,23 +225,22 @@ int keystone_run_enclave(unsigned long data)
   /* arg->error = ret.error; */
   /* arg->value = ret.value; */
 
-  core = get_cpu();
-  put_cpu();
+  core = smp_processor_id();
 
-  keystone_info("Switching domain!");
+  /* keystone_info("Switching domain!"); */
   if (driver_switch_domain(enclave->tyche_domain, core)) {
     keystone_err("Failed to switch domain");
     arg->error = -1;
     // TODO: pass return value :)
   }
-  keystone_info("Back from switch!");
+  /* keystone_info("Back from switch!"); */
   if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A1, &result)) {
     keystone_err("Failed to read a1 after returning from domain");
   }
   if (driver_get_domain_core_config(enclave->tyche_domain, core, REG_GP_A2, &is_exit)) {
     keystone_err("Failed to read a1 after returning from domain");
   }
-  keystone_info("Exit with a1: %lx, a2: %lx", result, is_exit);
+  /* keystone_info("Exit with a1: %lx, a2: %lx", result, is_exit); */
   arg->error = 0;
   if (is_exit) {
     keystone_info("Exiting enclave successfully");
@@ -393,6 +390,8 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
   ioc_size = _IOC_SIZE(cmd);
   ioc_size = ioc_size > sizeof(data) ? sizeof(data) : ioc_size;
 
+  /* keystone_info("ioctl"); */
+
   if (copy_from_user(data,(void __user *) arg, ioc_size))
     return -EFAULT;
 
@@ -425,9 +424,13 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       return -ENOSYS;
   }
 
-  if (copy_to_user((void __user*) arg, data, ioc_size))
+  /* keystone_info("Copy to user: %llx, size: %llx, data %llx", arg, ioc_size, &data); */
+  if (copy_to_user((void __user*) arg, data, ioc_size)) {
+    keystone_info("Failed to copy to user!");
     return -EFAULT;
+  }
 
+  /* keystone_info("ioctl done"); */
   return ret;
 }
 

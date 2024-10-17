@@ -84,7 +84,7 @@ int keystone_rtld_init_untrusted(struct enclave* enclave, void* untrusted_ptr, s
 struct enclave* get_enclave_by_id(unsigned int ueid);
 
 #if defined(TYCHE)
-struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain);
+struct enclave* create_enclave(unsigned long min_pages, driver_domain_t* tyche_domain, unsigned long core);
 #else
 struct enclave* create_enclave(unsigned long min_pages);
 #endif
@@ -103,7 +103,7 @@ static inline uintptr_t  epm_satp(struct epm* epm) {
 int epm_destroy(struct epm* epm);
 
 #if defined(TYCHE)
-int epm_init(struct epm* epm, unsigned int count, driver_domain_t* tyche_domain);
+int epm_init(struct epm* epm, unsigned int count, driver_domain_t* tyche_domain, unsigned long core);
 #else
 int epm_init(struct epm* epm, unsigned int count);
 #endif
