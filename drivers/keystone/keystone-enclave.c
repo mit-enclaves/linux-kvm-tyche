@@ -66,7 +66,7 @@ struct enclave* create_enclave(unsigned long min_pages)
 #endif
 {
   struct enclave* enclave;
-  unsigned long core = get_cpu();
+  unsigned long core;
 
   enclave = kmalloc(sizeof(struct enclave), GFP_KERNEL);
   if (!enclave){
@@ -96,6 +96,7 @@ struct enclave* create_enclave(unsigned long min_pages)
     goto error_destroy_enclave;
   }
 
+
   // Grant permissions
   for (unsigned int p = TYCHE_CONFIG_R16; p < TYCHE_NR_CONFIGS; p++) {
     if (driver_set_domain_configuration(tyche_domain, p, ~((uint64_t) 0)) != SUCCESS) {
@@ -109,6 +110,9 @@ struct enclave* create_enclave(unsigned long min_pages)
     keystone_err("Failed to set allowed cores");
     goto error_destroy_enclave;
   }
+
+  core = get_cpu();
+  put_cpu();
 
   // Alloc context
   if (driver_alloc_core_context(tyche_domain, core)) {

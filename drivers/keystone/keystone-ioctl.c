@@ -59,6 +59,7 @@ int keystone_finalize_enclave(unsigned long arg)
   struct keystone_sbi_create_t create_args;
   struct keystone_ioctl_create_enclave *enclp = (struct keystone_ioctl_create_enclave *) arg;
   unsigned long core = get_cpu();
+  put_cpu();
 
   keystone_info("Keystone finalize enclave");
 
@@ -177,12 +178,10 @@ int keystone_finalize_enclave(unsigned long arg)
     keystone_err("Failed to set a6 on cpu %lu", core);
     goto error_destroy_enclave;
   }
-  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A7, create_args.params.untrusted_size)) {
+  if (driver_set_domain_core_config(enclave->tyche_domain, core, REG_GP_A7, create_args.utm_region.size)) {
     keystone_err("Failed to set a7 on cpu %lu", core);
     goto error_destroy_enclave;
   }
-
-  put_cpu();
 
   // TODO: How should we gat an Enclave ID? Do we even need it?
   enclave->eid = ret.value;
@@ -204,7 +203,7 @@ int keystone_run_enclave(unsigned long data)
   unsigned long ueid;
   struct enclave* enclave;
   struct keystone_ioctl_run_enclave *arg = (struct keystone_ioctl_run_enclave*) data;
-  unsigned long core = get_cpu();
+  unsigned long core;
   usize result;
   usize is_exit;
 
@@ -227,6 +226,9 @@ int keystone_run_enclave(unsigned long data)
 
   /* arg->error = ret.error; */
   /* arg->value = ret.value; */
+
+  core = get_cpu();
+  put_cpu();
 
   keystone_info("Switching domain!");
   if (driver_switch_domain(enclave->tyche_domain, core)) {
@@ -270,8 +272,6 @@ int keystone_run_enclave(unsigned long data)
     }
   }
   /* keystone_info("Returned from enclave: value %lu, errror %lu", arg->value, arg->error); */
-
-  put_cpu();
 
   return 0;
 }
