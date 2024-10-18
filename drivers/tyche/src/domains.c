@@ -195,7 +195,8 @@ int driver_create_domain(domain_handle_t handle, driver_domain_t** ptr, int alia
   if (ptr != NULL) {
     *ptr = dom;
   }
-  LOG("A new domain was added to the driver with id %p", handle);
+  //Disabled for benchmarks
+  //LOG("A new domain was added to the driver with id %p", handle);
   return SUCCESS;
 failure_free:
   kfree(dom);
@@ -258,7 +259,7 @@ int driver_mmap_segment(driver_domain_t *dom, struct vm_area_struct *vma)
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
 
-  ERROR("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
+  //ERROR("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
   if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
     ERROR("Unable to map the memory...");
     goto fail_free_pages;
@@ -747,7 +748,7 @@ int driver_commit_domain(driver_domain_t *dom, int full)
     goto failure;
   }
   if (dll_is_empty(&dom->segments)) {
-    ERROR("WARNING: the domain %p has no segment.", dom);
+    //ERROR("WARNING: the domain %p has no segment.", dom);
     //goto failure;
   }
 
@@ -1087,6 +1088,7 @@ int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
   capability_t* orig = NULL;
   capability_t* orig_revoke = NULL;
   driver_pipe_t* pipe = NULL;
+  memory_access_right_t basic_flags = flags & MEM_ACCESS_RIGHT_MASK_SEWRCA;
   usize i = 0;
   if (pipe_id == NULL || width == 0) {
     ERROR("Supplied pipe id is null");
@@ -1100,10 +1102,11 @@ int driver_create_pipe(usize *pipe_id, usize phys_addr, usize size,
   pipe->id = 0;
   pipe->phys_start = phys_addr;
   pipe->size = size;
+  pipe->flags = flags;
   dll_init_list(&(pipe->actives));
   dll_init_list(&(pipe->revokes));
   dll_init_elem(pipe, list);
-  if (cut_region(phys_addr, size, flags, &orig, &orig_revoke) != SUCCESS) {
+  if (cut_region(phys_addr, size, basic_flags, &orig, &orig_revoke) != SUCCESS) {
     ERROR("Unable to carve out the original pipe region.");
     goto failure_free;
   }
@@ -1140,6 +1143,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   driver_pipe_t *pipe = NULL;
   capability_t* to_send = NULL;
   capability_t* to_revoke = NULL;
+  memory_access_right_t send_access;
   if (domain == NULL) {
     goto failure;
   }
@@ -1162,6 +1166,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
   // Remove the capas from the pipe.
   to_send = pipe->actives.head;
   to_revoke = pipe->revokes.head;
+  send_access = pipe->flags & MEM_ACCESS_RIGHT_MASK_VCH;
   dll_remove(&(pipe->actives), to_send, list);
   dll_remove(&(pipe->revokes), to_revoke, list);
 
@@ -1172,7 +1177,7 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe_id) {
     pipe = NULL;
   }
 
-  if (send_region(domain->domain_id, to_send, to_revoke) != SUCCESS) {
+  if (send_region(domain->domain_id, to_send, to_revoke, send_access) != SUCCESS) {
     ERROR("failed to send the pipes");
     goto fail_unlock;
   }
@@ -1212,3 +1217,9 @@ failure:
   return FAILURE;
 }
 EXPORT_SYMBOL(driver_find_pipe_from_hpa);
+
+int driver_serialize_attestation(char *addr, usize size, usize *written) {
+    usize phys = virt_to_phys(addr);
+    return tyche_serialize_attestation(phys, size, written);
+}
+EXPORT_SYMBOL(driver_serialize_attestation);

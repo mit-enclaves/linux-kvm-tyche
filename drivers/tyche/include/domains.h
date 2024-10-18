@@ -111,6 +111,8 @@ typedef struct driver_pipe_t {
 	usize phys_start;
 	// The size of the pipe;
 	usize size;
+	// The flags associated with the creation of the pipe.
+	memory_access_right_t flags;
 	// This is stored in a list inside the global driver state.
 	dll_elem(struct driver_pipe_t, list);
 
@@ -225,4 +227,8 @@ int driver_acquire_pipe(driver_domain_t *domain, usize pipe);
 
 /// Find the pipe_id from a physical address.
 int driver_find_pipe_from_hpa(usize *pipe_id, usize addr, usize size);
+
+/// Request tyche to serialize an atestation of the current state of the system
+/// into the provided buffer.
+int driver_serialize_attestation(char *addr, usize size, usize *written);
 #endif /*__SRC_DOMAINS_H__*/

@@ -50,7 +50,8 @@ int dup_region(capability_t *capa, capability_t **dup, capability_t **revoke);
 /// Send a pre-computed capa to a domain.
 /// This will free the capa in the capa engine and add the revoke to it.
 /// Make sure none of these is inside a list.
-int send_region(domain_id_t id, capability_t *capa, capability_t *revoke);
+int send_region(domain_id_t id, capability_t *capa, capability_t *revoke,
+		usize send_access);
 
 /// Share a memory region.
 /// Finds the correct capability and shares the region with the target domain.

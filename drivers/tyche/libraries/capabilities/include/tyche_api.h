@@ -27,13 +27,25 @@ typedef enum tyche_monitor_call_t {
 	TYCHE_SELF_CONFIG = 19,
 	TYCHE_ENCLAVE_ATTESTATION = 20,
 	TYCHE_REVOKE_ALIASED_REGION = 21,
+	TYCHE_SERIALIZE_ATTESTATION = 22,
+	TYCHE_TEST_CALL = 30,
 } tyche_monitor_call_t;
 
 typedef enum tyche_configurations_t {
 	TYCHE_CONFIG_PERMISSIONS = 0,
 	TYCHE_CONFIG_TRAPS = 1,
 	TYCHE_CONFIG_CORES = 2,
-	TYCHE_NR_CONFIGS = 3,
+	TYCHE_CONFIG_R16 = 3,
+	TYCHE_CONFIG_W16 = 4,
+	TYCHE_CONFIG_R32 = 5, 
+	TYCHE_CONFIG_W32 = 6, 
+	TYCHE_CONFIG_R64 = 7, 
+	TYCHE_CONFIG_W64 = 8,
+	TYCHE_CONFIG_RNAT = 9, 
+	TYCHE_CONFIG_WNAT = 10,
+	TYCHE_CONFIG_RGP = 11,
+	TYCHE_CONFIG_WGP = 12,
+	TYCHE_NR_CONFIGS = 13,
 } tyche_configurations_t;
 
 typedef enum tyche_perm_value_t {
@@ -73,6 +85,10 @@ typedef struct vmcall_frame_t {
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
+#if defined(CONFIG_RISCV) || defined(__riscv)
+int user_tyche_call(vmcall_frame_t *frame);
+#endif
+
 int tyche_call(vmcall_frame_t *frame);
 
 int tyche_create_domain(capa_index_t *management, int aliased);
@@ -99,7 +115,7 @@ int tyche_segment_region(usize is_shared, capa_index_t capa,
 int tyche_send(capa_index_t dest, capa_index_t capa);
 
 int tyche_send_aliased(capa_index_t dest, capa_index_t capa, int is_repeat,
-		       usize alias, usize size);
+		       usize alias, usize size, usize send_access);
 
 int tyche_share(capa_index_t *left, capa_index_t dest, capa_index_t capa,
 		usize a1, usize a2, usize a3);
@@ -108,6 +124,8 @@ int tyche_revoke(capa_index_t id);
 
 int tyche_revoke_region(capa_index_t id, capa_index_t child, paddr_t gpa,
 			paddr_t size);
+
+int tyche_serialize_attestation(usize addr, usize size, usize *written);
 
 int tyche_switch(capa_index_t *transition_handle,
 		 usize exit_frame[TYCHE_EXIT_FRAME_SIZE]);

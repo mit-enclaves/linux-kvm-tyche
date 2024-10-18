@@ -1,4 +1,6 @@
 #include "linux/rwsem.h"
+#include "linux/slab.h"
+#include "linux/uaccess.h"
 #include "tyche_api.h"
 #include <linux/ioctl.h>
 #include <linux/kernel.h>   /* printk() */
@@ -142,6 +144,8 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_set_perm_t perm = {0};
   driver_domain_t *domain = NULL;
   msg_create_pipe_t pipe = {0};
+  attest_buffer_t attest_buff = {0, 0, 0};
+  char *buff;
   switch(cmd) {
     case TYCHE_GET_PHYSOFFSET:
       if (copy_from_user(
@@ -278,6 +282,38 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       RELEASE_DOM(true);
+      break;
+    case TYCHE_GET_ATTESTATION:
+      if (copy_from_user(&attest_buff, (attest_buffer_t *) arg,
+            sizeof(attest_buffer_t))) {
+        ERROR("Unable to copy the create pipe message");
+        goto failure;
+      }
+      if (attest_buff.size > 4096) {
+        // Limit the maximum capacity, to avoid user process forcing a OOM
+        attest_buff.size = 4096;
+      }
+      buff = kmalloc(attest_buff.size, GFP_KERNEL);
+      if (buff == NULL) {
+        ERROR("Failed to allocate buffer in kernel");
+        goto failure;
+      }
+      if (driver_serialize_attestation(buff,
+                  attest_buff.size,
+                  &attest_buff.written) != SUCCESS) {
+        ERROR("Unable te serialize the attestation");
+        goto failure;
+      }
+      if (copy_to_user((char *)attest_buff.start,
+                  buff, attest_buff.written)) {
+        ERROR("Unable to copy attestation buffer");
+        goto failure;
+      }
+      if (copy_to_user((attest_buffer_t*) arg,
+                  &attest_buff, sizeof(attest_buffer_t))) {
+        ERROR("Unable to copy attestation results");
+        goto failure;
+      }
       break;
     default:
       ERROR("The command is not valid! %d", cmd);
