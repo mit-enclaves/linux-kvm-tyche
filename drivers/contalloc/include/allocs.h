@@ -43,6 +43,9 @@ typedef struct cont_alloc_t {
 	/// This is typically allocated during the mmap (from userspace),
 	segment_list_t raw_segments;
 
+	// Raw segments for the allocation to free when deleting the fd.
+	segment_list_t to_free_on_delete;
+
 	/// Allocations are stored in a global list by the driver.
 	dll_elem(struct cont_alloc_t, list);
 } cont_alloc_t;

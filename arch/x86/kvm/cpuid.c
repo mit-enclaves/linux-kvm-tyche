@@ -435,6 +435,12 @@ static int kvm_set_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2,
 	if (r)
 		return r;
 
+	if (kvm_x86_ops.tyche_install_cpuid_entries != NULL) {
+		for (int i = 0; i < nent; i++) {
+			kvm_x86_ops.tyche_install_cpuid_entries(vcpu, &e2[i]);
+		}
+    }
+
 	kvfree(vcpu->arch.cpuid_entries);
 	vcpu->arch.cpuid_entries = e2;
 	vcpu->arch.cpuid_nent = nent;

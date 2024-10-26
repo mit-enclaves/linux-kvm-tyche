@@ -733,3 +733,16 @@ int tyche_get_hpa(usize gpa, usize gpa_size, usize* hpa, usize* hpa_size) {
 failure:
     return FAILURE;
 }
+
+int tyche_set_cpuid_entry(capa_index_t management, usize function, usize index,
+        usize flags, usize eax, usize ebx, usize ecx, usize edx) {
+    vmcall_frame_t frame = {
+        .vmcall = TYCHE_SET_CPUID_ENTRY,
+        .arg_1 = management,
+        .arg_2 = function & 0xffffffff,
+        .arg_3 = (index & 0xffffffff) | (flags << 32),
+        .arg_4 = (eax & 0xffffffff) | (ebx << 32),
+        .arg_5 = (ecx & 0xffffffff) | (edx << 32),
+    };
+    return tyche_call(&frame);
+}

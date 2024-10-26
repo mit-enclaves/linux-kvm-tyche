@@ -95,7 +95,7 @@ int contalloc_mmap_alloc(cont_alloc_t *alloc, struct vm_area_struct *vma)
     ERROR("Unable to find the right alloc.");
     goto failure;
   }
-  if (driver_tyche_mmap(&(alloc->raw_segments), vma) != SUCCESS) {
+  if (driver_tyche_mmap(&(alloc->raw_segments), &(alloc->to_free_on_delete), vma) != SUCCESS) {
     ERROR("Unable to mmap vma 0x%lx - 0x%lx", vma->vm_start, vma->vm_end);
     goto failure;
   }
@@ -134,7 +134,6 @@ failure:
 int contalloc_delete_alloc(cont_alloc_t *alloc)
 {
   mmem_t* segment = NULL;
-  usize size = 0;
   if (alloc == NULL) {
     ERROR("The alloc is null.");
     goto failure;
@@ -142,15 +141,14 @@ int contalloc_delete_alloc(cont_alloc_t *alloc)
   // Delete all segments;
   while(!dll_is_empty(&(alloc->raw_segments))) {
     segment = dll_head(&(alloc->raw_segments));
-    size += segment->size;
     dll_remove(&(alloc->raw_segments), segment, list);
-    //TODO: this creates a bug if munmap was called from userspace.
-    //Let's just skip it for now.
-    /*if (alloc->handle != NULL) {
-      free_pages_exact(phys_to_virt((phys_addr_t)(segment->pa)), size);
-    }*/
     kfree(segment);
     segment = NULL;
+  }
+
+  if (tyche_free_memory(&(alloc->to_free_on_delete)) != SUCCESS) {
+    ERROR("Error while freeing memory.");
+    ERROR("Keep going to avoid extra memory leaks.");
   }
 
   dll_remove(&allocs, alloc, list);

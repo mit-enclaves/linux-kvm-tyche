@@ -1710,6 +1710,9 @@ struct kvm_x86_ops {
 	 * Returns vCPU specific APICv inhibit reasons
 	 */
 	unsigned long (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu *vcpu);
+
+    // Tyche specific ops
+    int (*tyche_install_cpuid_entries)(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2);
 };
 
 struct kvm_x86_nested_ops {
