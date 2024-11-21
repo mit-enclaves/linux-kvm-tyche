@@ -513,7 +513,8 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   capability_t *capa = NULL;
   capability_t* to_send = NULL;
   capability_t* revoke = NULL;
-  memory_access_right_t basic_access = (access) & MEM_ACCESS_RIGHT_MASK_SEWRCA;
+  // FISHER: want to include hash flag in new region if exists
+  memory_access_right_t basic_access = (access) & (MEM_HASH | MEM_ACCESS_RIGHT_MASK_SEWRCA);
   memory_access_right_t send_access = (access) & MEM_ACCESS_RIGHT_MASK_VCH;
   usize aliased_start = (alias == NO_ALIAS)? start : alias;
   paddr_t end = (!is_repeat)? start + size : start + 0x1000;
@@ -568,6 +569,7 @@ int internal_carve_region(domain_id_t id, paddr_t start, usize size,
   }
 
   //@aghosn: this is the new capa interface for regions.
+  // LOG("Segment_region_capa at %x->%x with access %x", start, end, basic_access);
   if (segment_region_capa(is_shared, capa, &to_send, &revoke, start, end, basic_access >> 2) != SUCCESS) {
     ERROR("Unable to segment the region !");
     goto failure;
